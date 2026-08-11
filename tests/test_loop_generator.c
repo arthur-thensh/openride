@@ -70,6 +70,7 @@ int main(void)
     request.start = start;
     request.target_distance_m = 8000.0;
     request.max_waypoint_snap_distance_m = 1200.0;
+    request.preferred_waypoint_snap_distance_m = 250.0;
     request.candidate_count = 4U;
     request.seed = 12345U;
     request.profile = OPENRIDE_ROUTING_PROFILE_TOURING;
@@ -89,6 +90,25 @@ int main(void)
     assert(result.stats.score >= 0.0 && result.stats.score <= 100.0);
     assert(result.stats.distance_error_ratio >= 0.0);
     assert(result.stats.overlap_ratio >= 0.0 && result.stats.overlap_ratio <= 1.0);
+    assert(result.stats.shape_score >= 0.0 && result.stats.shape_score <= 1.0);
+    assert(result.stats.waypoint_quality_score >= 0.0
+           && result.stats.waypoint_quality_score <= 1.0);
+    assert(result.stats.candidate_stat_count == request.candidate_count);
+    assert(result.stats.selected_candidate_index < request.candidate_count);
+    assert(result.stats.candidates[result.stats.selected_candidate_index].successful);
+
+    unsigned successful_stats = 0U;
+    for (uint32_t i = 0U; i < result.stats.candidate_stat_count; ++i) {
+        const OpenRideLoopCandidateStats *stats = &result.stats.candidates[i];
+        if (!stats->successful) continue;
+        ++successful_stats;
+        assert(stats->distance_m > 0.0);
+        assert(stats->score >= 0.0 && stats->score <= 100.0);
+        assert(stats->shape_score >= 0.0 && stats->shape_score <= 1.0);
+        assert(stats->waypoint_quality_score >= 0.0
+               && stats->waypoint_quality_score <= 1.0);
+    }
+    assert(successful_stats == result.stats.successful_candidates);
 
     const OpenRideRoutePoint first = result.route.geometry[0];
     const OpenRideRoutePoint last = result.route.geometry[result.route.geometry_count - 1U];

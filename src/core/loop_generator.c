@@ -9,8 +9,9 @@
 #define OPENRIDE_LOOP_MIN_DISTANCE_M 5000.0
 #define OPENRIDE_LOOP_MAX_DISTANCE_M 500000.0
 #define OPENRIDE_LOOP_MIN_CANDIDATES 1U
-#define OPENRIDE_LOOP_MAX_CANDIDATES 16U
-#define OPENRIDE_LOOP_DEFAULT_SNAP_M 2500.0
+#define OPENRIDE_LOOP_DEFAULT_MAX_SNAP_M 2500.0
+#define OPENRIDE_LOOP_DEFAULT_PREFERRED_SNAP_M 60.0
+#define OPENRIDE_LOOP_PLACEMENT_VARIANTS 6U
 #define OPENRIDE_LOOP_PI 3.14159265358979323846264338327950288
 
 typedef struct OpenRideTraversal {
@@ -37,7 +38,17 @@ typedef struct OpenRideLoopCandidate {
     double distance_error_ratio;
     double overlap_ratio;
     double max_waypoint_snap_distance_m;
+    double shape_score;
+    double waypoint_quality_score;
 } OpenRideLoopCandidate;
+
+typedef struct OpenRideWaypointPlacement {
+    OpenRideRoutingSnap snaps[OPENRIDE_LOOP_MAX_WAYPOINTS];
+    OpenRideRoutePoint points[OPENRIDE_LOOP_MAX_WAYPOINTS];
+    double max_snap_distance_m;
+    double mean_snap_distance_m;
+    double quality_score;
+} OpenRideWaypointPlacement;
 
 static void set_error(char *error, size_t error_size, const char *message)
 {
@@ -153,49 +164,6 @@ static const OpenRideRoutingEdge *find_edge(const OpenRideRoutingGraph *graph,
         if (edge->target == to) return edge;
     }
     return NULL;
-}
-
-static bool edge_allowed_for_loop(const OpenRideRoutingEdge *edge,
-                                  const OpenRideLoopRequest *request)
-{
-    if (!edge || !request) return false;
-    if (request->avoid_tolls && (edge->flags & OPENRIDE_EDGE_FLAG_TOLL) != 0U) {
-        return false;
-    }
-    if (request->avoid_ferries && (edge->flags & OPENRIDE_EDGE_FLAG_FERRY) != 0U) {
-        return false;
-    }
-    return true;
-}
-
-static double default_speed_kph(OpenRideRoadClass road_class)
-{
-    switch (road_class) {
-        case OPENRIDE_ROAD_MOTORWAY:      return 110.0;
-        case OPENRIDE_ROAD_TRUNK:         return 90.0;
-        case OPENRIDE_ROAD_PRIMARY:       return 80.0;
-        case OPENRIDE_ROAD_SECONDARY:     return 80.0;
-        case OPENRIDE_ROAD_TERTIARY:      return 70.0;
-        case OPENRIDE_ROAD_UNCLASSIFIED:  return 60.0;
-        case OPENRIDE_ROAD_RESIDENTIAL:   return 50.0;
-        case OPENRIDE_ROAD_SERVICE:       return 30.0;
-        case OPENRIDE_ROAD_LIVING_STREET: return 20.0;
-        case OPENRIDE_ROAD_TRACK:         return 25.0;
-        case OPENRIDE_ROAD_PATH:          return 15.0;
-        case OPENRIDE_ROAD_OTHER:
-        case OPENRIDE_ROAD_UNKNOWN:
-        default:                          return 40.0;
-    }
-}
-
-static double edge_speed_kph(const OpenRideRoutingEdge *edge)
-{
-    double speed = edge->max_speed_kph > 0U
-        ? (double)edge->max_speed_kph
-        : default_speed_kph((OpenRideRoadClass)edge->road_class);
-    if (speed < 5.0) speed = 5.0;
-    if (speed > 130.0) speed = 130.0;
-    return speed;
 }
 
 static bool geometry_reserve(OpenRideGeometryBuilder *builder, uint32_t needed)
@@ -325,124 +293,142 @@ static double repeated_distance_m(OpenRideTraversalList *list)
     return repeated;
 }
 
-static bool choose_start_endpoint(const OpenRideRoutingGraph *graph,
+static double route_shape_score(const OpenRideRoute *route)
+{
+    if (!route || !route->geometry || route->geometry_count < 4U
+        || route->distance_m <= 1.0) {
+        return 0.0;
+    }
+
+    const double lat0 = radians(route->geometry[0].lat);
+    const double lon0 = radians(route->geometry[0].lon);
+    const double cos_lat0 = cos(lat0);
+    double twice_area = 0.0;
+
+    for (uint32_t i = 0U; i < route->geometry_count; ++i) {
+        const uint32_t j = (i + 1U) % route->geometry_count;
+        const double xi = (radians(route->geometry[i].lon) - lon0)
+                        * OPENRIDE_EARTH_RADIUS_M * cos_lat0;
+        const double yi = (radians(route->geometry[i].lat) - lat0)
+                        * OPENRIDE_EARTH_RADIUS_M;
+        const double xj = (radians(route->geometry[j].lon) - lon0)
+                        * OPENRIDE_EARTH_RADIUS_M * cos_lat0;
+        const double yj = (radians(route->geometry[j].lat) - lat0)
+                        * OPENRIDE_EARTH_RADIUS_M;
+        twice_area += xi * yj - xj * yi;
+    }
+
+    const double area_m2 = fabs(twice_area) * 0.5;
+    const double compactness = 4.0 * OPENRIDE_LOOP_PI * area_m2
+                             / (route->distance_m * route->distance_m);
+    return clampd(compactness, 0.0, 1.0);
+}
+
+static double waypoint_quality_score(double max_snap_m,
+                                     double mean_snap_m,
+                                     double preferred_snap_m)
+{
+    const double preferred = preferred_snap_m > 1.0 ? preferred_snap_m : 1.0;
+    const double max_fit = clampd(1.0 - max_snap_m / (preferred * 3.0), 0.0, 1.0);
+    const double mean_fit = clampd(1.0 - mean_snap_m / (preferred * 2.0), 0.0, 1.0);
+    return 0.7 * max_fit + 0.3 * mean_fit;
+}
+
+static bool prepare_waypoint_placement(const OpenRideRoutingGraph *graph,
+                                       const OpenRideLoopRequest *request,
+                                       uint32_t candidate_index,
+                                       uint32_t *random_state,
+                                       OpenRideWaypointPlacement *placement)
+{
+    if (!placement) return false;
+    memset(placement, 0, sizeof(*placement));
+
+    bool have_best = false;
+    OpenRideWaypointPlacement best = {0};
+    const double base_bearing = candidate_bearing(request, candidate_index, random_state);
+    const OpenRideRoutePoint start = {request->start.lat, request->start.lon};
+
+    for (uint32_t variant = 0U; variant < OPENRIDE_LOOP_PLACEMENT_VARIANTS; ++variant) {
+        OpenRideWaypointPlacement current = {0};
+        const double bearing_jitter = (random_unit(random_state) - 0.5) * 24.0;
+        const double bearing = normalize_bearing(base_bearing + bearing_jitter);
+        const double radius_variation = 0.82 + random_unit(random_state) * 0.32;
+        const double radius_m = request->target_distance_m
+                              / (2.0 * OPENRIDE_LOOP_PI)
+                              * radius_variation;
+        const OpenRideRoutePoint center = destination_point(start, bearing, radius_m);
+        const double start_bearing_from_center = normalize_bearing(bearing + 180.0);
+        const double orientation = ((candidate_index + variant) & 1U) == 0U ? 1.0 : -1.0;
+
+        bool valid = true;
+        double snap_sum = 0.0;
+        for (uint32_t i = 0U; i < OPENRIDE_LOOP_MAX_WAYPOINTS; ++i) {
+            const double angular_jitter = (random_unit(random_state) - 0.5) * 12.0;
+            const double around = start_bearing_from_center
+                                + orientation * 90.0 * (double)(i + 1U)
+                                + angular_jitter;
+            const OpenRideRoutePoint requested_waypoint = destination_point(
+                center, around, radius_m);
+
+            OpenRideRoutingSnap snap = {0};
+            snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+            if (!openride_routing_graph_snap_to_segment(
+                    graph,
+                    requested_waypoint.lat,
+                    requested_waypoint.lon,
+                    request->max_waypoint_snap_distance_m,
+                    &snap)) {
+                valid = false;
+                break;
+            }
+
+            current.snaps[i] = snap;
+            current.points[i] = (OpenRideRoutePoint){snap.lat, snap.lon};
+            snap_sum += snap.distance_m;
+            if (snap.distance_m > current.max_snap_distance_m) {
+                current.max_snap_distance_m = snap.distance_m;
+            }
+        }
+
+        if (!valid) continue;
+        current.mean_snap_distance_m = snap_sum / (double)OPENRIDE_LOOP_MAX_WAYPOINTS;
+        current.quality_score = waypoint_quality_score(
+            current.max_snap_distance_m,
+            current.mean_snap_distance_m,
+            request->preferred_waypoint_snap_distance_m);
+
+        if (!have_best
+            || current.quality_score > best.quality_score
+            || (fabs(current.quality_score - best.quality_score) < 1e-12
+                && current.max_snap_distance_m < best.max_snap_distance_m)) {
+            best = current;
+            have_best = true;
+        }
+    }
+
+    if (!have_best) return false;
+    *placement = best;
+    return true;
+}
+
+static bool calculate_snapped_leg(const OpenRideRoutingGraph *graph,
                                   const OpenRideLoopRequest *request,
-                                  bool departure,
-                                  OpenRideRoutingNodeId *node,
-                                  const OpenRideRoutingEdge **partial_edge,
-                                  double *partial_fraction)
+                                  OpenRideRoutingSnap start,
+                                  OpenRideRoutingSnap destination,
+                                  OpenRideRoute *route)
 {
-    const OpenRideRoutingSnap *snap = &request->start;
-    const double eps = 1e-9;
-    if (snap->fraction <= eps) {
-        *node = snap->a;
-        *partial_edge = NULL;
-        *partial_fraction = 0.0;
-        return true;
-    }
-    if (1.0 - snap->fraction <= eps) {
-        *node = snap->b;
-        *partial_edge = NULL;
-        *partial_fraction = 0.0;
-        return true;
-    }
-
-    const OpenRideRoutingEdge *a_to_b = find_edge(graph, snap->a, snap->b);
-    const OpenRideRoutingEdge *b_to_a = find_edge(graph, snap->b, snap->a);
-    bool have = false;
-    double best_fraction = 2.0;
-    OpenRideRoutingNodeId best_node = OPENRIDE_ROUTING_NODE_NONE;
-    const OpenRideRoutingEdge *best_edge = NULL;
-
-    if (departure) {
-        if (b_to_a && edge_allowed_for_loop(b_to_a, request)
-            && snap->fraction < best_fraction) {
-            have = true;
-            best_fraction = snap->fraction;
-            best_node = snap->a;
-            best_edge = b_to_a;
-        }
-        const double to_b = 1.0 - snap->fraction;
-        if (a_to_b && edge_allowed_for_loop(a_to_b, request) && to_b < best_fraction) {
-            have = true;
-            best_fraction = to_b;
-            best_node = snap->b;
-            best_edge = a_to_b;
-        }
-    } else {
-        if (a_to_b && edge_allowed_for_loop(a_to_b, request)
-            && snap->fraction < best_fraction) {
-            have = true;
-            best_fraction = snap->fraction;
-            best_node = snap->a;
-            best_edge = a_to_b;
-        }
-        const double from_b = 1.0 - snap->fraction;
-        if (b_to_a && edge_allowed_for_loop(b_to_a, request) && from_b < best_fraction) {
-            have = true;
-            best_fraction = from_b;
-            best_node = snap->b;
-            best_edge = b_to_a;
-        }
-    }
-
-    if (!have) return false;
-    *node = best_node;
-    *partial_edge = best_edge;
-    *partial_fraction = best_fraction;
-    return true;
-}
-
-static bool snap_waypoint_to_node(const OpenRideRoutingGraph *graph,
-                                  OpenRideRoutePoint requested,
-                                  double max_distance_m,
-                                  OpenRideRoutePoint *snapped,
-                                  OpenRideRoutingNodeId *node,
-                                  double *snap_distance_m)
-{
-    double distance = 0.0;
-    const OpenRideRoutingNodeId id = openride_routing_graph_nearest_node(
-        graph, requested.lat, requested.lon, &distance);
-    if (id == OPENRIDE_ROUTING_NODE_NONE || distance > max_distance_m) return false;
-
-    double lat = 0.0;
-    double lon = 0.0;
-    openride_routing_node_geo(&graph->nodes[id], &lat, &lon);
-    *snapped = (OpenRideRoutePoint){lat, lon};
-    *node = id;
-    if (snap_distance_m) *snap_distance_m = distance;
-    return true;
-}
-
-static bool calculate_leg(const OpenRideRoutingGraph *graph,
-                          const OpenRideLoopRequest *request,
-                          OpenRideRoutingNodeId start,
-                          OpenRideRoutingNodeId destination,
-                          OpenRideRoute *route)
-{
-    OpenRideRoutingRequest routing = openride_routing_request_default();
+    OpenRideSnappedRoutingRequest routing = openride_snapped_routing_request_default();
     routing.start = start;
     routing.destination = destination;
     routing.profile = request->profile;
     routing.avoid_tolls = request->avoid_tolls;
     routing.avoid_ferries = request->avoid_ferries;
     char error[128] = {0};
-    return openride_routing_engine_calculate(graph,
-                                             &routing,
-                                             route,
-                                             error,
-                                             sizeof(error));
-}
-
-static void add_partial_metrics(const OpenRideRoutingEdge *edge,
-                                double fraction,
-                                OpenRideRoute *route)
-{
-    if (!edge || fraction <= 0.0 || !route) return;
-    const double length_m = ((double)edge->length_cm / 100.0) * fraction;
-    route->distance_m += length_m;
-    route->estimated_time_s += length_m / (edge_speed_kph(edge) / 3.6);
-    route->weighted_cost_s += length_m / (edge_speed_kph(edge) / 3.6);
+    return openride_routing_engine_calculate_snapped(graph,
+                                                     &routing,
+                                                     route,
+                                                     error,
+                                                     sizeof(error));
 }
 
 static bool generate_candidate(const OpenRideRoutingGraph *graph,
@@ -453,97 +439,43 @@ static bool generate_candidate(const OpenRideRoutingGraph *graph,
 {
     memset(candidate, 0, sizeof(*candidate));
 
-    OpenRideRoutingNodeId departure_node = OPENRIDE_ROUTING_NODE_NONE;
-    OpenRideRoutingNodeId arrival_node = OPENRIDE_ROUTING_NODE_NONE;
-    const OpenRideRoutingEdge *departure_edge = NULL;
-    const OpenRideRoutingEdge *arrival_edge = NULL;
-    double departure_fraction = 0.0;
-    double arrival_fraction = 0.0;
-
-    if (!choose_start_endpoint(graph,
-                               request,
-                               true,
-                               &departure_node,
-                               &departure_edge,
-                               &departure_fraction)
-        || !choose_start_endpoint(graph,
-                                  request,
-                                  false,
-                                  &arrival_node,
-                                  &arrival_edge,
-                                  &arrival_fraction)) {
+    OpenRideWaypointPlacement placement = {0};
+    if (!prepare_waypoint_placement(graph,
+                                    request,
+                                    candidate_index,
+                                    random_state,
+                                    &placement)) {
         return false;
     }
+    memcpy(candidate->waypoints, placement.points, sizeof(candidate->waypoints));
 
-    const double bearing = candidate_bearing(request, candidate_index, random_state);
-    const double radius_variation = 0.85 + random_unit(random_state) * 0.25;
-    const double radius_m = request->target_distance_m
-                          / (2.0 * OPENRIDE_LOOP_PI)
-                          * radius_variation;
-    const OpenRideRoutePoint start = {request->start.lat, request->start.lon};
-    const OpenRideRoutePoint center = destination_point(start, bearing, radius_m);
-    const double start_bearing_from_center = normalize_bearing(bearing + 180.0);
-    const double orientation = (candidate_index & 1U) == 0U ? 1.0 : -1.0;
-
-    OpenRideRoutingNodeId waypoint_nodes[OPENRIDE_LOOP_MAX_WAYPOINTS];
-    double max_snap = 0.0;
-    for (uint32_t i = 0U; i < OPENRIDE_LOOP_MAX_WAYPOINTS; ++i) {
-        const double around = start_bearing_from_center
-                            + orientation * 90.0 * (double)(i + 1U);
-        const OpenRideRoutePoint requested_waypoint = destination_point(
-            center, around, radius_m);
-        double snap_distance = 0.0;
-        if (!snap_waypoint_to_node(graph,
-                                   requested_waypoint,
-                                   request->max_waypoint_snap_distance_m,
-                                   &candidate->waypoints[i],
-                                   &waypoint_nodes[i],
-                                   &snap_distance)) {
-            return false;
-        }
-        if (snap_distance > max_snap) max_snap = snap_distance;
-    }
-
-    OpenRideRoutingNodeId leg_starts[4] = {
-        departure_node,
-        waypoint_nodes[0],
-        waypoint_nodes[1],
-        waypoint_nodes[2]
+    OpenRideRoutingSnap leg_starts[4] = {
+        request->start,
+        placement.snaps[0],
+        placement.snaps[1],
+        placement.snaps[2]
     };
-    OpenRideRoutingNodeId leg_ends[4] = {
-        waypoint_nodes[0],
-        waypoint_nodes[1],
-        waypoint_nodes[2],
-        arrival_node
+    OpenRideRoutingSnap leg_ends[4] = {
+        placement.snaps[0],
+        placement.snaps[1],
+        placement.snaps[2],
+        request->start
     };
 
     OpenRideGeometryBuilder geometry = {0};
     OpenRideTraversalList traversals = {0};
-    bool ok = geometry_append_point(&geometry, start);
+    bool ok = true;
     double distance_m = 0.0;
     double estimated_time_s = 0.0;
     double weighted_cost_s = 0.0;
 
-    if (ok && departure_fraction > 0.0) {
-        double lat = 0.0;
-        double lon = 0.0;
-        openride_routing_node_geo(&graph->nodes[departure_node], &lat, &lon);
-        ok = geometry_append_point(&geometry, (OpenRideRoutePoint){lat, lon});
-        const double partial_length = ((double)departure_edge->length_cm / 100.0)
-                                    * departure_fraction;
-        ok = ok && traversal_append(&traversals,
-                                    request->start.a,
-                                    request->start.b,
-                                    partial_length);
-    }
-
     for (uint32_t leg_index = 0U; ok && leg_index < 4U; ++leg_index) {
         OpenRideRoute leg = {0};
-        if (!calculate_leg(graph,
-                           request,
-                           leg_starts[leg_index],
-                           leg_ends[leg_index],
-                           &leg)) {
+        if (!calculate_snapped_leg(graph,
+                                   request,
+                                   leg_starts[leg_index],
+                                   leg_ends[leg_index],
+                                   &leg)) {
             ok = false;
             openride_route_destroy(&leg);
             break;
@@ -554,18 +486,6 @@ static bool generate_candidate(const OpenRideRoutingGraph *graph,
         estimated_time_s += leg.estimated_time_s;
         weighted_cost_s += leg.weighted_cost_s;
         openride_route_destroy(&leg);
-    }
-
-    if (ok && arrival_fraction > 0.0) {
-        const double partial_length = ((double)arrival_edge->length_cm / 100.0)
-                                    * arrival_fraction;
-        ok = traversal_append(&traversals,
-                              request->start.a,
-                              request->start.b,
-                              partial_length)
-          && geometry_append_point(&geometry, start);
-    } else if (ok) {
-        ok = geometry_append_point(&geometry, start);
     }
 
     if (!ok) {
@@ -580,8 +500,6 @@ static bool generate_candidate(const OpenRideRoutingGraph *graph,
     combined.distance_m = distance_m;
     combined.estimated_time_s = estimated_time_s;
     combined.weighted_cost_s = weighted_cost_s;
-    add_partial_metrics(departure_edge, departure_fraction, &combined);
-    add_partial_metrics(arrival_edge, arrival_fraction, &combined);
 
     const double repeated_m = repeated_distance_m(&traversals);
     free(traversals.items);
@@ -591,15 +509,21 @@ static bool generate_candidate(const OpenRideRoutingGraph *graph,
     const double overlap_ratio = combined.distance_m > 1.0
         ? clampd(repeated_m / combined.distance_m, 0.0, 1.0)
         : 1.0;
+    const double shape_score = route_shape_score(&combined);
     const double distance_fit = clampd(1.0 - distance_error / 0.40, 0.0, 1.0);
     const double overlap_fit = clampd(1.0 - overlap_ratio / 0.30, 0.0, 1.0);
-    const double score = 100.0 * (0.72 * distance_fit + 0.28 * overlap_fit);
+    const double score = 100.0 * (0.55 * distance_fit
+                                + 0.25 * overlap_fit
+                                + 0.10 * shape_score
+                                + 0.10 * placement.quality_score);
 
     candidate->route = combined;
     candidate->score = score;
     candidate->distance_error_ratio = distance_error;
     candidate->overlap_ratio = overlap_ratio;
-    candidate->max_waypoint_snap_distance_m = max_snap;
+    candidate->max_waypoint_snap_distance_m = placement.max_snap_distance_m;
+    candidate->shape_score = shape_score;
+    candidate->waypoint_quality_score = placement.quality_score;
     return true;
 }
 
@@ -613,7 +537,8 @@ OpenRideLoopRequest openride_loop_request_default(void)
     request.profile = OPENRIDE_ROUTING_PROFILE_TOURING;
     request.direction = OPENRIDE_LOOP_DIRECTION_ANY;
     request.target_distance_m = 100000.0;
-    request.max_waypoint_snap_distance_m = OPENRIDE_LOOP_DEFAULT_SNAP_M;
+    request.max_waypoint_snap_distance_m = OPENRIDE_LOOP_DEFAULT_MAX_SNAP_M;
+    request.preferred_waypoint_snap_distance_m = OPENRIDE_LOOP_DEFAULT_PREFERRED_SNAP_M;
     request.candidate_count = 6U;
     request.seed = 0x4f70656eU;
     request.avoid_tolls = false;
@@ -660,6 +585,13 @@ static bool validate_request(const OpenRideRoutingGraph *graph,
         set_error(error, error_size, "invalid waypoint snap distance");
         return false;
     }
+    if (!isfinite(request->preferred_waypoint_snap_distance_m)
+        || request->preferred_waypoint_snap_distance_m <= 0.0
+        || request->preferred_waypoint_snap_distance_m
+           > request->max_waypoint_snap_distance_m) {
+        set_error(error, error_size, "invalid preferred waypoint snap distance");
+        return false;
+    }
     if (request->profile < OPENRIDE_ROUTING_PROFILE_FASTEST
         || request->profile > OPENRIDE_ROUTING_PROFILE_TRAIL) {
         set_error(error, error_size, "invalid loop routing profile");
@@ -684,16 +616,29 @@ bool openride_loop_generator_generate(const OpenRideRoutingGraph *graph,
     OpenRideLoopResult generated;
     memset(&generated, 0, sizeof(generated));
     generated.stats.attempted_candidates = request->candidate_count;
+    generated.stats.selected_candidate_index = UINT32_MAX;
 
     bool have_best = false;
     uint32_t random_state = request->seed == 0U ? 0x4f70656eU : request->seed;
 
+    generated.stats.candidate_stat_count = request->candidate_count;
     for (uint32_t i = 0U; i < request->candidate_count; ++i) {
         OpenRideLoopCandidate candidate;
+        OpenRideLoopCandidateStats *candidate_stats = &generated.stats.candidates[i];
         if (!generate_candidate(graph, request, i, &random_state, &candidate)) {
+            candidate_stats->successful = false;
             continue;
         }
         ++generated.stats.successful_candidates;
+        candidate_stats->successful = true;
+        candidate_stats->distance_m = candidate.route.distance_m;
+        candidate_stats->score = candidate.score;
+        candidate_stats->distance_error_ratio = candidate.distance_error_ratio;
+        candidate_stats->overlap_ratio = candidate.overlap_ratio;
+        candidate_stats->max_waypoint_snap_distance_m =
+            candidate.max_waypoint_snap_distance_m;
+        candidate_stats->shape_score = candidate.shape_score;
+        candidate_stats->waypoint_quality_score = candidate.waypoint_quality_score;
 
         if (!have_best || candidate.score > generated.stats.score) {
             openride_route_destroy(&generated.route);
@@ -708,6 +653,9 @@ bool openride_loop_generator_generate(const OpenRideRoutingGraph *graph,
             generated.stats.overlap_ratio = candidate.overlap_ratio;
             generated.stats.max_waypoint_snap_distance_m =
                 candidate.max_waypoint_snap_distance_m;
+            generated.stats.shape_score = candidate.shape_score;
+            generated.stats.waypoint_quality_score = candidate.waypoint_quality_score;
+            generated.stats.selected_candidate_index = i;
             have_best = true;
         }
         openride_route_destroy(&candidate.route);

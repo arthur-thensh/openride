@@ -74,12 +74,35 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("Boucle retenue\n");
+    printf("Candidats\n");
+    printf("  #   etat  distance  erreur  repet.  snap max  forme  qualite  score\n");
+    for (uint32_t i = 0U; i < result.stats.candidate_stat_count; ++i) {
+        const OpenRideLoopCandidateStats *stats = &result.stats.candidates[i];
+        const char selected = i == result.stats.selected_candidate_index ? '*' : ' ';
+        if (!stats->successful) {
+            printf(" %c%-3u ECHEC\n", selected, i + 1U);
+            continue;
+        }
+        printf(" %c%-3u OK    %7.1f   %5.1f%%   %5.1f%%   %6.1f m  %5.1f%%   %5.1f%%  %5.1f\n",
+               selected,
+               i + 1U,
+               stats->distance_m / 1000.0,
+               stats->distance_error_ratio * 100.0,
+               stats->overlap_ratio * 100.0,
+               stats->max_waypoint_snap_distance_m,
+               stats->shape_score * 100.0,
+               stats->waypoint_quality_score * 100.0,
+               stats->score);
+    }
+
+    printf("\nBoucle retenue\n");
     printf("  distance     : %.1f km\n", result.route.distance_m / 1000.0);
     printf("  duree estimee: %.1f min\n", result.route.estimated_time_s / 60.0);
     printf("  score        : %.1f / 100\n", result.stats.score);
     printf("  erreur cible : %.1f %%\n", result.stats.distance_error_ratio * 100.0);
     printf("  repetition   : %.1f %%\n", result.stats.overlap_ratio * 100.0);
+    printf("  forme        : %.1f %%\n", result.stats.shape_score * 100.0);
+    printf("  qualite wp   : %.1f %%\n", result.stats.waypoint_quality_score * 100.0);
     printf("  succes       : %u / %u candidats\n",
            result.stats.successful_candidates,
            result.stats.attempted_candidates);
