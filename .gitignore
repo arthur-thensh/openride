@@ -1,0 +1,15 @@
+# Build
+build/
+cmake-build-*/
+
+# Dependencies téléchargées
+vendor/SDL/
+
+# macOS
+.DS_Store
+*.swp
+
+# Cartes téléchargées
+data/maps/*.mbtiles
+data/maps/*.zip
+EOF
