@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.7.0 LANGUAGES C)
+project(OpenRide VERSION 0.8.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -21,6 +21,8 @@ add_library(openride_core STATIC
     src/core/map_camera.c
     src/core/map_selection.c
     src/core/routing_graph.c
+    src/core/pathfinder.c
+    src/core/routing_engine.c
     src/map/mbtiles.c
     src/map/mvt.c
     src/map/map_style.c
@@ -107,4 +109,10 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_routing_graph PRIVATE openride_core)
     add_test(NAME routing_graph COMMAND test_routing_graph)
+
+    add_executable(test_routing_engine
+        tests/test_routing_engine.c
+    )
+    target_link_libraries(test_routing_engine PRIVATE openride_core)
+    add_test(NAME routing_engine COMMAND test_routing_engine)
 endif()

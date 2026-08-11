@@ -1,75 +1,84 @@
-# OpenRide v0.7 — fondation du graphe routier hors ligne
+# OpenRide v0.8 — moteur de routage hors ligne
 
-OpenRide affiche toujours la carte OSM vectorielle hors ligne et conserve les
-interactions départ/destination de la v0.6.1. La v0.7 ajoute la première brique
-du futur moteur de routage : un graphe routier compact, indépendant de SDL.
+OpenRide possède maintenant un vrai moteur capable de rechercher le meilleur
+chemin dans un graphe routier local. Le calcul est effectué en C pur et ne fait
+aucun appel réseau.
 
-## Nouveautés v0.7
+La carte OSM, les marqueurs départ/destination et le graphe `.orgraph` restent
+séparés. Cette version utilise encore des graphes synthétiques dans les tests :
+la prochaine étape sera l'import de vraies données OSM routières.
 
-- structure de graphe routier en C pur ;
-- nœuds et arêtes dirigées compactes de 16 octets chacune ;
-- coordonnées stockées en degrés × 1e7 pour limiter la mémoire ;
-- type de route, surface, vitesse maximale et drapeaux par arête ;
-- constructeur de graphe pour le futur importateur OSM ;
-- prise en charge des voies à sens unique via des arêtes dirigées ;
-- recherche du nœud routier le plus proche ;
-- format binaire local `.orgraph`, versionné et indépendant des structures C ;
-- sauvegarde et rechargement d'un graphe hors ligne ;
-- validation systématique de la topologie ;
-- tests unitaires dédiés.
+## Nouveautés v0.8
 
-Cette version **ne calcule pas encore d'itinéraire**. C'est volontaire : elle
-fige d'abord la représentation des données que le moteur de routage utilisera.
+- moteur de routage public `routing_engine` ;
+- recherche de chemin A* confinée dans le composant interne `pathfinder` ;
+- reconstruction complète de la suite de nœuds de l'itinéraire ;
+- calcul de la distance totale ;
+- estimation du temps de trajet ;
+- profils `fastest`, `touring` et `trail` ;
+- possibilité d'éviter péages et ferries ;
+- respect naturel des sens uniques grâce au graphe dirigé ;
+- détection d'un trajet impossible ;
+- tests dédiés aux profils et aux restrictions.
 
-## Pourquoi ne pas router directement sur les MBTiles ?
-
-Les MBTiles Shortbread actuellement affichées par OpenRide sont des données de
-**rendu cartographique**. Les géométries peuvent être découpées aux limites des
-tuiles ou simplifiées selon le niveau de zoom. Elles ne sont donc pas la bonne
-source pour construire une topologie routière fiable.
-
-À terme :
+## Architecture
 
 ```text
-OSM .pbf
-   ↓
-importateur OpenRide
-   ↓
-region.orgraph
-   ↓
-moteur de routage hors ligne
+OpenRide
+│
+├── carte MBTiles                  affichage
+│
+└── moteur de routage hors ligne
+    │
+    ├── routing_graph              topologie locale
+    │
+    ├── routing_engine             API de haut niveau
+    │   ├── profils moto
+    │   ├── coûts de route
+    │   ├── distance
+    │   └── temps estimé
+    │
+    └── pathfinder                 détail interne
+        └── A*
 ```
 
-La carte `.mbtiles` restera uniquement chargée de l'affichage.
+A* n'est donc pas exposé comme « le moteur ». Il pourra être remplacé ou
+complété plus tard sans modifier l'API utilisée par le reste de l'application.
 
-## Structure du graphe
+## Profils initiaux
 
-Un nœud représente une position du réseau :
+`FASTEST` privilégie principalement le temps de trajet. Les pistes et surfaces
+non revêtues restent possibles mais reçoivent une pénalité.
+
+`TOURING` pénalise fortement autoroutes et grands axes afin de favoriser les
+routes secondaires et tertiaires.
+
+`TRAIL` favorise les tracks et chemins non revêtus et pénalise fortement les
+autoroutes et grands axes.
+
+Ces coefficients sont volontairement simples pour l'instant. Ils deviendront
+plus fins lorsque l'importateur OSM fournira `surface`, `tracktype`, accès moto,
+restrictions et autres attributs utiles.
+
+## API principale
 
 ```c
-typedef struct OpenRideRoutingNode {
-    int32_t lat_e7;
-    int32_t lon_e7;
-    uint32_t first_edge;
-    uint32_t edge_count;
-} OpenRideRoutingNode;
+OpenRideRoutingRequest request = openride_routing_request_default();
+request.start = start_node;
+request.destination = destination_node;
+request.profile = OPENRIDE_ROUTING_PROFILE_TOURING;
+request.avoid_tolls = true;
+
+OpenRideRoute route = {0};
+char error[256] = {0};
+
+if (openride_routing_engine_calculate(
+        &graph, &request, &route, error, sizeof(error))) {
+    /* route.nodes, route.distance_m, route.estimated_time_s */
+}
+
+openride_route_destroy(&route);
 ```
-
-Une arête représente un déplacement autorisé vers un autre nœud :
-
-```c
-typedef struct OpenRideRoutingEdge {
-    uint32_t target;
-    uint32_t length_cm;
-    uint32_t flags;
-    uint8_t road_class;
-    uint8_t surface;
-    uint16_t max_speed_kph;
-} OpenRideRoutingEdge;
-```
-
-Le graphe est dirigé : une route à double sens possède deux arêtes, alors
-qu'une voie à sens unique n'en possède qu'une dans le sens autorisé.
 
 ## Compilation et tests
 
@@ -82,40 +91,31 @@ VS Code reste uniquement un éditeur. Tout se fait depuis le Terminal :
 ./scripts/run.sh
 ```
 
-Le nouveau test doit notamment afficher :
+Les tests doivent notamment afficher :
 
 ```text
 Routing graph tests: OK
+Routing engine tests: OK
 ```
 
-## Architecture
+## Fichiers ajoutés
 
 ```text
 include/openride/
-├── map_camera.h
-├── map_selection.h
-├── map_style.h
-├── mbtiles.h
-├── mvt.h
-└── routing_graph.h       <- nouveau
+└── routing_engine.h
 
 src/core/
-├── map_camera.c
-├── map_selection.c
-└── routing_graph.c       <- nouveau
+├── pathfinder.c
+├── pathfinder.h
+└── routing_engine.c
 
 tests/
-├── test_map_camera.c
-├── test_map_selection.c
-├── test_map_style.c
-├── test_mbtiles.c
-├── test_mvt.c
-└── test_routing_graph.c  <- nouveau
+└── test_routing_engine.c
 ```
 
 ## Étape suivante
 
-La v0.8 ajoutera le **moteur de routage hors ligne** au-dessus de ce graphe :
-recherche du meilleur chemin, coût des arêtes et reconstruction de
-l'itinéraire. Le premier algorithme utilisé sera A*, mais A* restera un détail
-interne de `pathfinder.c`.
+La v0.9 ajoutera l'import de vraies données OpenStreetMap pour produire un
+fichier `.orgraph`. À partir de là, les points choisis sur la carte pourront
+être rattachés au réseau routier réel et le moteur de routage calculera un
+véritable itinéraire hors ligne.
