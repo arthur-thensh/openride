@@ -4,12 +4,16 @@
 #include "map/map_renderer.h"
 #include "map/vector_map_renderer.h"
 #include "openride/map_camera.h"
+#include "openride/map_selection.h"
 #include "openride/mbtiles.h"
 
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+
+#define OPENRIDE_CLICK_DRAG_THRESHOLD 5.0
+#define OPENRIDE_MARKER_HIT_RADIUS 20.0
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -56,8 +60,160 @@ static void draw_center_marker(SDL_Renderer *renderer, int width, int height)
     SDL_RenderLine(renderer, cx, cy - 9.0f, cx, cy + 9.0f);
 }
 
+static OpenRidePointD marker_screen_position(const OpenRideMapCamera *camera,
+                                             const OpenRideMapSelection *selection,
+                                             OpenRideSelectionMarker marker,
+                                             int viewport_width,
+                                             int viewport_height)
+{
+    OpenRideGeoPosition position = {0};
+
+    if (marker == OPENRIDE_MARKER_START) {
+        position = selection->start;
+    } else if (marker == OPENRIDE_MARKER_DESTINATION) {
+        position = selection->destination;
+    }
+
+    return openride_geo_to_screen(camera,
+                                  position.lat,
+                                  position.lon,
+                                  viewport_width,
+                                  viewport_height);
+}
+
+static OpenRideSelectionMarker marker_at_screen(const OpenRideMapCamera *camera,
+                                                const OpenRideMapSelection *selection,
+                                                double x,
+                                                double y,
+                                                int viewport_width,
+                                                int viewport_height)
+{
+    const double radius_sq = OPENRIDE_MARKER_HIT_RADIUS * OPENRIDE_MARKER_HIT_RADIUS;
+
+    if (selection->has_destination) {
+        const OpenRidePointD p = marker_screen_position(camera,
+                                                        selection,
+                                                        OPENRIDE_MARKER_DESTINATION,
+                                                        viewport_width,
+                                                        viewport_height);
+        const double dx = x - p.x;
+        const double dy = y - (p.y - 12.0);
+        if (dx * dx + dy * dy <= radius_sq) {
+            return OPENRIDE_MARKER_DESTINATION;
+        }
+    }
+
+    if (selection->has_start) {
+        const OpenRidePointD p = marker_screen_position(camera,
+                                                        selection,
+                                                        OPENRIDE_MARKER_START,
+                                                        viewport_width,
+                                                        viewport_height);
+        const double dx = x - p.x;
+        const double dy = y - (p.y - 12.0);
+        if (dx * dx + dy * dy <= radius_sq) {
+            return OPENRIDE_MARKER_START;
+        }
+    }
+
+    return OPENRIDE_MARKER_NONE;
+}
+
+static void draw_marker(SDL_Renderer *renderer,
+                        OpenRidePointD p,
+                        OpenRideSelectionMarker marker)
+{
+    Uint8 r = 37;
+    Uint8 g = 145;
+    Uint8 b = 78;
+    const char *label = "D";
+
+    if (marker == OPENRIDE_MARKER_DESTINATION) {
+        r = 202;
+        g = 67;
+        b = 55;
+        label = "A";
+    }
+
+    /* The selected coordinate is at the bottom of the pin. */
+    SDL_SetRenderDrawColor(renderer, 35, 35, 35, 210);
+    SDL_RenderLine(renderer,
+                   (float)p.x + 1.0f,
+                   (float)p.y - 7.0f,
+                   (float)p.x + 1.0f,
+                   (float)p.y + 2.0f);
+
+    SDL_FRect shadow = {
+        (float)p.x - 7.0f,
+        (float)p.y - 23.0f,
+        16.0f,
+        16.0f
+    };
+    SDL_SetRenderDrawColor(renderer, 35, 35, 35, 180);
+    SDL_RenderFillRect(renderer, &shadow);
+
+    SDL_FRect body = {
+        (float)p.x - 8.0f,
+        (float)p.y - 24.0f,
+        16.0f,
+        16.0f
+    };
+    SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &body);
+    SDL_SetRenderDrawColor(renderer, 250, 250, 250, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &body);
+    SDL_RenderDebugText(renderer,
+                        (float)p.x - 4.0f,
+                        (float)p.y - 20.0f,
+                        label);
+}
+
+static void draw_selection(SDL_Renderer *renderer,
+                           const OpenRideMapCamera *camera,
+                           const OpenRideMapSelection *selection,
+                           int viewport_width,
+                           int viewport_height)
+{
+    OpenRidePointD start = {0};
+    OpenRidePointD destination = {0};
+
+    if (selection->has_start) {
+        start = marker_screen_position(camera,
+                                       selection,
+                                       OPENRIDE_MARKER_START,
+                                       viewport_width,
+                                       viewport_height);
+    }
+
+    if (selection->has_destination) {
+        destination = marker_screen_position(camera,
+                                             selection,
+                                             OPENRIDE_MARKER_DESTINATION,
+                                             viewport_width,
+                                             viewport_height);
+    }
+
+    if (selection->has_start && selection->has_destination) {
+        SDL_SetRenderDrawColor(renderer, 45, 91, 135, 190);
+        SDL_RenderLine(renderer,
+                       (float)start.x,
+                       (float)start.y,
+                       (float)destination.x,
+                       (float)destination.y);
+    }
+
+    if (selection->has_start) {
+        draw_marker(renderer, start, OPENRIDE_MARKER_START);
+    }
+
+    if (selection->has_destination) {
+        draw_marker(renderer, destination, OPENRIDE_MARKER_DESTINATION);
+    }
+}
+
 static void draw_overlay(SDL_Renderer *renderer,
                          const OpenRideMapCamera *camera,
+                         const OpenRideMapSelection *selection,
                          const OpenRideMBTilesMetadata *metadata,
                          bool vector_map,
                          int viewport_width,
@@ -66,23 +222,60 @@ static void draw_overlay(SDL_Renderer *renderer,
     (void)viewport_width;
 
     SDL_SetRenderDrawColor(renderer, 249, 249, 247, 225);
-    SDL_FRect panel = {8.0f, 8.0f, 350.0f, 58.0f};
+    SDL_FRect panel = {8.0f, 8.0f, 445.0f, 86.0f};
     SDL_RenderFillRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 34, 37, 40, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 14.0f, 14.0f, "OpenRide v0.5.1 - OFFLINE");
+    SDL_RenderDebugText(renderer, 14.0f, 14.0f, "OpenRide v0.6 - MAP INTERACTION");
     SDL_RenderDebugTextFormat(renderer,
                               14.0f,
                               28.0f,
-                              "lat %.5f  lon %.5f  z %.1f",
+                              "centre %.5f %.5f | z %.1f | %s",
                               camera->center_lat,
                               camera->center_lon,
-                              camera->zoom);
-    SDL_RenderDebugTextFormat(renderer,
-                              14.0f,
-                              42.0f,
-                              "%s | drag mouse | wheel zoom | Esc",
+                              camera->zoom,
                               vector_map ? "OSM vector" : "raster");
+
+    if (!selection->has_start) {
+        SDL_RenderDebugText(renderer,
+                            14.0f,
+                            44.0f,
+                            "clic carte: choisir le depart");
+    } else if (!selection->has_destination) {
+        SDL_RenderDebugTextFormat(renderer,
+                                  14.0f,
+                                  44.0f,
+                                  "depart %.5f %.5f | clic: destination",
+                                  selection->start.lat,
+                                  selection->start.lon);
+    } else {
+        const double distance_m = openride_geo_distance_m(selection->start.lat,
+                                                          selection->start.lon,
+                                                          selection->destination.lat,
+                                                          selection->destination.lon);
+        if (distance_m >= 1000.0) {
+            SDL_RenderDebugTextFormat(renderer,
+                                      14.0f,
+                                      44.0f,
+                                      "distance directe %.1f km",
+                                      distance_m / 1000.0);
+        } else {
+            SDL_RenderDebugTextFormat(renderer,
+                                      14.0f,
+                                      44.0f,
+                                      "distance directe %.0f m",
+                                      distance_m);
+        }
+    }
+
+    SDL_RenderDebugText(renderer,
+                        14.0f,
+                        60.0f,
+                        "glisser carte/marqueur | molette: zoom");
+    SDL_RenderDebugText(renderer,
+                        14.0f,
+                        76.0f,
+                        "clic droit marqueur: supprimer | C: effacer | Esc: quitter");
 
     if (metadata->attribution[0] != '\0' && viewport_height > 28) {
         size_t text_len = strlen(metadata->attribution);
@@ -144,6 +337,8 @@ int main(int argc, char **argv)
     const OpenRideMBTilesMetadata *metadata = openride_mbtiles_metadata(map);
     const bool vector_map = is_vector_map(metadata);
     OpenRideMapCamera camera = camera_from_metadata(metadata);
+    OpenRideMapSelection selection;
+    openride_map_selection_init(&selection);
 
     SDL_Window *window = NULL;
     SDL_Renderer *renderer = NULL;
@@ -151,7 +346,11 @@ int main(int argc, char **argv)
     OpenRideVectorMapRenderer vector_renderer;
     bool renderer_initialized = false;
     bool running = true;
-    bool dragging = false;
+    bool dragging_map = false;
+    bool map_drag_moved = false;
+    double mouse_down_x = 0.0;
+    double mouse_down_y = 0.0;
+    OpenRideSelectionMarker dragging_marker = OPENRIDE_MARKER_NONE;
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
@@ -203,26 +402,96 @@ int main(int argc, char **argv)
                 case SDL_EVENT_KEY_DOWN:
                     if (event.key.key == SDLK_ESCAPE) {
                         running = false;
+                    } else if (event.key.key == SDLK_C) {
+                        openride_map_selection_clear(&selection);
                     }
                     break;
 
-                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+                    int width = 0;
+                    int height = 0;
+                    SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
+
                     if (event.button.button == SDL_BUTTON_LEFT) {
-                        dragging = true;
+                        mouse_down_x = (double)event.button.x;
+                        mouse_down_y = (double)event.button.y;
+                        map_drag_moved = false;
+                        dragging_marker = marker_at_screen(&camera,
+                                                           &selection,
+                                                           mouse_down_x,
+                                                           mouse_down_y,
+                                                           width,
+                                                           height);
+                        dragging_map = dragging_marker == OPENRIDE_MARKER_NONE;
+                    } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                        const OpenRideSelectionMarker marker = marker_at_screen(
+                            &camera,
+                            &selection,
+                            (double)event.button.x,
+                            (double)event.button.y,
+                            width,
+                            height);
+                        openride_map_selection_remove(&selection, marker);
                     }
                     break;
+                }
 
                 case SDL_EVENT_MOUSE_BUTTON_UP:
                     if (event.button.button == SDL_BUTTON_LEFT) {
-                        dragging = false;
+                        if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                            dragging_marker = OPENRIDE_MARKER_NONE;
+                        } else if (dragging_map && !map_drag_moved) {
+                            int width = 0;
+                            int height = 0;
+                            double lat = 0.0;
+                            double lon = 0.0;
+                            SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
+                            openride_screen_to_geo(&camera,
+                                                   (double)event.button.x,
+                                                   (double)event.button.y,
+                                                   width,
+                                                   height,
+                                                   &lat,
+                                                   &lon);
+                            (void)openride_map_selection_add(&selection, lat, lon);
+                        }
+                        dragging_map = false;
+                        map_drag_moved = false;
                     }
                     break;
 
                 case SDL_EVENT_MOUSE_MOTION:
-                    if (dragging) {
-                        openride_camera_pan(&camera,
-                                            (double)event.motion.xrel,
-                                            (double)event.motion.yrel);
+                    if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                        int width = 0;
+                        int height = 0;
+                        double lat = 0.0;
+                        double lon = 0.0;
+                        SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
+                        openride_screen_to_geo(&camera,
+                                               (double)event.motion.x,
+                                               (double)event.motion.y,
+                                               width,
+                                               height,
+                                               &lat,
+                                               &lon);
+                        openride_map_selection_set(&selection,
+                                                   dragging_marker,
+                                                   lat,
+                                                   lon);
+                    } else if (dragging_map) {
+                        const double dx = (double)event.motion.x - mouse_down_x;
+                        const double dy = (double)event.motion.y - mouse_down_y;
+                        const double movement = sqrt(dx * dx + dy * dy);
+
+                        if (movement >= OPENRIDE_CLICK_DRAG_THRESHOLD) {
+                            map_drag_moved = true;
+                        }
+
+                        if (map_drag_moved) {
+                            openride_camera_pan(&camera,
+                                                (double)event.motion.xrel,
+                                                (double)event.motion.yrel);
+                        }
                     }
                     break;
 
@@ -267,8 +536,15 @@ int main(int argc, char **argv)
             openride_map_renderer_draw(&raster_renderer, &camera, width, height);
         }
 
+        draw_selection(renderer, &camera, &selection, width, height);
         draw_center_marker(renderer, width, height);
-        draw_overlay(renderer, &camera, metadata, vector_map, width, height);
+        draw_overlay(renderer,
+                     &camera,
+                     &selection,
+                     metadata,
+                     vector_map,
+                     width,
+                     height);
         SDL_RenderPresent(renderer);
     }
 

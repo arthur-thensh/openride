@@ -1,30 +1,35 @@
-# OpenRide v0.5.1 — nettoyage du rendu cartographique
+# OpenRide v0.6 — interaction avec la carte
 
-Cette version conserve la carte OpenStreetMap vectorielle hors ligne de la v0.5
-et améliore surtout sa lisibilité.
+OpenRide affiche une carte OpenStreetMap vectorielle hors ligne et permet
+maintenant de choisir un départ et une destination directement sur la carte.
 
-## Nouveautés v0.5.1
+## Nouveautés v0.6
 
-- placement des noms à l'échelle de tout l'écran, et non plus tuile par tuile ;
-- détection des collisions entre libellés ;
-- priorité donnée aux villes les plus importantes ;
-- apparition progressive des villes, villages, hameaux et quartiers selon le zoom ;
-- filtrage progressif des petites routes et chemins selon le zoom ;
-- libellés sans gros rectangles blancs, avec un halo discret ;
-- overlay OpenRide plus compact ;
-- attribution OpenStreetMap séparée en bas de la fenêtre ;
-- règles de style isolées dans un module C pur et couvertes par des tests ;
-- aucune requête réseau pendant l'exécution.
+- clic court sur la carte : pose le départ puis la destination ;
+- déplacement de la carte conservé par clic-glissé ;
+- glisser directement un marqueur : déplacer ce point ;
+- clic droit sur un marqueur : supprimer ce point ;
+- touche `C` : effacer les deux marqueurs ;
+- affichage de la distance à vol d'oiseau entre départ et destination ;
+- conversion écran <-> latitude/longitude réalisée avec la caméra Mercator ;
+- logique de sélection et calcul de distance placés dans un module C pur ;
+- tests unitaires ajoutés pour la sélection et la distance géographique ;
+- toujours aucune requête réseau pendant l'exécution.
 
-Le schéma Shortbread fournit notamment `kind` et `population` dans la couche
-`place_labels`. OpenRide les utilise maintenant pour décider quels noms afficher.
-
-## Utilisation
+## Installation / compilation
 
 VS Code reste uniquement un éditeur. Configuration, compilation, tests et
 lancement se font dans le Terminal.
 
-Première installation dans ce nouveau dossier :
+Pour une installation déjà configurée :
+
+```sh
+./scripts/build.sh
+./scripts/test.sh
+./scripts/run.sh
+```
+
+Pour une première installation :
 
 ```sh
 ./scripts/bootstrap_sdl.sh
@@ -34,19 +39,14 @@ Première installation dans ce nouveau dossier :
 ./scripts/run.sh
 ```
 
-Si le dossier de la v0.5 se trouve juste à côté de celui-ci, `run.sh` essaie
-automatiquement de réutiliser sa carte
-`nord-pas-de-calais-shortbread.mbtiles`. Il n'est donc normalement pas nécessaire
-de retélécharger les ~109 Mo de données.
-
-Sinon :
+Si la carte réelle n'est pas encore présente :
 
 ```sh
 ./scripts/download_real_map.sh
 ./scripts/run.sh
 ```
 
-On peut toujours fournir une autre carte explicitement :
+On peut fournir une autre carte explicitement :
 
 ```sh
 ./scripts/run.sh /chemin/vers/carte.mbtiles
@@ -54,35 +54,53 @@ On peut toujours fournir une autre carte explicitement :
 
 ## Contrôles
 
-- clic gauche maintenu + déplacement : déplacer la carte ;
+- clic gauche court sur la carte : choisir le départ puis la destination ;
+- clic gauche maintenu + déplacement sur la carte : déplacer la carte ;
+- clic gauche maintenu + déplacement sur un marqueur : déplacer le marqueur ;
+- clic droit sur un marqueur : supprimer le marqueur ;
+- `C` : effacer départ et destination ;
 - molette : zoomer / dézoomer ;
 - `Esc` : quitter.
 
-## Architecture ajoutée
+Une fois les deux points définis, un segment les relie provisoirement. Il ne
+s'agit pas encore d'un itinéraire routier : il matérialise uniquement la
+distance directe. Le futur moteur de routage hors ligne remplacera ce segment
+par un trajet calculé sur le graphe routier OSM.
+
+## Architecture
 
 ```text
 include/openride/
 ├── map_camera.h
-├── map_style.h       <- règles cartographiques, C pur
+├── map_selection.h   <- départ/destination + distance, C pur
+├── map_style.h
 ├── mbtiles.h
 └── mvt.h
 
+src/core/
+├── map_camera.c
+└── map_selection.c
+
 src/map/
-├── map_style.c       <- visibilité / priorité des objets
+├── map_style.c
 ├── mbtiles.c
 ├── mvt.c
 ├── map_renderer.c
 └── vector_map_renderer.c
 
 tests/
-└── test_map_style.c
+├── test_map_camera.c
+├── test_map_selection.c
+├── test_map_style.c
+├── test_mbtiles.c
+└── test_mvt.c
 ```
 
-`map_style.c` ne dépend pas de SDL. Les règles de visibilité pourront donc être
-réutilisées sur Android et iOS sans modification du moteur cartographique.
+`map_selection.c` ne dépend pas de SDL. Cette logique pourra donc être reprise
+telle quelle sur Android et iOS.
 
 ## Hors ligne
 
-Une fois SDL compilé et le fichier MBTiles présent localement, l'application
-fonctionne sans connexion Internet. La carte et les décisions de rendu sont
-entièrement traitées sur la machine locale.
+Une fois SDL compilé et le fichier MBTiles présent localement, la carte, la
+sélection des points et tous les calculs de la v0.6 fonctionnent sans connexion
+Internet.
