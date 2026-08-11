@@ -510,6 +510,7 @@ static void draw_overlay(SDL_Renderer *renderer,
                          bool vector_map,
                          bool graph_loaded,
                          OpenRideRoutingProfile profile,
+                         OpenRideMapStyle map_style,
                          const OpenRideRoute *route,
                          bool route_valid,
                          const char *route_status,
@@ -521,7 +522,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     const float panel_x = 10.0f;
     const float panel_y = 10.0f;
     const float panel_w = 500.0f;
-    const float panel_h = 126.0f;
+    const float panel_h = 142.0f;
     SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
 
     SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
@@ -530,7 +531,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.11");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.11.2");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -540,7 +541,7 @@ static void draw_overlay(SDL_Renderer *renderer,
                               camera->center_lat,
                               camera->center_lon,
                               camera->zoom,
-                              vector_map ? "OSM offline" : "raster offline");
+                              vector_map ? openride_map_style_name(map_style) : "raster offline");
 
     if (selection->has_start) {
         SDL_FRect chip = {panel_x + 12.0f, panel_y + 44.0f, 10.0f, 10.0f};
@@ -612,6 +613,11 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderDebugText(renderer,
                         panel_x + 12.0f,
                         panel_y + 110.0f,
+                        "M: style carte | 1 rapide | 2 balade | 3 trail");
+
+    SDL_RenderDebugText(renderer,
+                        panel_x + 12.0f,
+                        panel_y + 126.0f,
                         "glisser: deplacer | clic droit: supprimer | C: effacer");
 
     if (selection->has_start && selection->has_destination) {
@@ -765,6 +771,7 @@ int main(int argc, char **argv)
     openride_map_selection_init(&selection);
     OpenRideRoute route = {0};
     OpenRideRoutingProfile routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
+    OpenRideMapStyle map_style = OPENRIDE_MAP_STYLE_TRAIL;
     bool route_valid = false;
     bool route_dirty = false;
     OpenRideRoutingSnap start_snap = {0};
@@ -814,6 +821,9 @@ int main(int argc, char **argv)
 
     if (vector_map) {
         renderer_initialized = openride_vector_map_renderer_init(&vector_renderer, renderer, map);
+        if (renderer_initialized) {
+            openride_vector_map_renderer_set_style(&vector_renderer, map_style);
+        }
     } else {
         renderer_initialized = openride_map_renderer_init(&raster_renderer, renderer, map);
     }
@@ -853,6 +863,9 @@ int main(int argc, char **argv)
                                  sizeof(route_status),
                                  "%s",
                                  graph_loaded ? "pret" : "graphe non installe");
+                    } else if (event.key.key == SDLK_M && vector_map) {
+                        map_style = openride_map_style_next(map_style);
+                        openride_vector_map_renderer_set_style(&vector_renderer, map_style);
                     } else if (event.key.key == SDLK_1
                                || event.key.key == SDLK_2
                                || event.key.key == SDLK_3) {
@@ -1071,6 +1084,7 @@ int main(int argc, char **argv)
                      vector_map,
                      graph_loaded,
                      routing_profile,
+                     map_style,
                      &route,
                      route_valid,
                      route_status,

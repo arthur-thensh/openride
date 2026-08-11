@@ -39,6 +39,7 @@ typedef struct DrawContext {
     double tile_top;
     double tile_size;
     double camera_zoom;
+    OpenRideMapStyle style;
     int pass;
     LabelLayout *labels;
 } DrawContext;
@@ -307,95 +308,33 @@ static void draw_dashed_line(SDL_Renderer *renderer,
     }
 }
 
-static void style_street(const OpenRideMVTFeatureView *feature,
+static bool style_street(const OpenRideMVTFeatureView *feature,
                          GeometryDrawState *state)
 {
     const char *kind = openride_mvt_get_string(feature, "kind");
     bool rail = false;
     (void)openride_mvt_get_bool(feature, "rail", &rail);
 
-    state->r = 154.0f;
-    state->g = 158.0f;
-    state->b = 163.0f;
-    state->a = 255.0f;
-    state->width = 1;
-    state->casing_width = 0;
-    state->dashed = false;
-
-    if (rail) {
-        state->r = 95.0f;
-        state->g = 95.0f;
-        state->b = 100.0f;
-        state->width = 1;
-        state->dashed = true;
-        return;
+    OpenRideMapRoadPaint paint;
+    if (!openride_map_road_paint(state->draw->style,
+                                 kind,
+                                 rail,
+                                 state->draw->camera_zoom,
+                                 &paint)) {
+        return false;
     }
 
-    if (!kind) return;
-
-    if (strcmp(kind, "motorway") == 0 || strcmp(kind, "trunk") == 0) {
-        state->r = 235.0f;
-        state->g = 166.0f;
-        state->b = 92.0f;
-        state->casing_r = 180.0f;
-        state->casing_g = 120.0f;
-        state->casing_b = 70.0f;
-        state->width = 4;
-        state->casing_width = 6;
-    } else if (strcmp(kind, "primary") == 0) {
-        state->r = 242.0f;
-        state->g = 205.0f;
-        state->b = 125.0f;
-        state->casing_r = 190.0f;
-        state->casing_g = 160.0f;
-        state->casing_b = 100.0f;
-        state->width = 3;
-        state->casing_width = 5;
-    } else if (strcmp(kind, "secondary") == 0) {
-        state->r = 247.0f;
-        state->g = 232.0f;
-        state->b = 170.0f;
-        state->casing_r = 188.0f;
-        state->casing_g = 184.0f;
-        state->casing_b = 150.0f;
-        state->width = 3;
-        state->casing_width = 4;
-    } else if (strcmp(kind, "tertiary") == 0) {
-        state->r = 245.0f;
-        state->g = 245.0f;
-        state->b = 238.0f;
-        state->casing_r = 182.0f;
-        state->casing_g = 185.0f;
-        state->casing_b = 185.0f;
-        state->width = 2;
-        state->casing_width = 3;
-    } else if (strcmp(kind, "residential") == 0 ||
-               strcmp(kind, "unclassified") == 0 ||
-               strcmp(kind, "living_street") == 0 ||
-               strcmp(kind, "service") == 0) {
-        state->r = 239.0f;
-        state->g = 239.0f;
-        state->b = 235.0f;
-        state->casing_r = 190.0f;
-        state->casing_g = 193.0f;
-        state->casing_b = 194.0f;
-        state->width = state->draw->camera_zoom >= 13.0 ? 2 : 1;
-        state->casing_width = state->draw->camera_zoom >= 13.0 ? 3 : 0;
-    } else if (strcmp(kind, "track") == 0) {
-        state->r = 157.0f;
-        state->g = 125.0f;
-        state->b = 83.0f;
-        state->width = 1;
-        state->dashed = true;
-    } else if (strcmp(kind, "path") == 0 ||
-               strcmp(kind, "footway") == 0 ||
-               strcmp(kind, "cycleway") == 0) {
-        state->r = 151.0f;
-        state->g = 140.0f;
-        state->b = 125.0f;
-        state->width = 1;
-        state->dashed = true;
-    }
+    state->r = (float)paint.line.r;
+    state->g = (float)paint.line.g;
+    state->b = (float)paint.line.b;
+    state->a = (float)paint.line.a;
+    state->casing_r = (float)paint.casing.r;
+    state->casing_g = (float)paint.casing.g;
+    state->casing_b = (float)paint.casing.b;
+    state->width = paint.width;
+    state->casing_width = paint.casing_width;
+    state->dashed = paint.dashed;
+    return true;
 }
 
 static bool draw_geometry_callback(OpenRideMVTGeometryCommand command,
@@ -545,36 +484,45 @@ static bool render_feature(const OpenRideMVTFeatureView *feature, void *user_dat
         const char *kind = openride_mvt_get_string(feature, "kind");
         bool rail = false;
         (void)openride_mvt_get_bool(feature, "rail", &rail);
-        if (!rail && !openride_map_road_visible(kind, draw->camera_zoom)) {
+        if (!rail && !openride_map_road_visible_for_style(draw->style, kind, draw->camera_zoom)) {
             return true;
         }
 
-        style_street(feature, &state);
-        (void)openride_mvt_visit_geometry(feature, draw_geometry_callback, &state);
+        if (style_street(feature, &state)) {
+            (void)openride_mvt_visit_geometry(feature, draw_geometry_callback, &state);
+        }
     } else if (strcmp(layer, "water_lines") == 0 && feature->geometry_type == OPENRIDE_MVT_LINESTRING) {
-        state.r = 92.0f;
-        state.g = 158.0f;
-        state.b = 201.0f;
-        state.width = 2;
+        const OpenRideMapPalette palette = openride_map_palette(draw->style);
+        state.r = (float)palette.water_line.r;
+        state.g = (float)palette.water_line.g;
+        state.b = (float)palette.water_line.b;
+        state.a = (float)palette.water_line.a;
+        state.width = draw->style == OPENRIDE_MAP_STYLE_TOPO ? 2 : 1;
         (void)openride_mvt_visit_geometry(feature, draw_geometry_callback, &state);
     } else if (strcmp(layer, "water_polygons") == 0 && feature->geometry_type == OPENRIDE_MVT_POLYGON) {
-        state.r = 112.0f;
-        state.g = 174.0f;
-        state.b = 210.0f;
+        const OpenRideMapPalette palette = openride_map_palette(draw->style);
+        state.r = (float)palette.water.r;
+        state.g = (float)palette.water.g;
+        state.b = (float)palette.water.b;
+        state.a = (float)palette.water.a;
         state.width = 2;
         (void)openride_mvt_visit_geometry(feature, draw_geometry_callback, &state);
     } else if (strcmp(layer, "boundaries") == 0 && feature->geometry_type == OPENRIDE_MVT_LINESTRING) {
-        state.r = 180.0f;
-        state.g = 163.0f;
-        state.b = 185.0f;
+        const OpenRideMapPalette palette = openride_map_palette(draw->style);
+        state.r = (float)palette.boundary.r;
+        state.g = (float)palette.boundary.g;
+        state.b = (float)palette.boundary.b;
+        state.a = (float)palette.boundary.a;
         state.width = 1;
         state.dashed = true;
         (void)openride_mvt_visit_geometry(feature, draw_geometry_callback, &state);
     } else if (strcmp(layer, "buildings") == 0 && feature->geometry_type == OPENRIDE_MVT_POLYGON &&
-               draw->camera_zoom >= 14.0) {
-        state.r = 177.0f;
-        state.g = 172.0f;
-        state.b = 167.0f;
+               openride_map_buildings_visible(draw->style, draw->camera_zoom)) {
+        const OpenRideMapPalette palette = openride_map_palette(draw->style);
+        state.r = (float)palette.building.r;
+        state.g = (float)palette.building.g;
+        state.b = (float)palette.building.b;
+        state.a = (float)palette.building.a;
         state.width = 1;
         (void)openride_mvt_visit_geometry(feature, draw_geometry_callback, &state);
     }
@@ -610,19 +558,31 @@ static bool label_would_overlap(const LabelLayout *labels, const SDL_FRect *box)
 static void draw_text_with_halo(SDL_Renderer *renderer,
                                 float x,
                                 float y,
-                                const char *text)
+                                const char *text,
+                                OpenRideMapStyle style)
 {
-    SDL_SetRenderDrawColor(renderer, 250, 250, 247, 245);
+    const OpenRideMapPalette palette = openride_map_palette(style);
+    SDL_SetRenderDrawColor(renderer,
+                           palette.label_halo.r,
+                           palette.label_halo.g,
+                           palette.label_halo.b,
+                           palette.label_halo.a);
     SDL_RenderDebugText(renderer, x - 1.0f, y, text);
     SDL_RenderDebugText(renderer, x + 1.0f, y, text);
     SDL_RenderDebugText(renderer, x, y - 1.0f, text);
     SDL_RenderDebugText(renderer, x, y + 1.0f, text);
 
-    SDL_SetRenderDrawColor(renderer, 48, 51, 54, 255);
+    SDL_SetRenderDrawColor(renderer,
+                           palette.label.r,
+                           palette.label.g,
+                           palette.label.b,
+                           palette.label.a);
     SDL_RenderDebugText(renderer, x, y, text);
 }
 
-static void draw_collected_labels(SDL_Renderer *renderer, LabelLayout *labels)
+static void draw_collected_labels(SDL_Renderer *renderer,
+                                  LabelLayout *labels,
+                                  OpenRideMapStyle style)
 {
     if (!renderer || !labels || labels->candidate_count == 0) return;
 
@@ -655,7 +615,7 @@ static void draw_collected_labels(SDL_Renderer *renderer, LabelLayout *labels)
         if (labels->placed_count >= OPENRIDE_MAX_PLACED_LABELS) break;
 
         labels->placed[labels->placed_count++] = collision;
-        draw_text_with_halo(renderer, candidate->x, candidate->y, candidate->name);
+        draw_text_with_halo(renderer, candidate->x, candidate->y, candidate->name, style);
     }
 }
 
@@ -676,6 +636,7 @@ static void draw_one_tile(OpenRideVectorMapRenderer *renderer,
         .tile_top = top,
         .tile_size = tile_size,
         .camera_zoom = camera_zoom,
+        .style = renderer->style,
         .pass = pass,
         .labels = labels
     };
@@ -699,7 +660,20 @@ bool openride_vector_map_renderer_init(OpenRideVectorMapRenderer *map_renderer,
     memset(map_renderer, 0, sizeof(*map_renderer));
     map_renderer->renderer = renderer;
     map_renderer->map = map;
+    map_renderer->style = OPENRIDE_MAP_STYLE_TRAIL;
     return true;
+}
+
+void openride_vector_map_renderer_set_style(OpenRideVectorMapRenderer *map_renderer,
+                                            OpenRideMapStyle style)
+{
+    if (!map_renderer) return;
+    map_renderer->style = style;
+}
+
+OpenRideMapStyle openride_vector_map_renderer_style(const OpenRideVectorMapRenderer *map_renderer)
+{
+    return map_renderer ? map_renderer->style : OPENRIDE_MAP_STYLE_TRAIL;
 }
 
 void openride_vector_map_renderer_destroy(OpenRideVectorMapRenderer *map_renderer)
@@ -749,7 +723,12 @@ void openride_vector_map_renderer_draw(OpenRideVectorMapRenderer *map_renderer,
     const int first_y = (int)floor(top_world / tile_screen_size);
     const int last_y = (int)floor(bottom_world / tile_screen_size);
 
-    SDL_SetRenderDrawColor(map_renderer->renderer, 236, 238, 233, 255);
+    const OpenRideMapPalette palette = openride_map_palette(map_renderer->style);
+    SDL_SetRenderDrawColor(map_renderer->renderer,
+                           palette.background.r,
+                           palette.background.g,
+                           palette.background.b,
+                           palette.background.a);
     SDL_RenderClear(map_renderer->renderer);
 
     LabelLayout labels;
@@ -785,5 +764,5 @@ void openride_vector_map_renderer_draw(OpenRideVectorMapRenderer *map_renderer,
         }
     }
 
-    draw_collected_labels(map_renderer->renderer, &labels);
+    draw_collected_labels(map_renderer->renderer, &labels, map_renderer->style);
 }

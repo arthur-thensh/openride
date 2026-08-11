@@ -5,6 +5,7 @@
 
 #include "openride/map_camera.h"
 #include "openride/mbtiles.h"
+#include "openride/map_style.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -26,6 +27,7 @@ typedef struct OpenRideVectorMapRenderer {
     SDL_Renderer *renderer;
     OpenRideMBTiles *map;
     uint64_t frame_counter;
+    OpenRideMapStyle style;
     OpenRideVectorTileCacheEntry cache[OPENRIDE_VECTOR_TILE_CACHE_CAPACITY];
 } OpenRideVectorMapRenderer;
 
@@ -34,6 +36,11 @@ bool openride_vector_map_renderer_init(OpenRideVectorMapRenderer *map_renderer,
                                        OpenRideMBTiles *map);
 
 void openride_vector_map_renderer_destroy(OpenRideVectorMapRenderer *map_renderer);
+
+void openride_vector_map_renderer_set_style(OpenRideVectorMapRenderer *map_renderer,
+                                            OpenRideMapStyle style);
+
+OpenRideMapStyle openride_vector_map_renderer_style(const OpenRideVectorMapRenderer *map_renderer);
 
 void openride_vector_map_renderer_draw(OpenRideVectorMapRenderer *map_renderer,
                                        const OpenRideMapCamera *camera,
