@@ -13,7 +13,7 @@
 #include <string.h>
 
 #define OPENRIDE_CLICK_DRAG_THRESHOLD 5.0
-#define OPENRIDE_MARKER_HIT_RADIUS 20.0
+#define OPENRIDE_MARKER_HIT_RADIUS 26.0
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -44,6 +44,87 @@ static const char *default_map_path(void)
     static const char *demo_map = "data/maps/demo.mbtiles";
 
     return file_exists(real_map) ? real_map : demo_map;
+}
+
+static void draw_filled_circle(SDL_Renderer *renderer, float cx, float cy, float radius)
+{
+    const int r = (int)ceilf(radius);
+
+    for (int y = -r; y <= r; ++y) {
+        const float fy = (float)y;
+        const float inside = radius * radius - fy * fy;
+        if (inside < 0.0f) continue;
+
+        const float dx = sqrtf(inside);
+        SDL_RenderLine(renderer, cx - dx, cy + fy, cx + dx, cy + fy);
+    }
+}
+
+static void draw_circle_outline(SDL_Renderer *renderer, float cx, float cy, float radius)
+{
+    const int segments = 48;
+    float previous_x = cx + radius;
+    float previous_y = cy;
+
+    for (int i = 1; i <= segments; ++i) {
+        const float angle = (float)(6.28318530717958647692 * (double)i / (double)segments);
+        const float x = cx + cosf(angle) * radius;
+        const float y = cy + sinf(angle) * radius;
+        SDL_RenderLine(renderer, previous_x, previous_y, x, y);
+        previous_x = x;
+        previous_y = y;
+    }
+}
+
+static void draw_thick_line(SDL_Renderer *renderer,
+                            float x1,
+                            float y1,
+                            float x2,
+                            float y2,
+                            int width)
+{
+    const float dx = x2 - x1;
+    const float dy = y2 - y1;
+    const float length = sqrtf(dx * dx + dy * dy);
+
+    if (length < 0.001f || width <= 1) {
+        SDL_RenderLine(renderer, x1, y1, x2, y2);
+        return;
+    }
+
+    const float nx = -dy / length;
+    const float ny = dx / length;
+    const float half = ((float)width - 1.0f) * 0.5f;
+
+    for (int i = 0; i < width; ++i) {
+        const float offset = (float)i - half;
+        SDL_RenderLine(renderer,
+                       x1 + nx * offset,
+                       y1 + ny * offset,
+                       x2 + nx * offset,
+                       y2 + ny * offset);
+    }
+}
+
+static void draw_scaled_text(SDL_Renderer *renderer,
+                             float x,
+                             float y,
+                             float scale,
+                             const char *text)
+{
+    float old_scale_x = 1.0f;
+    float old_scale_y = 1.0f;
+
+    if (!text || scale <= 0.0f) return;
+    if (!SDL_GetRenderScale(renderer, &old_scale_x, &old_scale_y)) return;
+
+    if (SDL_SetRenderScale(renderer, old_scale_x * scale, old_scale_y * scale)) {
+        SDL_RenderDebugText(renderer,
+                            x / scale,
+                            y / scale,
+                            text);
+        SDL_SetRenderScale(renderer, old_scale_x, old_scale_y);
+    }
 }
 
 static void draw_center_marker(SDL_Renderer *renderer, int width, int height)
@@ -97,7 +178,7 @@ static OpenRideSelectionMarker marker_at_screen(const OpenRideMapCamera *camera,
                                                         viewport_width,
                                                         viewport_height);
         const double dx = x - p.x;
-        const double dy = y - (p.y - 12.0);
+        const double dy = y - (p.y - 25.0);
         if (dx * dx + dy * dy <= radius_sq) {
             return OPENRIDE_MARKER_DESTINATION;
         }
@@ -110,7 +191,7 @@ static OpenRideSelectionMarker marker_at_screen(const OpenRideMapCamera *camera,
                                                         viewport_width,
                                                         viewport_height);
         const double dx = x - p.x;
-        const double dy = y - (p.y - 12.0);
+        const double dy = y - (p.y - 25.0);
         if (dx * dx + dy * dy <= radius_sq) {
             return OPENRIDE_MARKER_START;
         }
@@ -123,49 +204,45 @@ static void draw_marker(SDL_Renderer *renderer,
                         OpenRidePointD p,
                         OpenRideSelectionMarker marker)
 {
-    Uint8 r = 37;
-    Uint8 g = 145;
-    Uint8 b = 78;
+    Uint8 r = 42;
+    Uint8 g = 157;
+    Uint8 b = 84;
     const char *label = "D";
+    const float center_x = (float)p.x;
+    const float center_y = (float)p.y - 25.0f;
 
     if (marker == OPENRIDE_MARKER_DESTINATION) {
-        r = 202;
-        g = 67;
-        b = 55;
+        r = 214;
+        g = 66;
+        b = 57;
         label = "A";
     }
 
-    /* The selected coordinate is at the bottom of the pin. */
-    SDL_SetRenderDrawColor(renderer, 35, 35, 35, 210);
-    SDL_RenderLine(renderer,
-                   (float)p.x + 1.0f,
-                   (float)p.y - 7.0f,
-                   (float)p.x + 1.0f,
-                   (float)p.y + 2.0f);
+    /* Pin shadow and stem. The selected coordinate is the tip of the pin. */
+    SDL_SetRenderDrawColor(renderer, 18, 22, 26, 100);
+    draw_filled_circle(renderer, center_x + 2.0f, center_y + 3.0f, 16.0f);
+    draw_thick_line(renderer,
+                    center_x + 2.0f,
+                    center_y + 11.0f,
+                    center_x + 2.0f,
+                    (float)p.y + 2.0f,
+                    5);
 
-    SDL_FRect shadow = {
-        (float)p.x - 7.0f,
-        (float)p.y - 23.0f,
-        16.0f,
-        16.0f
-    };
-    SDL_SetRenderDrawColor(renderer, 35, 35, 35, 180);
-    SDL_RenderFillRect(renderer, &shadow);
+    SDL_SetRenderDrawColor(renderer, 248, 248, 246, SDL_ALPHA_OPAQUE);
+    draw_thick_line(renderer,
+                    center_x,
+                    center_y + 10.0f,
+                    center_x,
+                    (float)p.y,
+                    5);
+    draw_filled_circle(renderer, center_x, center_y, 15.0f);
 
-    SDL_FRect body = {
-        (float)p.x - 8.0f,
-        (float)p.y - 24.0f,
-        16.0f,
-        16.0f
-    };
     SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &body);
-    SDL_SetRenderDrawColor(renderer, 250, 250, 250, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &body);
-    SDL_RenderDebugText(renderer,
-                        (float)p.x - 4.0f,
-                        (float)p.y - 20.0f,
-                        label);
+    draw_filled_circle(renderer, center_x, center_y, 12.0f);
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
+    draw_circle_outline(renderer, center_x, center_y, 12.0f);
+    SDL_RenderDebugText(renderer, center_x - 4.0f, center_y - 4.0f, label);
 }
 
 static void draw_selection(SDL_Renderer *renderer,
@@ -194,12 +271,20 @@ static void draw_selection(SDL_Renderer *renderer,
     }
 
     if (selection->has_start && selection->has_destination) {
-        SDL_SetRenderDrawColor(renderer, 45, 91, 135, 190);
-        SDL_RenderLine(renderer,
-                       (float)start.x,
-                       (float)start.y,
-                       (float)destination.x,
-                       (float)destination.y);
+        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 205);
+        draw_thick_line(renderer,
+                        (float)start.x,
+                        (float)start.y,
+                        (float)destination.x,
+                        (float)destination.y,
+                        7);
+        SDL_SetRenderDrawColor(renderer, 41, 91, 139, 225);
+        draw_thick_line(renderer,
+                        (float)start.x,
+                        (float)start.y,
+                        (float)destination.x,
+                        (float)destination.y,
+                        3);
     }
 
     if (selection->has_start) {
@@ -219,63 +304,118 @@ static void draw_overlay(SDL_Renderer *renderer,
                          int viewport_width,
                          int viewport_height)
 {
-    (void)viewport_width;
+    const float panel_x = 10.0f;
+    const float panel_y = 10.0f;
+    const float panel_w = 420.0f;
+    const float panel_h = 104.0f;
+    SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
 
-    SDL_SetRenderDrawColor(renderer, 249, 249, 247, 225);
-    SDL_FRect panel = {8.0f, 8.0f, 445.0f, 86.0f};
+    SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
     SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
+    SDL_RenderRect(renderer, &panel);
 
-    SDL_SetRenderDrawColor(renderer, 34, 37, 40, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, 14.0f, 14.0f, "OpenRide v0.6 - MAP INTERACTION");
+    SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.6.1");
+
+    SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
-                              14.0f,
-                              28.0f,
-                              "centre %.5f %.5f | z %.1f | %s",
+                              panel_x + 12.0f,
+                              panel_y + 25.0f,
+                              "centre %.5f %.5f  |  z %.1f  |  %s",
                               camera->center_lat,
                               camera->center_lon,
                               camera->zoom,
-                              vector_map ? "OSM vector" : "raster");
+                              vector_map ? "OSM offline" : "raster offline");
 
-    if (!selection->has_start) {
-        SDL_RenderDebugText(renderer,
-                            14.0f,
-                            44.0f,
-                            "clic carte: choisir le depart");
-    } else if (!selection->has_destination) {
+    if (selection->has_start) {
+        SDL_FRect chip = {panel_x + 12.0f, panel_y + 44.0f, 10.0f, 10.0f};
+        SDL_SetRenderDrawColor(renderer, 42, 157, 84, SDL_ALPHA_OPAQUE);
+        SDL_RenderFillRect(renderer, &chip);
+        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
         SDL_RenderDebugTextFormat(renderer,
-                                  14.0f,
-                                  44.0f,
-                                  "depart %.5f %.5f | clic: destination",
+                                  panel_x + 30.0f,
+                                  panel_y + 45.0f,
+                                  "Depart       %.5f  %.5f",
                                   selection->start.lat,
                                   selection->start.lon);
     } else {
+        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugText(renderer,
+                            panel_x + 12.0f,
+                            panel_y + 45.0f,
+                            "Clique sur la carte pour choisir le depart");
+    }
+
+    if (selection->has_destination) {
+        SDL_FRect chip = {panel_x + 12.0f, panel_y + 60.0f, 10.0f, 10.0f};
+        SDL_SetRenderDrawColor(renderer, 214, 66, 57, SDL_ALPHA_OPAQUE);
+        SDL_RenderFillRect(renderer, &chip);
+        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugTextFormat(renderer,
+                                  panel_x + 30.0f,
+                                  panel_y + 61.0f,
+                                  "Destination  %.5f  %.5f",
+                                  selection->destination.lat,
+                                  selection->destination.lon);
+    } else if (selection->has_start) {
+        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugText(renderer,
+                            panel_x + 12.0f,
+                            panel_y + 61.0f,
+                            "Clique sur la carte pour choisir la destination");
+    }
+
+    SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer,
+                        panel_x + 12.0f,
+                        panel_y + 82.0f,
+                        "glisser: deplacer  |  clic droit: supprimer  |  C: effacer");
+
+    if (selection->has_start && selection->has_destination) {
         const double distance_m = openride_geo_distance_m(selection->start.lat,
                                                           selection->start.lon,
                                                           selection->destination.lat,
                                                           selection->destination.lon);
+        char distance_text[32];
         if (distance_m >= 1000.0) {
-            SDL_RenderDebugTextFormat(renderer,
-                                      14.0f,
-                                      44.0f,
-                                      "distance directe %.1f km",
-                                      distance_m / 1000.0);
+            snprintf(distance_text, sizeof(distance_text), "%.1f km", distance_m / 1000.0);
         } else {
-            SDL_RenderDebugTextFormat(renderer,
-                                      14.0f,
-                                      44.0f,
-                                      "distance directe %.0f m",
-                                      distance_m);
+            snprintf(distance_text, sizeof(distance_text), "%.0f m", distance_m);
         }
-    }
 
-    SDL_RenderDebugText(renderer,
-                        14.0f,
-                        60.0f,
-                        "glisser carte/marqueur | molette: zoom");
-    SDL_RenderDebugText(renderer,
-                        14.0f,
-                        76.0f,
-                        "clic droit marqueur: supprimer | C: effacer | Esc: quitter");
+        const float distance_w = 210.0f;
+        const float distance_h = 66.0f;
+        const float distance_x = viewport_width >= 680
+            ? (float)viewport_width - distance_w - 10.0f
+            : 10.0f;
+        const float distance_y = viewport_width >= 680
+            ? 10.0f
+            : panel_y + panel_h + 8.0f;
+        SDL_FRect distance_panel = {
+            distance_x,
+            distance_y,
+            distance_w,
+            distance_h
+        };
+
+        SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
+        SDL_RenderFillRect(renderer, &distance_panel);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
+        SDL_RenderRect(renderer, &distance_panel);
+
+        SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugText(renderer,
+                            distance_x + 14.0f,
+                            distance_y + 10.0f,
+                            "DISTANCE DIRECTE");
+        SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
+        draw_scaled_text(renderer,
+                         distance_x + 14.0f,
+                         distance_y + 30.0f,
+                         1.75f,
+                         distance_text);
+    }
 
     if (metadata->attribution[0] != '\0' && viewport_height > 28) {
         size_t text_len = strlen(metadata->attribution);
