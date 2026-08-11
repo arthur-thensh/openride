@@ -15,6 +15,7 @@ typedef struct OpenRideOSMImportStats {
     uint64_t missing_node_count;
     uint64_t graph_node_count;
     uint64_t graph_edge_count;
+    uint64_t graph_segment_count;
 } OpenRideOSMImportStats;
 
 /*

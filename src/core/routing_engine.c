@@ -189,10 +189,32 @@ OpenRideRoutingRequest openride_routing_request_default(void)
     return request;
 }
 
+static bool route_build_geometry_from_nodes(const OpenRideRoutingGraph *graph,
+                                            OpenRideRoute *route)
+{
+    free(route->geometry);
+    route->geometry = NULL;
+    route->geometry_count = 0U;
+    if (route->node_count == 0U) return true;
+
+    route->geometry = calloc(route->node_count, sizeof(*route->geometry));
+    if (!route->geometry) return false;
+    route->geometry_count = route->node_count;
+
+    for (uint32_t i = 0U; i < route->node_count; ++i) {
+        if (route->nodes[i] >= graph->node_count) return false;
+        openride_routing_node_geo(&graph->nodes[route->nodes[i]],
+                                  &route->geometry[i].lat,
+                                  &route->geometry[i].lon);
+    }
+    return true;
+}
+
 void openride_route_destroy(OpenRideRoute *route)
 {
     if (!route) return;
     free(route->nodes);
+    free(route->geometry);
     memset(route, 0, sizeof(*route));
 }
 
@@ -264,6 +286,286 @@ bool openride_routing_engine_calculate(const OpenRideRoutingGraph *graph,
     path.nodes = NULL;
     openride_pathfinder_result_destroy(&path);
 
+    if (!route_build_geometry_from_nodes(graph, route)) {
+        openride_route_destroy(route);
+        set_error(error, error_size, "unable to allocate route geometry");
+        return false;
+    }
+
+    set_error(error, error_size, "");
+    return true;
+}
+
+OpenRideSnappedRoutingRequest openride_snapped_routing_request_default(void)
+{
+    OpenRideSnappedRoutingRequest request;
+    memset(&request, 0, sizeof(request));
+    request.start.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    request.destination.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    request.start.a = OPENRIDE_ROUTING_NODE_NONE;
+    request.start.b = OPENRIDE_ROUTING_NODE_NONE;
+    request.destination.a = OPENRIDE_ROUTING_NODE_NONE;
+    request.destination.b = OPENRIDE_ROUTING_NODE_NONE;
+    request.profile = OPENRIDE_ROUTING_PROFILE_FASTEST;
+    request.avoid_tolls = false;
+    request.avoid_ferries = false;
+    return request;
+}
+
+typedef struct OpenRideSnapEndpointOption {
+    OpenRideRoutingNodeId node;
+    const OpenRideRoutingEdge *edge;
+    double fraction;
+} OpenRideSnapEndpointOption;
+
+static bool snap_valid_for_graph(const OpenRideRoutingGraph *graph,
+                                 const OpenRideRoutingSnap *snap)
+{
+    if (!snap
+        || snap->segment_id == OPENRIDE_ROUTING_SEGMENT_NONE
+        || snap->segment_id >= graph->segment_index.segment_count
+        || snap->a >= graph->node_count
+        || snap->b >= graph->node_count
+        || snap->fraction < 0.0
+        || snap->fraction > 1.0
+        || !isfinite(snap->lat)
+        || !isfinite(snap->lon)) {
+        return false;
+    }
+    const OpenRideRoutingSegment *segment =
+        &graph->segment_index.segments[snap->segment_id];
+    return snap->a == segment->a && snap->b == segment->b;
+}
+
+static uint32_t start_options(const OpenRideRoutingGraph *graph,
+                              const OpenRideRoutingSnap *snap,
+                              OpenRideEngineContext *context,
+                              OpenRideSnapEndpointOption options[2])
+{
+    const double eps = 1e-9;
+    uint32_t count = 0U;
+
+    if (snap->fraction <= eps) {
+        options[count++] = (OpenRideSnapEndpointOption){snap->a, NULL, 0.0};
+    } else {
+        const OpenRideRoutingEdge *edge = find_edge(graph, snap->b, snap->a);
+        if (edge && edge_allowed(edge, context)) {
+            options[count++] = (OpenRideSnapEndpointOption){snap->a, edge, snap->fraction};
+        }
+    }
+
+    if (1.0 - snap->fraction <= eps) {
+        options[count++] = (OpenRideSnapEndpointOption){snap->b, NULL, 0.0};
+    } else {
+        const OpenRideRoutingEdge *edge = find_edge(graph, snap->a, snap->b);
+        if (edge && edge_allowed(edge, context)) {
+            options[count++] = (OpenRideSnapEndpointOption){snap->b, edge, 1.0 - snap->fraction};
+        }
+    }
+    return count;
+}
+
+static uint32_t destination_options(const OpenRideRoutingGraph *graph,
+                                    const OpenRideRoutingSnap *snap,
+                                    OpenRideEngineContext *context,
+                                    OpenRideSnapEndpointOption options[2])
+{
+    const double eps = 1e-9;
+    uint32_t count = 0U;
+
+    if (snap->fraction <= eps) {
+        options[count++] = (OpenRideSnapEndpointOption){snap->a, NULL, 0.0};
+    } else {
+        const OpenRideRoutingEdge *edge = find_edge(graph, snap->a, snap->b);
+        if (edge && edge_allowed(edge, context)) {
+            options[count++] = (OpenRideSnapEndpointOption){snap->a, edge, snap->fraction};
+        }
+    }
+
+    if (1.0 - snap->fraction <= eps) {
+        options[count++] = (OpenRideSnapEndpointOption){snap->b, NULL, 0.0};
+    } else {
+        const OpenRideRoutingEdge *edge = find_edge(graph, snap->b, snap->a);
+        if (edge && edge_allowed(edge, context)) {
+            options[count++] = (OpenRideSnapEndpointOption){snap->b, edge, 1.0 - snap->fraction};
+        }
+    }
+    return count;
+}
+
+static void add_partial_metrics(const OpenRideRoutingEdge *edge,
+                                double fraction,
+                                OpenRideEngineContext *context,
+                                double *distance_m,
+                                double *time_s,
+                                double *weighted_cost_s)
+{
+    if (!edge || fraction <= 0.0) return;
+    const double length = ((double)edge->length_cm / 100.0) * fraction;
+    *distance_m += length;
+    *time_s += length / (edge_speed_kph(edge) / 3.6);
+    *weighted_cost_s += edge_cost(edge, context) * fraction;
+}
+
+static bool build_snapped_geometry(const OpenRideRoutingGraph *graph,
+                                   const OpenRideRoutingSnap *start,
+                                   const OpenRideRoutingSnap *destination,
+                                   OpenRideRoute *route)
+{
+    const uint32_t count = route->node_count + 2U;
+    OpenRideRoutePoint *geometry = calloc(count, sizeof(*geometry));
+    if (!geometry) return false;
+
+    geometry[0].lat = start->lat;
+    geometry[0].lon = start->lon;
+    for (uint32_t i = 0U; i < route->node_count; ++i) {
+        openride_routing_node_geo(&graph->nodes[route->nodes[i]],
+                                  &geometry[i + 1U].lat,
+                                  &geometry[i + 1U].lon);
+    }
+    geometry[count - 1U].lat = destination->lat;
+    geometry[count - 1U].lon = destination->lon;
+
+    free(route->geometry);
+    route->geometry = geometry;
+    route->geometry_count = count;
+    return true;
+}
+
+static bool direct_same_segment_route(const OpenRideRoutingGraph *graph,
+                                      const OpenRideSnappedRoutingRequest *request,
+                                      OpenRideEngineContext *context,
+                                      OpenRideRoute *route)
+{
+    if (request->start.segment_id != request->destination.segment_id) return false;
+
+    const double delta = request->destination.fraction - request->start.fraction;
+    if (fabs(delta) < 1e-12) {
+        openride_route_destroy(route);
+        route->geometry = calloc(2U, sizeof(*route->geometry));
+        if (!route->geometry) return false;
+        route->geometry_count = 2U;
+        route->geometry[0] = (OpenRideRoutePoint){request->start.lat, request->start.lon};
+        route->geometry[1] = (OpenRideRoutePoint){request->destination.lat, request->destination.lon};
+        return true;
+    }
+
+    const OpenRideRoutingEdge *edge = delta > 0.0
+        ? find_edge(graph, request->start.a, request->start.b)
+        : find_edge(graph, request->start.b, request->start.a);
+    if (!edge || !edge_allowed(edge, context)) return false;
+
+    openride_route_destroy(route);
+    route->geometry = calloc(2U, sizeof(*route->geometry));
+    if (!route->geometry) return false;
+    route->geometry_count = 2U;
+    route->geometry[0] = (OpenRideRoutePoint){request->start.lat, request->start.lon};
+    route->geometry[1] = (OpenRideRoutePoint){request->destination.lat, request->destination.lon};
+    add_partial_metrics(edge,
+                        fabs(delta),
+                        context,
+                        &route->distance_m,
+                        &route->estimated_time_s,
+                        &route->weighted_cost_s);
+    return true;
+}
+
+bool openride_routing_engine_calculate_snapped(
+    const OpenRideRoutingGraph *graph,
+    const OpenRideSnappedRoutingRequest *request,
+    OpenRideRoute *route,
+    char *error,
+    size_t error_size)
+{
+    if (!graph || !request || !route) {
+        set_error(error, error_size, "invalid snapped routing arguments");
+        return false;
+    }
+    if (!snap_valid_for_graph(graph, &request->start)
+        || !snap_valid_for_graph(graph, &request->destination)) {
+        set_error(error, error_size, "invalid snapped routing position");
+        return false;
+    }
+    if (request->profile < OPENRIDE_ROUTING_PROFILE_FASTEST
+        || request->profile > OPENRIDE_ROUTING_PROFILE_TRAIL) {
+        set_error(error, error_size, "unknown routing profile");
+        return false;
+    }
+
+    OpenRideRoutingRequest base = openride_routing_request_default();
+    base.profile = request->profile;
+    base.avoid_tolls = request->avoid_tolls;
+    base.avoid_ferries = request->avoid_ferries;
+    OpenRideEngineContext context = {graph, base};
+
+    OpenRideRoute best = {0};
+    bool have_best = false;
+    if (direct_same_segment_route(graph, request, &context, &best)) {
+        have_best = true;
+    }
+
+    OpenRideSnapEndpointOption starts[2];
+    OpenRideSnapEndpointOption destinations[2];
+    const uint32_t start_count = start_options(graph, &request->start, &context, starts);
+    const uint32_t destination_count = destination_options(
+        graph, &request->destination, &context, destinations);
+
+    for (uint32_t si = 0U; si < start_count; ++si) {
+        for (uint32_t di = 0U; di < destination_count; ++di) {
+            OpenRideRoutingRequest node_request = base;
+            node_request.start = starts[si].node;
+            node_request.destination = destinations[di].node;
+
+            OpenRideRoute candidate = {0};
+            char candidate_error[128] = {0};
+            if (!openride_routing_engine_calculate(graph,
+                                                   &node_request,
+                                                   &candidate,
+                                                   candidate_error,
+                                                   sizeof(candidate_error))) {
+                continue;
+            }
+
+            add_partial_metrics(starts[si].edge,
+                                starts[si].fraction,
+                                &context,
+                                &candidate.distance_m,
+                                &candidate.estimated_time_s,
+                                &candidate.weighted_cost_s);
+            add_partial_metrics(destinations[di].edge,
+                                destinations[di].fraction,
+                                &context,
+                                &candidate.distance_m,
+                                &candidate.estimated_time_s,
+                                &candidate.weighted_cost_s);
+
+            if (!build_snapped_geometry(graph,
+                                        &request->start,
+                                        &request->destination,
+                                        &candidate)) {
+                openride_route_destroy(&candidate);
+                openride_route_destroy(&best);
+                set_error(error, error_size, "unable to allocate snapped route geometry");
+                return false;
+            }
+
+            if (!have_best || candidate.weighted_cost_s < best.weighted_cost_s) {
+                openride_route_destroy(&best);
+                best = candidate;
+                memset(&candidate, 0, sizeof(candidate));
+                have_best = true;
+            }
+            openride_route_destroy(&candidate);
+        }
+    }
+
+    if (!have_best) {
+        set_error(error, error_size, "no route between snapped positions");
+        return false;
+    }
+
+    openride_route_destroy(route);
+    *route = best;
     set_error(error, error_size, "");
     return true;
 }

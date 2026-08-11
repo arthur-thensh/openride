@@ -1355,6 +1355,7 @@ static bool build_graph(ImportContext *context,
     if (ok) {
         context->stats.graph_node_count = graph->node_count;
         context->stats.graph_edge_count = graph->edge_count;
+        context->stats.graph_segment_count = graph->segment_index.segment_count;
     }
     return ok;
 }

@@ -43,5 +43,6 @@ int main(int argc, char **argv)
     printf("  noeuds manquants         : %" PRIu64 "\n", stats.missing_node_count);
     printf("  noeuds du graphe         : %" PRIu64 "\n", stats.graph_node_count);
     printf("  aretes dirigees          : %" PRIu64 "\n", stats.graph_edge_count);
+    printf("  segments geometriques    : %" PRIu64 "\n", stats.graph_segment_count);
     return 0;
 }

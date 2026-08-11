@@ -138,6 +138,73 @@ static void test_toll_avoidance(void)
     openride_routing_graph_destroy(&graph);
 }
 
+
+static void test_snapped_routing(void)
+{
+    OpenRideRoutingGraph graph = build_profile_fixture();
+    OpenRideRoutingSnap start = {0};
+    OpenRideRoutingSnap destination = {0};
+    OpenRideRoute route = {0};
+    char error[256] = {0};
+
+    assert(openride_routing_graph_snap_to_segment(
+        &graph, 50.3700, 3.0825, 20.0, &start));
+    assert(openride_routing_graph_snap_to_segment(
+        &graph, 50.3700, 3.0950, 20.0, &destination));
+
+    OpenRideSnappedRoutingRequest request = openride_snapped_routing_request_default();
+    request.start = start;
+    request.destination = destination;
+    request.profile = OPENRIDE_ROUTING_PROFILE_FASTEST;
+
+    assert(openride_routing_engine_calculate_snapped(
+        &graph, &request, &route, error, sizeof(error)));
+    assert(route.geometry_count >= 2U);
+    assert(fabs(route.geometry[0].lon - start.lon) < 1e-8);
+    assert(fabs(route.geometry[route.geometry_count - 1U].lon - destination.lon) < 1e-8);
+    assert(route.distance_m > 1200.0 && route.distance_m < 1300.0);
+
+    openride_route_destroy(&route);
+    openride_routing_graph_destroy(&graph);
+}
+
+static void test_snapped_one_way(void)
+{
+    OpenRideRoutingGraph graph = {0};
+    OpenRideRoutingGraphBuilder *builder = openride_routing_graph_builder_create();
+    assert(builder != NULL);
+    const OpenRideRoutingNodeId a = openride_routing_graph_builder_add_node(builder, 50.0, 3.0);
+    const OpenRideRoutingNodeId b = openride_routing_graph_builder_add_node(builder, 50.0, 3.01);
+    OpenRideRoutingEdgeAttributes road = openride_routing_edge_attributes_default();
+    road.length_m = 1000.0;
+    road.max_speed_kph = 50U;
+    assert(openride_routing_graph_builder_add_directed_edge(builder, a, b, &road));
+    char error[256] = {0};
+    assert(openride_routing_graph_builder_build(builder, &graph, error, sizeof(error)));
+    openride_routing_graph_builder_destroy(builder);
+
+    OpenRideRoutingSnap s1 = {0};
+    OpenRideRoutingSnap s2 = {0};
+    assert(openride_routing_graph_snap_to_segment(&graph, 50.0, 3.002, 20.0, &s1));
+    assert(openride_routing_graph_snap_to_segment(&graph, 50.0, 3.008, 20.0, &s2));
+
+    OpenRideSnappedRoutingRequest request = openride_snapped_routing_request_default();
+    OpenRideRoute route = {0};
+    request.start = s1;
+    request.destination = s2;
+    assert(openride_routing_engine_calculate_snapped(
+        &graph, &request, &route, error, sizeof(error)));
+    assert(route.distance_m > 590.0 && route.distance_m < 610.0);
+    openride_route_destroy(&route);
+
+    request.start = s2;
+    request.destination = s1;
+    assert(!openride_routing_engine_calculate_snapped(
+        &graph, &request, &route, error, sizeof(error)));
+
+    openride_routing_graph_destroy(&graph);
+}
+
 static void test_no_route_and_same_node(void)
 {
     OpenRideRoutingGraph graph = {0};
@@ -169,6 +236,8 @@ int main(void)
     test_fastest_profile();
     test_trail_profile();
     test_toll_avoidance();
+    test_snapped_routing();
+    test_snapped_one_way();
     test_no_route_and_same_node();
     puts("Routing engine tests: OK");
     return 0;

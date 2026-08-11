@@ -9,8 +9,11 @@
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
 #define OPENRIDE_GRAPH_MAGIC "ORGRAPH1"
 #define OPENRIDE_SPATIAL_INDEX_MAGIC "ORIDX001"
+#define OPENRIDE_SEGMENT_INDEX_MAGIC "ORSEG001"
 #define OPENRIDE_GRAPH_LEGACY_VERSION 1U
+#define OPENRIDE_GRAPH_V2_VERSION 2U
 #define OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX 1U
+#define OPENRIDE_GRAPH_FEATURE_SEGMENT_INDEX 2U
 #define OPENRIDE_NODE_RECORD_SIZE 16U
 #define OPENRIDE_EDGE_RECORD_SIZE 16U
 
@@ -353,6 +356,10 @@ bool openride_routing_graph_builder_build(
         openride_routing_graph_destroy(&result);
         return false;
     }
+    if (!openride_routing_graph_build_segment_index(&result, error, error_size)) {
+        openride_routing_graph_destroy(&result);
+        return false;
+    }
 
     if (!openride_routing_graph_validate(&result, error, error_size)) {
         openride_routing_graph_destroy(&result);
@@ -371,6 +378,7 @@ void openride_routing_graph_destroy(OpenRideRoutingGraph *graph)
     free(graph->nodes);
     free(graph->edges);
     openride_routing_spatial_index_destroy(&graph->spatial_index);
+    openride_routing_segment_index_destroy(&graph->segment_index);
     memset(graph, 0, sizeof(*graph));
 }
 
@@ -418,6 +426,9 @@ bool openride_routing_graph_validate(const OpenRideRoutingGraph *graph,
     }
 
     if (!openride_routing_spatial_index_validate(graph, error, error_size)) {
+        return false;
+    }
+    if (!openride_routing_segment_index_validate(graph, error, error_size)) {
         return false;
     }
 
@@ -568,6 +579,93 @@ static bool read_spatial_index(FILE *file,
     return true;
 }
 
+static bool write_segment_index(FILE *file,
+                                const OpenRideRoutingGraph *graph)
+{
+    const OpenRideRoutingSegmentIndex *index = &graph->segment_index;
+    const uint32_t cell_count = graph->spatial_index.cell_count;
+    bool ok = write_exact(file, OPENRIDE_SEGMENT_INDEX_MAGIC, 8U)
+           && write_u32_le(file, index->segment_count)
+           && write_u32_le(file, index->ref_count)
+           && write_u32_le(file, cell_count);
+
+    for (uint32_t i = 0U; ok && i < index->segment_count; ++i) {
+        ok = write_u32_le(file, index->segments[i].a)
+          && write_u32_le(file, index->segments[i].b);
+    }
+    for (uint32_t i = 0U; ok && i <= cell_count; ++i) {
+        ok = write_u32_le(file, index->cell_offsets[i]);
+    }
+    for (uint32_t i = 0U; ok && i < index->ref_count; ++i) {
+        ok = write_u32_le(file, index->segment_ids[i]);
+    }
+    return ok;
+}
+
+static bool read_segment_index(FILE *file,
+                               OpenRideRoutingGraph *graph,
+                               char *error,
+                               size_t error_size)
+{
+    char magic[8];
+    uint32_t cell_count = 0U;
+    OpenRideRoutingSegmentIndex index;
+    memset(&index, 0, sizeof(index));
+
+    bool ok = read_exact(file, magic, sizeof(magic))
+           && read_u32_le(file, &index.segment_count)
+           && read_u32_le(file, &index.ref_count)
+           && read_u32_le(file, &cell_count);
+
+    if (!ok || memcmp(magic, OPENRIDE_SEGMENT_INDEX_MAGIC, 8U) != 0) {
+        set_error(error, error_size, "invalid routing segment index header");
+        return false;
+    }
+    if (cell_count != graph->spatial_index.cell_count
+        || index.segment_count > graph->edge_count) {
+        set_error(error, error_size, "invalid routing segment index dimensions");
+        return false;
+    }
+
+    if (index.segment_count > 0U) {
+        index.segments = calloc(index.segment_count, sizeof(*index.segments));
+        if (!index.segments) ok = false;
+    }
+    if (ok && cell_count > 0U) {
+        index.cell_offsets = calloc((size_t)cell_count + 1U,
+                                    sizeof(*index.cell_offsets));
+        if (!index.cell_offsets) ok = false;
+    }
+    if (ok && index.ref_count > 0U) {
+        index.segment_ids = malloc((size_t)index.ref_count * sizeof(*index.segment_ids));
+        if (!index.segment_ids) ok = false;
+    }
+
+    for (uint32_t i = 0U; ok && i < index.segment_count; ++i) {
+        ok = read_u32_le(file, &index.segments[i].a)
+          && read_u32_le(file, &index.segments[i].b);
+    }
+    for (uint32_t i = 0U; ok && i <= cell_count; ++i) {
+        ok = read_u32_le(file, &index.cell_offsets[i]);
+    }
+    for (uint32_t i = 0U; ok && i < index.ref_count; ++i) {
+        ok = read_u32_le(file, &index.segment_ids[i]);
+    }
+
+    if (!ok) {
+        openride_routing_segment_index_destroy(&index);
+        set_error(error, error_size, "routing segment index is truncated");
+        return false;
+    }
+
+    graph->segment_index = index;
+    if (!openride_routing_segment_index_validate(graph, error, error_size)) {
+        openride_routing_segment_index_destroy(&graph->segment_index);
+        return false;
+    }
+    return true;
+}
+
 bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,
                                  const char *path,
                                  char *error,
@@ -590,7 +688,8 @@ bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,
            && write_u32_le(file, graph->edge_count)
            && write_u32_le(file, OPENRIDE_NODE_RECORD_SIZE)
            && write_u32_le(file, OPENRIDE_EDGE_RECORD_SIZE)
-           && write_u32_le(file, OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX);
+           && write_u32_le(file, OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX
+                                | OPENRIDE_GRAPH_FEATURE_SEGMENT_INDEX);
 
     for (uint32_t i = 0U; ok && i < graph->node_count; ++i) {
         const OpenRideRoutingNode *node = &graph->nodes[i];
@@ -614,6 +713,7 @@ bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,
     }
 
     if (ok) ok = write_spatial_index(file, graph);
+    if (ok) ok = write_segment_index(file, graph);
     if (fclose(file) != 0) ok = false;
 
     if (!ok) {
@@ -665,6 +765,7 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
     }
 
     if ((version != OPENRIDE_GRAPH_LEGACY_VERSION
+         && version != OPENRIDE_GRAPH_V2_VERSION
          && version != OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION)
         || node_record_size != OPENRIDE_NODE_RECORD_SIZE
         || edge_record_size != OPENRIDE_EDGE_RECORD_SIZE) {
@@ -711,12 +812,20 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
         edge->surface = class_and_surface[1];
     }
 
-    if (ok && version == OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION) {
+    if (ok && version >= OPENRIDE_GRAPH_V2_VERSION) {
         if ((features & OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX) == 0U) {
             ok = false;
-            set_error(error, error_size, "v2 routing graph has no spatial index");
+            set_error(error, error_size, "routing graph has no node spatial index");
         } else {
             ok = read_spatial_index(file, &loaded, error, error_size);
+        }
+    }
+    if (ok && version == OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION) {
+        if ((features & OPENRIDE_GRAPH_FEATURE_SEGMENT_INDEX) == 0U) {
+            ok = false;
+            set_error(error, error_size, "v3 routing graph has no segment index");
+        } else {
+            ok = read_segment_index(file, &loaded, error, error_size);
         }
     }
 
@@ -730,9 +839,15 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
         return false;
     }
 
-    /* v0.9 files remain readable. Their index is rebuilt once at load time. */
+    /* Older files remain readable. Missing indexes are rebuilt once at load time. */
     if (version == OPENRIDE_GRAPH_LEGACY_VERSION) {
         if (!openride_routing_graph_build_spatial_index(&loaded, error, error_size)) {
+            openride_routing_graph_destroy(&loaded);
+            return false;
+        }
+    }
+    if (version < OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION) {
+        if (!openride_routing_graph_build_segment_index(&loaded, error, error_size)) {
             openride_routing_graph_destroy(&loaded);
             return false;
         }

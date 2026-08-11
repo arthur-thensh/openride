@@ -6,7 +6,8 @@
 #include <stdint.h>
 
 #define OPENRIDE_ROUTING_NODE_NONE UINT32_MAX
-#define OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION 2U
+#define OPENRIDE_ROUTING_SEGMENT_NONE UINT32_MAX
+#define OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION 3U
 
 typedef uint32_t OpenRideRoutingNodeId;
 
@@ -82,12 +83,36 @@ typedef struct OpenRideRoutingSpatialIndex {
     uint32_t *node_ids;     /* node_count entries */
 } OpenRideRoutingSpatialIndex;
 
+typedef struct OpenRideRoutingSegment {
+    uint32_t a;
+    uint32_t b;
+} OpenRideRoutingSegment;
+
+typedef struct OpenRideRoutingSegmentIndex {
+    uint32_t segment_count;
+    uint32_t ref_count;
+    OpenRideRoutingSegment *segments;
+    uint32_t *cell_offsets; /* spatial_index.cell_count + 1 entries */
+    uint32_t *segment_ids;  /* ref_count entries */
+} OpenRideRoutingSegmentIndex;
+
+typedef struct OpenRideRoutingSnap {
+    uint32_t segment_id;
+    OpenRideRoutingNodeId a;
+    OpenRideRoutingNodeId b;
+    double fraction; /* 0 = a, 1 = b */
+    double lat;
+    double lon;
+    double distance_m;
+} OpenRideRoutingSnap;
+
 typedef struct OpenRideRoutingGraph {
     OpenRideRoutingNode *nodes;
     OpenRideRoutingEdge *edges;
     uint32_t node_count;
     uint32_t edge_count;
     OpenRideRoutingSpatialIndex spatial_index;
+    OpenRideRoutingSegmentIndex segment_index;
 } OpenRideRoutingGraph;
 
 typedef struct OpenRideRoutingEdgeAttributes {
@@ -169,6 +194,32 @@ OpenRideRoutingNodeId openride_routing_graph_nearest_node_linear(
     double lat,
     double lon,
     double *distance_m);
+
+bool openride_routing_graph_build_segment_index(OpenRideRoutingGraph *graph,
+                                                char *error,
+                                                size_t error_size);
+
+bool openride_routing_graph_has_segment_index(const OpenRideRoutingGraph *graph);
+
+bool openride_routing_segment_index_validate(const OpenRideRoutingGraph *graph,
+                                             char *error,
+                                             size_t error_size);
+
+void openride_routing_segment_index_destroy(OpenRideRoutingSegmentIndex *index);
+
+bool openride_routing_graph_snap_to_segment(
+    const OpenRideRoutingGraph *graph,
+    double lat,
+    double lon,
+    double max_distance_m,
+    OpenRideRoutingSnap *snap);
+
+bool openride_routing_graph_snap_to_segment_linear(
+    const OpenRideRoutingGraph *graph,
+    double lat,
+    double lon,
+    double max_distance_m,
+    OpenRideRoutingSnap *snap);
 
 /* Deterministic little-endian on-disk format (.orgraph). */
 bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,

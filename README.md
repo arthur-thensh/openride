@@ -1,69 +1,119 @@
-# OpenRide v0.10 — index spatial du graphe routier
+# OpenRide v0.11 — accrochage aux segments routiers
 
-La v0.10 accélère l'accrochage d'une position GPS ou d'un marqueur au réseau
-routier. Le calcul reste entièrement hors ligne et le cœur reste écrit en C17.
+La v0.11 remplace l'accrochage au **nœud OSM le plus proche** par un véritable
+accrochage au **segment routier le plus proche**. Le calcul reste entièrement
+hors ligne et le cœur reste écrit en C17.
 
-## Nouveautés v0.10
+## Nouveautés v0.11
 
-- grille spatiale compacte intégrée au graphe routier ;
-- recherche locale du nœud routier le plus proche au lieu de parcourir tous les
-  nœuds ;
-- nouvel index sauvegardé directement dans le fichier `.orgraph` ;
-- format `.orgraph` v2 ;
-- lecture toujours compatible avec les fichiers `.orgraph` v1 de la v0.9 ;
-- outil de benchmark comparant l'index à la recherche linéaire ;
-- tests vérifiant que les deux méthodes retournent exactement le même nœud.
+- index spatial des segments routiers ;
+- projection exacte d'un point choisi sur le segment OSM proche ;
+- distance entre la position choisie et la route ;
+- prise en compte du sens de circulation lors du départ et de l'arrivée ;
+- départ et arrivée possibles au milieu d'un segment ;
+- géométrie d'itinéraire commençant et finissant au point projeté ;
+- visualisation du point d'accrochage sur la carte ;
+- format `.orgraph` v3 ;
+- compatibilité de lecture avec les formats v1 (v0.9) et v2 (v0.10) ;
+- benchmark dédié à l'index des segments.
 
-## Pourquoi cet index
+## Pourquoi ce changement
 
-Le graphe Nord-Pas-de-Calais de la v0.9 contient environ 3 millions de nœuds.
-Avant la v0.10, chaque sélection sur la carte pouvait nécessiter de comparer la
-position à chacun de ces nœuds.
-
-La v0.10 découpe l'étendue géographique du graphe en cellules d'environ
-`0.01° × 0.01°` (la taille augmente automatiquement pour les très grandes
-zones). Chaque cellule contient uniquement les identifiants des nœuds présents
-dans cette zone.
+Jusqu'à la v0.10, un clic au milieu d'une route était ramené à une intersection
+ou à un nœud OSM proche :
 
 ```text
-Position GPS
-    │
-    ▼
-cellule spatiale
-    │
-    ├── nœud 18031
-    ├── nœud 18044
-    ├── nœud 18102
-    └── ...
-    │
-    ▼
-comparaison locale
-    │
-    ▼
-nœud le plus proche
+position choisie
+       ●
+        \
+         \
+A────────────B
 ```
 
-La distance géographique finale reste calculée exactement sur les coordonnées
-OSM. L'index sert uniquement à réduire le nombre de candidats à examiner.
+La v0.11 projette maintenant la position directement sur la route :
 
-## Format `.orgraph` v2
+```text
+position choisie
+       ●
+       │  7.2 m
+       ▼
+A──────●────────B
+       ^
+   position utilisée
+   pour le routage
+```
 
-Le fichier contient maintenant :
+Le moteur connaît aussi la fraction du segment :
+
+```text
+A ───────────────────────── B
+0 %          43 %          100 %
+              ●
+```
+
+Cette information sera réutilisée plus tard pour le suivi GPS et la navigation.
+
+## Index des segments
+
+Le graphe contient des arêtes dirigées pour respecter les sens uniques. Pour le
+map matching, OpenRide construit en plus une liste de **segments géométriques
+uniques** : une route bidirectionnelle n'est donc indexée qu'une seule fois.
+
+Les segments sont placés dans la même grille géographique que l'index des
+nœuds. Un segment traversant plusieurs cellules est référencé dans chacune des
+cellules traversées.
+
+```text
+┌──────┬──────┬──────┐
+│      │      │      │
+├──────┼──────┼──────┤
+│   ╲  │      │      │
+│    ╲─┼──────┼─╲    │
+├──────┼──────┼──────┤
+│      │      │      │
+└──────┴──────┴──────┘
+```
+
+Une recherche ne parcourt donc que les segments des cellules autour de la
+position.
+
+## Routage depuis le milieu d'une route
+
+Pour un point projeté sur un segment `A—B`, le moteur examine les directions
+réellement autorisées :
+
+```text
+A ─────────●───────── B
+           départ
+
+A → B autorisé : le moteur peut rejoindre B
+B → A autorisé : le moteur peut rejoindre A
+```
+
+Sur une voie à sens unique, la direction interdite n'est pas utilisée. Le même
+principe est appliqué à la destination.
+
+Le moteur teste ensuite les combinaisons valides et conserve celle ayant le
+meilleur coût pour le profil moto sélectionné.
+
+## Format `.orgraph` v3
 
 ```text
 ORGRAPH1
-├── en-tête
+├── en-tête v3
 ├── nœuds routiers
 ├── arêtes dirigées
-└── ORIDX001
-    ├── origine et taille de cellule
+├── ORIDX001
+│   └── index spatial des nœuds
+└── ORSEG001
+    ├── segments uniques
     ├── offsets des cellules
-    └── identifiants de nœuds
+    └── références vers les segments
 ```
 
-Les anciens fichiers v0.9 restent lisibles. Dans ce cas, OpenRide reconstruit
-l'index en RAM au chargement. Pour éviter ce travail à chaque démarrage, il est
-recommandé de régénérer une fois le graphe avec la v0.10.
+Un fichier v0.9 ou v0.10 peut toujours être chargé. Dans ce cas, l'index des
+segments est reconstruit en RAM. Il est cependant recommandé de régénérer le
+graphe afin de stocker directement cet index dans le fichier.
 
 ## Compilation
 
@@ -83,87 +133,72 @@ Routing engine tests: OK
 OSM import tests: OK
 ```
 
-## Régénérer le graphe v0.10
+## Régénérer le graphe v0.11
 
-Le fichier `.osm.pbf` déjà téléchargé avec la v0.9 peut être réutilisé :
+Il n'est pas nécessaire de télécharger à nouveau le fichier OSM :
 
 ```sh
 ./scripts/prepare_routing_graph.sh
 ```
 
-Cela remplace :
+Le fichier :
 
 ```text
 data/routing/nord-pas-de-calais.orgraph
 ```
 
-par un fichier v2 contenant directement l'index spatial.
+est alors réécrit au format v3 avec les deux index.
 
-Cette opération est entièrement hors ligne.
+## Benchmark de l'accrochage aux segments
 
-## Mesurer le gain
-
-Après compilation et préparation du graphe :
+Après régénération :
 
 ```sh
-./scripts/benchmark_spatial_index.sh
+./scripts/benchmark_segment_index.sh
 ```
 
-Le benchmark :
+Le programme compare quelques recherches exhaustives à plusieurs milliers de
+recherches indexées et vérifie que le segment obtenu est identique.
 
-1. charge le vrai graphe régional ;
-2. exécute quelques recherches exhaustives ;
-3. vérifie que l'index retrouve exactement les mêmes nœuds ;
-4. effectue plusieurs milliers de recherches indexées ;
-5. affiche le temps moyen et le facteur d'accélération.
-
-Exemple de sortie :
-
-```text
-OpenRide spatial index benchmark
-  noeuds      : 3008935
-  cellules    : ...
-
-Recherche lineaire : ... ms / requete
-Index spatial       : ... ms / requete
-Acceleration        : x...
-```
-
-Les valeurs exactes dépendent du Mac et du graphe.
-
-## Lancer l'application
+## Lancer OpenRide
 
 ```sh
 ./scripts/run.sh
 ```
 
-Le comportement visible reste celui de la v0.9 : départ, destination et
-itinéraire réel hors ligne. La différence est interne : l'accrochage des deux
-marqueurs au réseau utilise maintenant l'index spatial.
+Choisis un départ et une destination. Les marqueurs restent exactement à
+l'endroit cliqué, tandis qu'un petit point bleu/blanc montre la position
+réellement utilisée sur la route. Le panneau indique la distance d'accrochage :
+
+```text
+accroche segment: depart 6.4 m | arrivee 2.1 m
+```
+
+L'itinéraire bleu commence et se termine désormais sur ces positions projetées,
+plutôt qu'aux nœuds OSM les plus proches.
 
 ## Architecture
 
 ```text
-OSM PBF
-   │
-   ▼
-importateur C
-   │
-   ▼
-.orgraph v2
-├── nœuds
-├── arêtes
-└── index spatial
+position utilisateur
        │
        ▼
-position / GPS
+index spatial des segments
        │
        ▼
-nœud routier proche
+projection sur la route
        │
-       ▼
-moteur de routage hors ligne
+       ├── segment
+       ├── fraction 0..1
+       ├── distance à la route
+       └── sens autorisés
+                 │
+                 ▼
+       moteur de routage hors ligne
+                 │
+                 ▼
+       itinéraire depuis/vers
+       le milieu des segments
 ```
 
-La prochaine étape prévue est le **map matching** : accrocher une position au
-segment routier réel plutôt qu'au seul nœud le plus proche.
+Cette étape prépare directement le futur **suivi GPS / map matching dynamique**.

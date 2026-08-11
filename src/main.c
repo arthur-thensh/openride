@@ -261,7 +261,7 @@ static void draw_route(SDL_Renderer *renderer,
                        int viewport_width,
                        int viewport_height)
 {
-    if (!graph || !route || route->node_count < 2U) return;
+    if (!route) return;
 
     for (int pass = 0; pass < 2; ++pass) {
         if (pass == 0) {
@@ -271,6 +271,31 @@ static void draw_route(SDL_Renderer *renderer,
         }
         const int width = pass == 0 ? 8 : 4;
 
+        if (route->geometry_count >= 2U && route->geometry) {
+            for (uint32_t i = 1U; i < route->geometry_count; ++i) {
+                const OpenRidePointD a = openride_geo_to_screen(
+                    camera,
+                    route->geometry[i - 1U].lat,
+                    route->geometry[i - 1U].lon,
+                    viewport_width,
+                    viewport_height);
+                const OpenRidePointD b = openride_geo_to_screen(
+                    camera,
+                    route->geometry[i].lat,
+                    route->geometry[i].lon,
+                    viewport_width,
+                    viewport_height);
+                draw_thick_line(renderer,
+                                (float)a.x,
+                                (float)a.y,
+                                (float)b.x,
+                                (float)b.y,
+                                width);
+            }
+            continue;
+        }
+
+        if (!graph || route->node_count < 2U) continue;
         for (uint32_t i = 1U; i < route->node_count; ++i) {
             const OpenRideRoutingNodeId a_id = route->nodes[i - 1U];
             const OpenRideRoutingNodeId b_id = route->nodes[i];
@@ -308,14 +333,20 @@ static bool recalculate_route(const OpenRideRoutingGraph *graph,
                               const OpenRideMapSelection *selection,
                               OpenRideRoutingProfile profile,
                               OpenRideRoute *route,
-                              double *start_snap_m,
-                              double *destination_snap_m,
+                              OpenRideRoutingSnap *start_snap,
+                              OpenRideRoutingSnap *destination_snap,
                               char *status,
                               size_t status_size)
 {
     openride_route_destroy(route);
-    if (start_snap_m) *start_snap_m = 0.0;
-    if (destination_snap_m) *destination_snap_m = 0.0;
+    if (start_snap) {
+        memset(start_snap, 0, sizeof(*start_snap));
+        start_snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    }
+    if (destination_snap) {
+        memset(destination_snap, 0, sizeof(*destination_snap));
+        destination_snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    }
 
     if (!graph_loaded) {
         snprintf(status, status_size, "graphe routier non installe");
@@ -326,44 +357,39 @@ static bool recalculate_route(const OpenRideRoutingGraph *graph,
         return false;
     }
 
-    double start_distance = 0.0;
-    double destination_distance = 0.0;
-    const OpenRideRoutingNodeId start = openride_routing_graph_nearest_node(
-        graph,
-        selection->start.lat,
-        selection->start.lon,
-        &start_distance);
-    const OpenRideRoutingNodeId destination = openride_routing_graph_nearest_node(
-        graph,
-        selection->destination.lat,
-        selection->destination.lon,
-        &destination_distance);
+    OpenRideRoutingSnap local_start = {0};
+    OpenRideRoutingSnap local_destination = {0};
+    local_start.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    local_destination.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
 
-    if (start_snap_m) *start_snap_m = start_distance;
-    if (destination_snap_m) *destination_snap_m = destination_distance;
-
-    if (start == OPENRIDE_ROUTING_NODE_NONE
-        || destination == OPENRIDE_ROUTING_NODE_NONE) {
-        snprintf(status, status_size, "aucun noeud routier proche");
-        return false;
-    }
-    if (start_distance > OPENRIDE_MAX_SNAP_DISTANCE_M
-        || destination_distance > OPENRIDE_MAX_SNAP_DISTANCE_M) {
+    if (!openride_routing_graph_snap_to_segment(graph,
+                                                selection->start.lat,
+                                                selection->start.lon,
+                                                OPENRIDE_MAX_SNAP_DISTANCE_M,
+                                                &local_start)
+        || !openride_routing_graph_snap_to_segment(graph,
+                                                   selection->destination.lat,
+                                                   selection->destination.lon,
+                                                   OPENRIDE_MAX_SNAP_DISTANCE_M,
+                                                   &local_destination)) {
         snprintf(status, status_size, "point trop loin du reseau routier");
         return false;
     }
 
-    OpenRideRoutingRequest request = openride_routing_request_default();
-    request.start = start;
-    request.destination = destination;
+    if (start_snap) *start_snap = local_start;
+    if (destination_snap) *destination_snap = local_destination;
+
+    OpenRideSnappedRoutingRequest request = openride_snapped_routing_request_default();
+    request.start = local_start;
+    request.destination = local_destination;
     request.profile = profile;
 
     char route_error[256] = {0};
-    if (!openride_routing_engine_calculate(graph,
-                                           &request,
-                                           route,
-                                           route_error,
-                                           sizeof(route_error))) {
+    if (!openride_routing_engine_calculate_snapped(graph,
+                                                   &request,
+                                                   route,
+                                                   route_error,
+                                                   sizeof(route_error))) {
         snprintf(status,
                  status_size,
                  "itineraire impossible: %.180s",
@@ -371,8 +397,44 @@ static bool recalculate_route(const OpenRideRoutingGraph *graph,
         return false;
     }
 
-    snprintf(status, status_size, "itineraire calcule hors ligne");
+    snprintf(status, status_size, "itineraire calcule sur segments");
     return true;
+}
+
+static void draw_snap_connector(SDL_Renderer *renderer,
+                                const OpenRideMapCamera *camera,
+                                const OpenRideMapSelection *selection,
+                                const OpenRideRoutingSnap *snap,
+                                OpenRideSelectionMarker marker,
+                                int viewport_width,
+                                int viewport_height)
+{
+    if (!snap || snap->segment_id == OPENRIDE_ROUTING_SEGMENT_NONE) return;
+
+    const OpenRideGeoPosition raw = marker == OPENRIDE_MARKER_START
+        ? selection->start : selection->destination;
+    const OpenRidePointD raw_point = openride_geo_to_screen(camera,
+                                                             raw.lat,
+                                                             raw.lon,
+                                                             viewport_width,
+                                                             viewport_height);
+    const OpenRidePointD snapped = openride_geo_to_screen(camera,
+                                                           snap->lat,
+                                                           snap->lon,
+                                                           viewport_width,
+                                                           viewport_height);
+
+    SDL_SetRenderDrawColor(renderer, 53, 63, 72, 190);
+    draw_thick_line(renderer,
+                    (float)raw_point.x,
+                    (float)raw_point.y,
+                    (float)snapped.x,
+                    (float)snapped.y,
+                    2);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
+    draw_filled_circle(renderer, (float)snapped.x, (float)snapped.y, 5.0f);
+    SDL_SetRenderDrawColor(renderer, 37, 101, 173, SDL_ALPHA_OPAQUE);
+    draw_filled_circle(renderer, (float)snapped.x, (float)snapped.y, 3.0f);
 }
 
 static void draw_selection(SDL_Renderer *renderer,
@@ -451,8 +513,8 @@ static void draw_overlay(SDL_Renderer *renderer,
                          const OpenRideRoute *route,
                          bool route_valid,
                          const char *route_status,
-                         double start_snap_m,
-                         double destination_snap_m,
+                         const OpenRideRoutingSnap *start_snap,
+                         const OpenRideRoutingSnap *destination_snap,
                          int viewport_width,
                          int viewport_height)
 {
@@ -468,7 +530,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.10");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.11");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -535,9 +597,9 @@ static void draw_overlay(SDL_Renderer *renderer,
         SDL_RenderDebugTextFormat(renderer,
                                   panel_x + 12.0f,
                                   panel_y + 94.0f,
-                                  "accroche reseau: depart %.0f m | arrivee %.0f m",
-                                  start_snap_m,
-                                  destination_snap_m);
+                                  "accroche segment: depart %.1f m | arrivee %.1f m",
+                                  start_snap ? start_snap->distance_m : 0.0,
+                                  destination_snap ? destination_snap->distance_m : 0.0);
     } else {
         SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
         SDL_RenderDebugText(renderer,
@@ -685,9 +747,10 @@ int main(int argc, char **argv)
                     error[0] ? error : "unknown error");
         } else {
             fprintf(stdout,
-                    "Routing graph loaded: %u nodes, %u directed edges, %u spatial cells\n",
+                    "Routing graph loaded: %u nodes, %u directed edges, %u segments, %u spatial cells\n",
                     routing_graph.node_count,
                     routing_graph.edge_count,
+                    routing_graph.segment_index.segment_count,
                     routing_graph.spatial_index.cell_count);
         }
     } else {
@@ -704,8 +767,10 @@ int main(int argc, char **argv)
     OpenRideRoutingProfile routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
     bool route_valid = false;
     bool route_dirty = false;
-    double start_snap_m = 0.0;
-    double destination_snap_m = 0.0;
+    OpenRideRoutingSnap start_snap = {0};
+    OpenRideRoutingSnap destination_snap = {0};
+    start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
     char route_status[256];
     snprintf(route_status,
              sizeof(route_status),
@@ -782,6 +847,8 @@ int main(int argc, char **argv)
                         openride_route_destroy(&route);
                         route_valid = false;
                         route_dirty = false;
+                        start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+                        destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
                         snprintf(route_status,
                                  sizeof(route_status),
                                  "%s",
@@ -944,8 +1011,8 @@ int main(int argc, char **argv)
                                             &selection,
                                             routing_profile,
                                             &route,
-                                            &start_snap_m,
-                                            &destination_snap_m,
+                                            &start_snap,
+                                            &destination_snap,
                                             route_status,
                                             sizeof(route_status));
             route_dirty = false;
@@ -974,6 +1041,22 @@ int main(int argc, char **argv)
                        width,
                        height);
         }
+        if (route_valid) {
+            draw_snap_connector(renderer,
+                                &camera,
+                                &selection,
+                                &start_snap,
+                                OPENRIDE_MARKER_START,
+                                width,
+                                height);
+            draw_snap_connector(renderer,
+                                &camera,
+                                &selection,
+                                &destination_snap,
+                                OPENRIDE_MARKER_DESTINATION,
+                                width,
+                                height);
+        }
         draw_selection(renderer,
                        &camera,
                        &selection,
@@ -991,8 +1074,8 @@ int main(int argc, char **argv)
                      &route,
                      route_valid,
                      route_status,
-                     start_snap_m,
-                     destination_snap_m,
+                     &start_snap,
+                     &destination_snap,
                      width,
                      height);
         SDL_RenderPresent(renderer);

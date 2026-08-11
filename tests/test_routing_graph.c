@@ -49,6 +49,9 @@ static void test_builder_and_adjacency(void)
     assert(graph.edge_count == 5U);
     assert(openride_routing_graph_has_spatial_index(&graph));
     assert(graph.spatial_index.cell_count > 0U);
+    assert(openride_routing_graph_has_segment_index(&graph));
+    assert(graph.segment_index.segment_count == 3U);
+    assert(graph.segment_index.ref_count >= graph.segment_index.segment_count);
     assert(graph.nodes[0].first_edge == 0U);
     assert(graph.nodes[0].edge_count == 1U);
     assert(graph.nodes[1].first_edge == 1U);
@@ -86,6 +89,28 @@ static void test_nearest_node(void)
     assert(linear == nearest);
     assert(fabs(linear_distance_m - distance_m) < 0.001);
     assert(distance_m < 5.0);
+
+    openride_routing_graph_destroy(&graph);
+}
+
+
+static void test_nearest_segment(void)
+{
+    OpenRideRoutingGraph graph = build_fixture();
+    OpenRideRoutingSnap indexed = {0};
+    OpenRideRoutingSnap linear = {0};
+
+    assert(openride_routing_graph_snap_to_segment(
+        &graph, 50.37148, 3.08152, 100.0, &indexed));
+    assert(openride_routing_graph_snap_to_segment_linear(
+        &graph, 50.37148, 3.08152, 100.0, &linear));
+
+    assert(indexed.segment_id == linear.segment_id);
+    assert(indexed.a == linear.a);
+    assert(indexed.b == linear.b);
+    assert(fabs(indexed.distance_m - linear.distance_m) < 0.001);
+    assert(indexed.distance_m < 10.0);
+    assert(indexed.fraction > 0.45 && indexed.fraction < 0.55);
 
     openride_routing_graph_destroy(&graph);
 }
@@ -161,6 +186,21 @@ static void test_binary_roundtrip(void)
                   graph.spatial_index.node_ids,
                   (size_t)graph.node_count * sizeof(graph.spatial_index.node_ids[0])) == 0);
 
+    assert(loaded.segment_index.segment_count == graph.segment_index.segment_count);
+    assert(loaded.segment_index.ref_count == graph.segment_index.ref_count);
+    assert(memcmp(loaded.segment_index.segments,
+                  graph.segment_index.segments,
+                  (size_t)graph.segment_index.segment_count
+                      * sizeof(graph.segment_index.segments[0])) == 0);
+    assert(memcmp(loaded.segment_index.cell_offsets,
+                  graph.segment_index.cell_offsets,
+                  ((size_t)graph.spatial_index.cell_count + 1U)
+                      * sizeof(graph.segment_index.cell_offsets[0])) == 0);
+    assert(memcmp(loaded.segment_index.segment_ids,
+                  graph.segment_index.segment_ids,
+                  (size_t)graph.segment_index.ref_count
+                      * sizeof(graph.segment_index.segment_ids[0])) == 0);
+
     remove(path);
     openride_routing_graph_destroy(&loaded);
     openride_routing_graph_destroy(&graph);
@@ -185,6 +225,7 @@ int main(void)
 {
     test_builder_and_adjacency();
     test_nearest_node();
+    test_nearest_segment();
     test_spatial_index_matches_linear();
     test_binary_roundtrip();
     test_invalid_inputs();
