@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.11.2 LANGUAGES C)
+project(OpenRide VERSION 0.12.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -25,6 +25,7 @@ add_library(openride_core STATIC
     src/core/routing_segment_index.c
     src/core/pathfinder.c
     src/core/routing_engine.c
+    src/core/loop_generator.c
     src/osm/osm_import.c
     src/map/mbtiles.c
     src/map/mvt.c
@@ -118,6 +119,21 @@ else()
     target_compile_options(openride_segment_benchmark PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_executable(openride_loop_benchmark
+    src/tools/loop_benchmark_main.c
+)
+
+target_link_libraries(openride_loop_benchmark
+    PRIVATE
+        openride_core
+)
+
+if(MSVC)
+    target_compile_options(openride_loop_benchmark PRIVATE /W4)
+else()
+    target_compile_options(openride_loop_benchmark PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 if(OPENRIDE_BUILD_TESTS)
     enable_testing()
 
@@ -165,6 +181,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_routing_engine PRIVATE openride_core)
     add_test(NAME routing_engine COMMAND test_routing_engine)
+
+    add_executable(test_loop_generator
+        tests/test_loop_generator.c
+    )
+    target_link_libraries(test_loop_generator PRIVATE openride_core)
+    add_test(NAME loop_generator COMMAND test_loop_generator)
 
     add_executable(test_osm_import
         tests/test_osm_import.c
