@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define OPENRIDE_ROUTING_NODE_NONE UINT32_MAX
-#define OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION 1U
+#define OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION 2U
 
 typedef uint32_t OpenRideRoutingNodeId;
 
@@ -71,11 +71,23 @@ typedef struct OpenRideRoutingEdge {
     uint16_t max_speed_kph;
 } OpenRideRoutingEdge;
 
+typedef struct OpenRideRoutingSpatialIndex {
+    int32_t min_lat_e7;
+    int32_t min_lon_e7;
+    uint32_t cell_size_e7;
+    uint32_t rows;
+    uint32_t columns;
+    uint32_t cell_count;
+    uint32_t *cell_offsets; /* cell_count + 1 entries */
+    uint32_t *node_ids;     /* node_count entries */
+} OpenRideRoutingSpatialIndex;
+
 typedef struct OpenRideRoutingGraph {
     OpenRideRoutingNode *nodes;
     OpenRideRoutingEdge *edges;
     uint32_t node_count;
     uint32_t edge_count;
+    OpenRideRoutingSpatialIndex spatial_index;
 } OpenRideRoutingGraph;
 
 typedef struct OpenRideRoutingEdgeAttributes {
@@ -126,7 +138,33 @@ void openride_routing_node_geo(const OpenRideRoutingNode *node,
                                double *lat,
                                double *lon);
 
+bool openride_routing_graph_build_spatial_index(OpenRideRoutingGraph *graph,
+                                                char *error,
+                                                size_t error_size);
+
+bool openride_routing_graph_has_spatial_index(const OpenRideRoutingGraph *graph);
+
+bool openride_routing_spatial_index_validate(const OpenRideRoutingGraph *graph,
+                                             char *error,
+                                             size_t error_size);
+
+void openride_routing_spatial_index_destroy(OpenRideRoutingSpatialIndex *index);
+
+OpenRideRoutingNodeId openride_routing_spatial_index_nearest_node(
+    const OpenRideRoutingGraph *graph,
+    double lat,
+    double lon,
+    double *distance_m);
+
+/* Production lookup: uses the spatial index when available. */
 OpenRideRoutingNodeId openride_routing_graph_nearest_node(
+    const OpenRideRoutingGraph *graph,
+    double lat,
+    double lon,
+    double *distance_m);
+
+/* Reference implementation kept for tests and performance measurements. */
+OpenRideRoutingNodeId openride_routing_graph_nearest_node_linear(
     const OpenRideRoutingGraph *graph,
     double lat,
     double lon,

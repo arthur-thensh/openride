@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.9.0 LANGUAGES C)
+project(OpenRide VERSION 0.10.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -21,6 +21,7 @@ add_library(openride_core STATIC
     src/core/map_camera.c
     src/core/map_selection.c
     src/core/routing_graph.c
+    src/core/routing_spatial_index.c
     src/core/pathfinder.c
     src/core/routing_engine.c
     src/osm/osm_import.c
@@ -84,6 +85,21 @@ if(MSVC)
     target_compile_options(openride_osm_import PRIVATE /W4)
 else()
     target_compile_options(openride_osm_import PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(openride_spatial_benchmark
+    src/tools/spatial_benchmark_main.c
+)
+
+target_link_libraries(openride_spatial_benchmark
+    PRIVATE
+        openride_core
+)
+
+if(MSVC)
+    target_compile_options(openride_spatial_benchmark PRIVATE /W4)
+else()
+    target_compile_options(openride_spatial_benchmark PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(OPENRIDE_BUILD_TESTS)

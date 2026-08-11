@@ -1,69 +1,73 @@
-# OpenRide v0.9 — routage réel OpenStreetMap hors ligne
+# OpenRide v0.10 — index spatial du graphe routier
 
-OpenRide peut maintenant transformer un extrait OpenStreetMap `.osm.pbf` en
-un graphe routier OpenRide `.orgraph`, charger ce graphe dans l'application et
-calculer un véritable itinéraire entre les marqueurs départ/destination.
+La v0.10 accélère l'accrochage d'une position GPS ou d'un marqueur au réseau
+routier. Le calcul reste entièrement hors ligne et le cœur reste écrit en C17.
 
-Le calcul d'itinéraire ne fait aucun appel réseau. Internet n'est utilisé que
-pour télécharger, à l'avance, les fichiers de données cartographiques.
+## Nouveautés v0.10
 
-## Nouveautés v0.9
+- grille spatiale compacte intégrée au graphe routier ;
+- recherche locale du nœud routier le plus proche au lieu de parcourir tous les
+  nœuds ;
+- nouvel index sauvegardé directement dans le fichier `.orgraph` ;
+- format `.orgraph` v2 ;
+- lecture toujours compatible avec les fichiers `.orgraph` v1 de la v0.9 ;
+- outil de benchmark comparant l'index à la recherche linéaire ;
+- tests vérifiant que les deux méthodes retournent exactement le même nœud.
 
-- importateur `.osm.pbf` écrit en C ;
-- décompression des blocs PBF zlib ;
-- lecture des `DenseNodes`, `Node` et `Way` OSM ;
-- filtrage des voies utilisables par une moto ;
-- conversion des tags `highway`, `surface`, `maxspeed`, `oneway`, `access`,
-  `motor_vehicle`, `motorcycle`, `toll` et `junction` ;
-- génération du fichier régional `.orgraph` ;
-- chargement automatique du graphe au démarrage ;
-- accrochage départ/destination au nœud routier le plus proche ;
-- calcul automatique d'un itinéraire hors ligne ;
-- tracé de l'itinéraire réel directement sur la carte ;
-- distance et durée estimée de l'itinéraire ;
-- changement de profil au clavier : `1` rapide, `2` balade, `3` trail ;
-- test PBF miniature inclus dans le dépôt.
+## Pourquoi cet index
 
-## Architecture des données
+Le graphe Nord-Pas-de-Calais de la v0.9 contient environ 3 millions de nœuds.
+Avant la v0.10, chaque sélection sur la carte pouvait nécessiter de comparer la
+position à chacun de ces nœuds.
+
+La v0.10 découpe l'étendue géographique du graphe en cellules d'environ
+`0.01° × 0.01°` (la taille augmente automatiquement pour les très grandes
+zones). Chaque cellule contient uniquement les identifiants des nœuds présents
+dans cette zone.
 
 ```text
-                         préparation (une fois)
-
-OpenStreetMap / Geofabrik
-        │
-        ▼
-nord-pas-de-calais-latest.osm.pbf
-        │
-        ▼
-openride_osm_import       C pur + zlib
-        │
-        ▼
-nord-pas-de-calais.orgraph
-
-
-                         utilisation
-
-┌──────────────────────── téléphone / OpenRide ───────────────────────┐
-│                                                                     │
-│  carte MBTiles ───────────────► affichage                           │
-│                                                                     │
-│  fichier .orgraph ────────────► moteur de routage hors ligne        │
-│                                      │                              │
-│  départ + destination ───────────────┘                              │
-│                                      │                              │
-│                                      ▼                              │
-│                              itinéraire réel                        │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+Position GPS
+    │
+    ▼
+cellule spatiale
+    │
+    ├── nœud 18031
+    ├── nœud 18044
+    ├── nœud 18102
+    └── ...
+    │
+    ▼
+comparaison locale
+    │
+    ▼
+nœud le plus proche
 ```
 
-Le `.osm.pbf` sert à préparer le graphe. L'application n'a pas besoin de
-reparser le PBF à chaque lancement.
+La distance géographique finale reste calculée exactement sur les coordonnées
+OSM. L'index sert uniquement à réduire le nombre de candidats à examiner.
 
-## 1. Compilation
+## Format `.orgraph` v2
 
-VS Code reste uniquement un éditeur. La compilation et l'exécution se font
-dans le Terminal :
+Le fichier contient maintenant :
+
+```text
+ORGRAPH1
+├── en-tête
+├── nœuds routiers
+├── arêtes dirigées
+└── ORIDX001
+    ├── origine et taille de cellule
+    ├── offsets des cellules
+    └── identifiants de nœuds
+```
+
+Les anciens fichiers v0.9 restent lisibles. Dans ce cas, OpenRide reconstruit
+l'index en RAM au chargement. Pour éviter ce travail à chaque démarrage, il est
+recommandé de régénérer une fois le graphe avec la v0.10.
+
+## Compilation
+
+VS Code reste uniquement l'éditeur :
 
 ```sh
 ./scripts/configure.sh
@@ -71,7 +75,7 @@ dans le Terminal :
 ./scripts/test.sh
 ```
 
-Les tests doivent notamment inclure :
+Les tests doivent notamment afficher :
 
 ```text
 Routing graph tests: OK
@@ -79,128 +83,87 @@ Routing engine tests: OK
 OSM import tests: OK
 ```
 
-## 2. Télécharger les données routières OSM
+## Régénérer le graphe v0.10
 
-```sh
-./scripts/download_routing_data.sh
-```
-
-Le script télécharge l'extrait Nord-Pas-de-Calais de Geofabrik dans :
-
-```text
-data/osm/nord-pas-de-calais-latest.osm.pbf
-```
-
-Ce fichier n'est pas suivi par Git. Le téléchargement est la seule étape de cette chaîne qui nécessite Internet. Si tu disposes déjà d'un extrait OSM, tu peux aussi le placer manuellement à cet emplacement.
-
-## 3. Construire le graphe OpenRide
-
-Après compilation et une fois le `.osm.pbf` présent :
+Le fichier `.osm.pbf` déjà téléchargé avec la v0.9 peut être réutilisé :
 
 ```sh
 ./scripts/prepare_routing_graph.sh
 ```
 
-Cette étape est entièrement hors ligne : le script ne déclenche aucun téléchargement automatiquement.
-
-Le résultat est créé ici :
+Cela remplace :
 
 ```text
 data/routing/nord-pas-de-calais.orgraph
 ```
 
-L'import fait deux lectures du PBF :
+par un fichier v2 contenant directement l'index spatial.
 
-1. collecte des voies routables et de leurs références de nœuds ;
-2. récupération des coordonnées des seuls nœuds nécessaires ;
-3. construction du graphe dirigé et sauvegarde `.orgraph`.
+Cette opération est entièrement hors ligne.
 
-L'opération peut prendre plusieurs minutes et utiliser une quantité notable de
-RAM. Elle est destinée à la préparation des données, pas à être répétée à
-chaque démarrage de l'application.
+## Mesurer le gain
 
-## 4. Lancer OpenRide
+Après compilation et préparation du graphe :
+
+```sh
+./scripts/benchmark_spatial_index.sh
+```
+
+Le benchmark :
+
+1. charge le vrai graphe régional ;
+2. exécute quelques recherches exhaustives ;
+3. vérifie que l'index retrouve exactement les mêmes nœuds ;
+4. effectue plusieurs milliers de recherches indexées ;
+5. affiche le temps moyen et le facteur d'accélération.
+
+Exemple de sortie :
+
+```text
+OpenRide spatial index benchmark
+  noeuds      : 3008935
+  cellules    : ...
+
+Recherche lineaire : ... ms / requete
+Index spatial       : ... ms / requete
+Acceleration        : x...
+```
+
+Les valeurs exactes dépendent du Mac et du graphe.
+
+## Lancer l'application
 
 ```sh
 ./scripts/run.sh
 ```
 
-Si la carte et le graphe régional sont présents, ils sont chargés
-automatiquement.
+Le comportement visible reste celui de la v0.9 : départ, destination et
+itinéraire réel hors ligne. La différence est interne : l'accrochage des deux
+marqueurs au réseau utilise maintenant l'index spatial.
 
-Tu peux aussi préciser les deux fichiers manuellement :
-
-```sh
-./build/openride \
-    data/maps/nord-pas-de-calais-shortbread.mbtiles \
-    data/routing/nord-pas-de-calais.orgraph
-```
-
-## Utilisation du routage
-
-- clic court : poser le départ puis la destination ;
-- glisser la carte : déplacer la carte ;
-- glisser un marqueur : déplacer le départ ou l'arrivée ;
-- clic droit sur un marqueur : le supprimer ;
-- `C` : effacer les deux marqueurs ;
-- `1` : profil rapide ;
-- `2` : profil balade ;
-- `3` : profil trail ;
-- molette : zoom ;
-- `Échap` : quitter.
-
-Après la pose des deux marqueurs, OpenRide :
-
-1. cherche le nœud du graphe le plus proche de chaque marqueur ;
-2. lance le moteur de routage hors ligne ;
-3. dessine la suite des nœuds OSM sur la carte ;
-4. affiche distance et durée estimée.
-
-## Règles OSM prises en compte en v0.9
-
-Les principales catégories routières sont importées : autoroutes, grands axes,
-routes secondaires, tertiaires, rues, voies de service, `track` et certains
-`path`.
-
-Pour rester prudent, un `path` générique n'est routable à moto que si OSM
-contient une autorisation explicite `motorcycle=*` ou `motor_vehicle=*`.
-Les interdictions explicites `no`, `private`, `agricultural` et `forestry` sont
-écartées dans la hiérarchie d'accès moto.
-
-Les sens uniques et ronds-points créent des arêtes dirigées. Les surfaces non
-revêtues sont conservées pour le profil trail.
-
-## Limites connues de cette première version OSM
-
-La v0.9 ne traite pas encore :
-
-- les relations OSM de restriction de virage (`type=restriction`) ;
-- les accès conditionnels (`access:conditional`) ;
-- les restrictions directionnelles fines (`motorcycle:forward`, etc.) ;
-- les barrières portées par les nœuds ;
-- un index spatial accéléré pour l'accrochage GPS ;
-- la réduction/hiérarchisation du graphe pour les très grands territoires.
-
-Ces éléments seront ajoutés progressivement. Le but de la v0.9 est de valider
-la chaîne complète **OSM réel → graphe local → itinéraire réel → affichage**.
-
-## Fichiers principaux ajoutés
+## Architecture
 
 ```text
-include/openride/
-└── osm_import.h
-
-src/osm/
-└── osm_import.c
-
-src/tools/
-└── osm_import_main.c
-
-scripts/
-├── download_routing_data.sh
-└── prepare_routing_graph.sh
-
-tests/
-├── test_osm_import.c
-└── data/tiny.osm.pbf
+OSM PBF
+   │
+   ▼
+importateur C
+   │
+   ▼
+.orgraph v2
+├── nœuds
+├── arêtes
+└── index spatial
+       │
+       ▼
+position / GPS
+       │
+       ▼
+nœud routier proche
+       │
+       ▼
+moteur de routage hors ligne
 ```
+
+La prochaine étape prévue est le **map matching** : accrocher une position au
+segment routier réel plutôt qu'au seul nœud le plus proche.

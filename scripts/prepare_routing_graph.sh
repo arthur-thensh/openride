@@ -38,4 +38,8 @@ mv "$GRAPH.part" "$GRAPH"
 
 echo
 echo "Graphe prêt : $GRAPH"
-echo "OpenRide peut maintenant calculer des itinéraires sans Internet."
+echo "Le fichier contient maintenant le graphe et son index spatial."
+echo "OpenRide peut calculer des itinéraires sans Internet."
+echo
+echo "Benchmark facultatif :"
+echo "  ./scripts/benchmark_spatial_index.sh"

@@ -8,7 +8,9 @@
 #define OPENRIDE_PI 3.14159265358979323846
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
 #define OPENRIDE_GRAPH_MAGIC "ORGRAPH1"
-#define OPENRIDE_GRAPH_HEADER_SIZE 32U
+#define OPENRIDE_SPATIAL_INDEX_MAGIC "ORIDX001"
+#define OPENRIDE_GRAPH_LEGACY_VERSION 1U
+#define OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX 1U
 #define OPENRIDE_NODE_RECORD_SIZE 16U
 #define OPENRIDE_EDGE_RECORD_SIZE 16U
 
@@ -347,6 +349,11 @@ bool openride_routing_graph_builder_build(
         }
     }
 
+    if (!openride_routing_graph_build_spatial_index(&result, error, error_size)) {
+        openride_routing_graph_destroy(&result);
+        return false;
+    }
+
     if (!openride_routing_graph_validate(&result, error, error_size)) {
         openride_routing_graph_destroy(&result);
         return false;
@@ -363,6 +370,7 @@ void openride_routing_graph_destroy(OpenRideRoutingGraph *graph)
     if (!graph) return;
     free(graph->nodes);
     free(graph->edges);
+    openride_routing_spatial_index_destroy(&graph->spatial_index);
     memset(graph, 0, sizeof(*graph));
 }
 
@@ -409,6 +417,10 @@ bool openride_routing_graph_validate(const OpenRideRoutingGraph *graph,
         }
     }
 
+    if (!openride_routing_spatial_index_validate(graph, error, error_size)) {
+        return false;
+    }
+
     set_error(error, error_size, "");
     return true;
 }
@@ -422,7 +434,7 @@ void openride_routing_node_geo(const OpenRideRoutingNode *node,
     if (lon) *lon = e7_to_degree(node->lon_e7);
 }
 
-OpenRideRoutingNodeId openride_routing_graph_nearest_node(
+OpenRideRoutingNodeId openride_routing_graph_nearest_node_linear(
     const OpenRideRoutingGraph *graph,
     double lat,
     double lon,
@@ -436,7 +448,6 @@ OpenRideRoutingNodeId openride_routing_graph_nearest_node(
     OpenRideRoutingNodeId best_id = OPENRIDE_ROUTING_NODE_NONE;
     double best_distance = INFINITY;
 
-    /* Linear for v0.7. A spatial index will replace this for large OSM graphs. */
     for (uint32_t i = 0U; i < graph->node_count; ++i) {
         double node_lat = 0.0;
         double node_lon = 0.0;
@@ -450,6 +461,111 @@ OpenRideRoutingNodeId openride_routing_graph_nearest_node(
 
     if (distance_m) *distance_m = best_distance;
     return best_id;
+}
+
+OpenRideRoutingNodeId openride_routing_graph_nearest_node(
+    const OpenRideRoutingGraph *graph,
+    double lat,
+    double lon,
+    double *distance_m)
+{
+    if (openride_routing_graph_has_spatial_index(graph)) {
+        return openride_routing_spatial_index_nearest_node(
+            graph, lat, lon, distance_m);
+    }
+    return openride_routing_graph_nearest_node_linear(graph, lat, lon, distance_m);
+}
+
+static bool write_spatial_index(FILE *file,
+                                const OpenRideRoutingGraph *graph)
+{
+    const OpenRideRoutingSpatialIndex *index = &graph->spatial_index;
+    bool ok = write_exact(file, OPENRIDE_SPATIAL_INDEX_MAGIC, 8U)
+           && write_u32_le(file, (uint32_t)index->min_lat_e7)
+           && write_u32_le(file, (uint32_t)index->min_lon_e7)
+           && write_u32_le(file, index->cell_size_e7)
+           && write_u32_le(file, index->rows)
+           && write_u32_le(file, index->columns)
+           && write_u32_le(file, index->cell_count)
+           && write_u32_le(file, graph->node_count);
+
+    if (index->cell_count > 0U) {
+        for (uint32_t i = 0U; ok && i <= index->cell_count; ++i) {
+            ok = write_u32_le(file, index->cell_offsets[i]);
+        }
+    }
+    for (uint32_t i = 0U; ok && i < graph->node_count; ++i) {
+        ok = write_u32_le(file, index->node_ids[i]);
+    }
+    return ok;
+}
+
+static bool read_spatial_index(FILE *file,
+                               OpenRideRoutingGraph *graph,
+                               char *error,
+                               size_t error_size)
+{
+    char magic[8];
+    uint32_t min_lat_raw = 0U;
+    uint32_t min_lon_raw = 0U;
+    uint32_t node_ref_count = 0U;
+    OpenRideRoutingSpatialIndex index;
+    memset(&index, 0, sizeof(index));
+
+    bool ok = read_exact(file, magic, sizeof(magic))
+           && read_u32_le(file, &min_lat_raw)
+           && read_u32_le(file, &min_lon_raw)
+           && read_u32_le(file, &index.cell_size_e7)
+           && read_u32_le(file, &index.rows)
+           && read_u32_le(file, &index.columns)
+           && read_u32_le(file, &index.cell_count)
+           && read_u32_le(file, &node_ref_count);
+
+    index.min_lat_e7 = (int32_t)min_lat_raw;
+    index.min_lon_e7 = (int32_t)min_lon_raw;
+
+    if (!ok || memcmp(magic, OPENRIDE_SPATIAL_INDEX_MAGIC, 8U) != 0) {
+        set_error(error, error_size, "invalid routing spatial index header");
+        return false;
+    }
+    if (node_ref_count != graph->node_count
+        || (uint64_t)index.rows * (uint64_t)index.columns != index.cell_count
+        || index.cell_count > 2000000U) {
+        set_error(error, error_size, "invalid routing spatial index dimensions");
+        return false;
+    }
+
+    if (index.cell_count > 0U) {
+        index.cell_offsets = calloc((size_t)index.cell_count + 1U,
+                                    sizeof(*index.cell_offsets));
+        if (!index.cell_offsets) ok = false;
+    }
+    if (ok && graph->node_count > 0U) {
+        index.node_ids = malloc((size_t)graph->node_count * sizeof(*index.node_ids));
+        if (!index.node_ids) ok = false;
+    }
+
+    if (index.cell_count > 0U) {
+        for (uint32_t i = 0U; ok && i <= index.cell_count; ++i) {
+            ok = read_u32_le(file, &index.cell_offsets[i]);
+        }
+    }
+    for (uint32_t i = 0U; ok && i < graph->node_count; ++i) {
+        ok = read_u32_le(file, &index.node_ids[i]);
+    }
+
+    if (!ok) {
+        openride_routing_spatial_index_destroy(&index);
+        set_error(error, error_size, "routing spatial index is truncated");
+        return false;
+    }
+
+    graph->spatial_index = index;
+    if (!openride_routing_spatial_index_validate(graph, error, error_size)) {
+        openride_routing_spatial_index_destroy(&graph->spatial_index);
+        return false;
+    }
+    return true;
 }
 
 bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,
@@ -474,7 +590,7 @@ bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,
            && write_u32_le(file, graph->edge_count)
            && write_u32_le(file, OPENRIDE_NODE_RECORD_SIZE)
            && write_u32_le(file, OPENRIDE_EDGE_RECORD_SIZE)
-           && write_u32_le(file, 0U);
+           && write_u32_le(file, OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX);
 
     for (uint32_t i = 0U; ok && i < graph->node_count; ++i) {
         const OpenRideRoutingNode *node = &graph->nodes[i];
@@ -497,6 +613,7 @@ bool openride_routing_graph_save(const OpenRideRoutingGraph *graph,
           && write_u16_le(file, edge->max_speed_kph);
     }
 
+    if (ok) ok = write_spatial_index(file, graph);
     if (fclose(file) != 0) ok = false;
 
     if (!ok) {
@@ -531,7 +648,7 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
     uint32_t edge_count = 0U;
     uint32_t node_record_size = 0U;
     uint32_t edge_record_size = 0U;
-    uint32_t reserved = 0U;
+    uint32_t features = 0U;
 
     bool ok = read_exact(file, magic, sizeof(magic))
            && read_u32_le(file, &version)
@@ -539,7 +656,7 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
            && read_u32_le(file, &edge_count)
            && read_u32_le(file, &node_record_size)
            && read_u32_le(file, &edge_record_size)
-           && read_u32_le(file, &reserved);
+           && read_u32_le(file, &features);
 
     if (!ok || memcmp(magic, OPENRIDE_GRAPH_MAGIC, 8U) != 0) {
         fclose(file);
@@ -547,7 +664,8 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
         return false;
     }
 
-    if (version != OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION
+    if ((version != OPENRIDE_GRAPH_LEGACY_VERSION
+         && version != OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION)
         || node_record_size != OPENRIDE_NODE_RECORD_SIZE
         || edge_record_size != OPENRIDE_EDGE_RECORD_SIZE) {
         fclose(file);
@@ -593,12 +711,31 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
         edge->surface = class_and_surface[1];
     }
 
+    if (ok && version == OPENRIDE_ROUTING_GRAPH_FORMAT_VERSION) {
+        if ((features & OPENRIDE_GRAPH_FEATURE_SPATIAL_INDEX) == 0U) {
+            ok = false;
+            set_error(error, error_size, "v2 routing graph has no spatial index");
+        } else {
+            ok = read_spatial_index(file, &loaded, error, error_size);
+        }
+    }
+
     if (fclose(file) != 0) ok = false;
 
     if (!ok) {
         openride_routing_graph_destroy(&loaded);
-        set_error(error, error_size, "routing graph file is truncated or unreadable");
+        if (!error || !error[0]) {
+            set_error(error, error_size, "routing graph file is truncated or unreadable");
+        }
         return false;
+    }
+
+    /* v0.9 files remain readable. Their index is rebuilt once at load time. */
+    if (version == OPENRIDE_GRAPH_LEGACY_VERSION) {
+        if (!openride_routing_graph_build_spatial_index(&loaded, error, error_size)) {
+            openride_routing_graph_destroy(&loaded);
+            return false;
+        }
     }
 
     if (!openride_routing_graph_validate(&loaded, error, error_size)) {

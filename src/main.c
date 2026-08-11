@@ -468,7 +468,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.9");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.10");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -685,9 +685,10 @@ int main(int argc, char **argv)
                     error[0] ? error : "unknown error");
         } else {
             fprintf(stdout,
-                    "Routing graph loaded: %u nodes, %u directed edges\n",
+                    "Routing graph loaded: %u nodes, %u directed edges, %u spatial cells\n",
                     routing_graph.node_count,
-                    routing_graph.edge_count);
+                    routing_graph.edge_count,
+                    routing_graph.spatial_index.cell_count);
         }
     } else {
         fprintf(stdout,
