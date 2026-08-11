@@ -1,28 +1,79 @@
-# OpenRide v0.6.1 — lisibilité de l’interface
+# OpenRide v0.7 — fondation du graphe routier hors ligne
 
-OpenRide affiche une carte OpenStreetMap vectorielle hors ligne et permet de
-choisir puis déplacer un départ et une destination directement sur la carte.
+OpenRide affiche toujours la carte OSM vectorielle hors ligne et conserve les
+interactions départ/destination de la v0.6.1. La v0.7 ajoute la première brique
+du futur moteur de routage : un graphe routier compact, indépendant de SDL.
 
-## Nouveautés v0.6.1
+## Nouveautés v0.7
 
-- marqueurs départ/destination plus grands et mieux contrastés ;
-- liaison directe épaissie avec halo pour rester visible sur la carte ;
-- panneau d’état compact avec coordonnées du départ et de la destination ;
-- panneau séparé mettant en avant la distance directe ;
-- affichage agrandi de la distance avec `SDL_SetRenderScale` ;
-- interface adaptée aux fenêtres étroites : le panneau de distance passe sous
-  le panneau principal si la largeur disponible est insuffisante ;
-- aucune modification du moteur de sélection de la v0.6 ;
-- toujours aucune requête réseau pendant l’exécution.
+- structure de graphe routier en C pur ;
+- nœuds et arêtes dirigées compactes de 16 octets chacune ;
+- coordonnées stockées en degrés × 1e7 pour limiter la mémoire ;
+- type de route, surface, vitesse maximale et drapeaux par arête ;
+- constructeur de graphe pour le futur importateur OSM ;
+- prise en charge des voies à sens unique via des arêtes dirigées ;
+- recherche du nœud routier le plus proche ;
+- format binaire local `.orgraph`, versionné et indépendant des structures C ;
+- sauvegarde et rechargement d'un graphe hors ligne ;
+- validation systématique de la topologie ;
+- tests unitaires dédiés.
 
-La distance affichée reste une **distance à vol d’oiseau**. Elle sera remplacée
-plus tard par la longueur de l’itinéraire produit par le moteur de routage hors
-ligne.
+Cette version **ne calcule pas encore d'itinéraire**. C'est volontaire : elle
+fige d'abord la représentation des données que le moteur de routage utilisera.
 
-## Installation / compilation
+## Pourquoi ne pas router directement sur les MBTiles ?
 
-VS Code sert uniquement à éditer le code. La configuration, la compilation,
-les tests et le lancement se font dans le Terminal.
+Les MBTiles Shortbread actuellement affichées par OpenRide sont des données de
+**rendu cartographique**. Les géométries peuvent être découpées aux limites des
+tuiles ou simplifiées selon le niveau de zoom. Elles ne sont donc pas la bonne
+source pour construire une topologie routière fiable.
+
+À terme :
+
+```text
+OSM .pbf
+   ↓
+importateur OpenRide
+   ↓
+region.orgraph
+   ↓
+moteur de routage hors ligne
+```
+
+La carte `.mbtiles` restera uniquement chargée de l'affichage.
+
+## Structure du graphe
+
+Un nœud représente une position du réseau :
+
+```c
+typedef struct OpenRideRoutingNode {
+    int32_t lat_e7;
+    int32_t lon_e7;
+    uint32_t first_edge;
+    uint32_t edge_count;
+} OpenRideRoutingNode;
+```
+
+Une arête représente un déplacement autorisé vers un autre nœud :
+
+```c
+typedef struct OpenRideRoutingEdge {
+    uint32_t target;
+    uint32_t length_cm;
+    uint32_t flags;
+    uint8_t road_class;
+    uint8_t surface;
+    uint16_t max_speed_kph;
+} OpenRideRoutingEdge;
+```
+
+Le graphe est dirigé : une route à double sens possède deux arêtes, alors
+qu'une voie à sens unique n'en possède qu'une dans le sens autorisé.
+
+## Compilation et tests
+
+VS Code reste uniquement un éditeur. Tout se fait depuis le Terminal :
 
 ```sh
 ./scripts/configure.sh
@@ -31,35 +82,40 @@ les tests et le lancement se font dans le Terminal.
 ./scripts/run.sh
 ```
 
-Si l’environnement est déjà configuré et que `CMakeLists.txt` n’a pas changé
-depuis l’application du patch, `build.sh`, `test.sh` et `run.sh` suffisent.
+Le nouveau test doit notamment afficher :
 
-Si la carte réelle n’est pas encore présente :
-
-```sh
-./scripts/download_real_map.sh
-./scripts/run.sh
+```text
+Routing graph tests: OK
 ```
-
-## Contrôles
-
-- clic gauche court sur la carte : choisir le départ puis la destination ;
-- clic gauche maintenu + déplacement sur la carte : déplacer la carte ;
-- clic gauche maintenu + déplacement sur un marqueur : déplacer le marqueur ;
-- clic droit sur un marqueur : supprimer le marqueur ;
-- `C` : effacer départ et destination ;
-- molette : zoomer / dézoomer ;
-- `Esc` : quitter.
 
 ## Architecture
 
-La logique géographique reste dans `src/core/map_selection.c` et ne dépend pas
-de SDL. Les changements de la v0.6.1 concernent uniquement la présentation
-dans `src/main.c`. Cette séparation permettra de conserver le même cœur C sur
-macOS, Android et iOS.
+```text
+include/openride/
+├── map_camera.h
+├── map_selection.h
+├── map_style.h
+├── mbtiles.h
+├── mvt.h
+└── routing_graph.h       <- nouveau
 
-## Hors ligne
+src/core/
+├── map_camera.c
+├── map_selection.c
+└── routing_graph.c       <- nouveau
 
-Une fois SDL compilé et le fichier MBTiles présent localement, la carte, la
-sélection des points, leur déplacement et le calcul de distance fonctionnent
-sans connexion Internet.
+tests/
+├── test_map_camera.c
+├── test_map_selection.c
+├── test_map_style.c
+├── test_mbtiles.c
+├── test_mvt.c
+└── test_routing_graph.c  <- nouveau
+```
+
+## Étape suivante
+
+La v0.8 ajoutera le **moteur de routage hors ligne** au-dessus de ce graphe :
+recherche du meilleur chemin, coût des arêtes et reconstruction de
+l'itinéraire. Le premier algorithme utilisé sera A*, mais A* restera un détail
+interne de `pathfinder.c`.

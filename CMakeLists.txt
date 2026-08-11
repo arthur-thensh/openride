@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.6.1 LANGUAGES C)
+project(OpenRide VERSION 0.7.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -20,6 +20,7 @@ add_subdirectory(vendor/SDL EXCLUDE_FROM_ALL)
 add_library(openride_core STATIC
     src/core/map_camera.c
     src/core/map_selection.c
+    src/core/routing_graph.c
     src/map/mbtiles.c
     src/map/mvt.c
     src/map/map_style.c
@@ -100,4 +101,10 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_map_selection PRIVATE openride_core)
     add_test(NAME map_selection COMMAND test_map_selection)
+
+    add_executable(test_routing_graph
+        tests/test_routing_graph.c
+    )
+    target_link_libraries(test_routing_graph PRIVATE openride_core)
+    add_test(NAME routing_graph COMMAND test_routing_graph)
 endif()
