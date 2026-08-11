@@ -13,3 +13,8 @@ vendor/SDL/
 data/maps/*.mbtiles
 data/maps/*.zip
 EOF
+
+data/osm/*.osm.pbf
+data/osm/*.part
+data/routing/*.orgraph
+data/routing/*.part

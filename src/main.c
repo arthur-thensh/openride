@@ -6,6 +6,8 @@
 #include "openride/map_camera.h"
 #include "openride/map_selection.h"
 #include "openride/mbtiles.h"
+#include "openride/routing_engine.h"
+#include "openride/routing_graph.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -14,6 +16,7 @@
 
 #define OPENRIDE_CLICK_DRAG_THRESHOLD 5.0
 #define OPENRIDE_MARKER_HIT_RADIUS 26.0
+#define OPENRIDE_MAX_SNAP_DISTANCE_M 2000.0
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -44,6 +47,12 @@ static const char *default_map_path(void)
     static const char *demo_map = "data/maps/demo.mbtiles";
 
     return file_exists(real_map) ? real_map : demo_map;
+}
+
+static const char *default_routing_graph_path(void)
+{
+    static const char *graph = "data/routing/nord-pas-de-calais.orgraph";
+    return file_exists(graph) ? graph : NULL;
 }
 
 static void draw_filled_circle(SDL_Renderer *renderer, float cx, float cy, float radius)
@@ -245,9 +254,131 @@ static void draw_marker(SDL_Renderer *renderer,
     SDL_RenderDebugText(renderer, center_x - 4.0f, center_y - 4.0f, label);
 }
 
+static void draw_route(SDL_Renderer *renderer,
+                       const OpenRideMapCamera *camera,
+                       const OpenRideRoutingGraph *graph,
+                       const OpenRideRoute *route,
+                       int viewport_width,
+                       int viewport_height)
+{
+    if (!graph || !route || route->node_count < 2U) return;
+
+    for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 0) {
+            SDL_SetRenderDrawColor(renderer, 250, 250, 248, 225);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 37, 101, 173, 245);
+        }
+        const int width = pass == 0 ? 8 : 4;
+
+        for (uint32_t i = 1U; i < route->node_count; ++i) {
+            const OpenRideRoutingNodeId a_id = route->nodes[i - 1U];
+            const OpenRideRoutingNodeId b_id = route->nodes[i];
+            if (a_id >= graph->node_count || b_id >= graph->node_count) continue;
+
+            double a_lat = 0.0;
+            double a_lon = 0.0;
+            double b_lat = 0.0;
+            double b_lon = 0.0;
+            openride_routing_node_geo(&graph->nodes[a_id], &a_lat, &a_lon);
+            openride_routing_node_geo(&graph->nodes[b_id], &b_lat, &b_lon);
+
+            const OpenRidePointD a = openride_geo_to_screen(camera,
+                                                             a_lat,
+                                                             a_lon,
+                                                             viewport_width,
+                                                             viewport_height);
+            const OpenRidePointD b = openride_geo_to_screen(camera,
+                                                             b_lat,
+                                                             b_lon,
+                                                             viewport_width,
+                                                             viewport_height);
+            draw_thick_line(renderer,
+                            (float)a.x,
+                            (float)a.y,
+                            (float)b.x,
+                            (float)b.y,
+                            width);
+        }
+    }
+}
+
+static bool recalculate_route(const OpenRideRoutingGraph *graph,
+                              bool graph_loaded,
+                              const OpenRideMapSelection *selection,
+                              OpenRideRoutingProfile profile,
+                              OpenRideRoute *route,
+                              double *start_snap_m,
+                              double *destination_snap_m,
+                              char *status,
+                              size_t status_size)
+{
+    openride_route_destroy(route);
+    if (start_snap_m) *start_snap_m = 0.0;
+    if (destination_snap_m) *destination_snap_m = 0.0;
+
+    if (!graph_loaded) {
+        snprintf(status, status_size, "graphe routier non installe");
+        return false;
+    }
+    if (!openride_map_selection_complete(selection)) {
+        snprintf(status, status_size, "choisis un depart et une destination");
+        return false;
+    }
+
+    double start_distance = 0.0;
+    double destination_distance = 0.0;
+    const OpenRideRoutingNodeId start = openride_routing_graph_nearest_node(
+        graph,
+        selection->start.lat,
+        selection->start.lon,
+        &start_distance);
+    const OpenRideRoutingNodeId destination = openride_routing_graph_nearest_node(
+        graph,
+        selection->destination.lat,
+        selection->destination.lon,
+        &destination_distance);
+
+    if (start_snap_m) *start_snap_m = start_distance;
+    if (destination_snap_m) *destination_snap_m = destination_distance;
+
+    if (start == OPENRIDE_ROUTING_NODE_NONE
+        || destination == OPENRIDE_ROUTING_NODE_NONE) {
+        snprintf(status, status_size, "aucun noeud routier proche");
+        return false;
+    }
+    if (start_distance > OPENRIDE_MAX_SNAP_DISTANCE_M
+        || destination_distance > OPENRIDE_MAX_SNAP_DISTANCE_M) {
+        snprintf(status, status_size, "point trop loin du reseau routier");
+        return false;
+    }
+
+    OpenRideRoutingRequest request = openride_routing_request_default();
+    request.start = start;
+    request.destination = destination;
+    request.profile = profile;
+
+    char route_error[256] = {0};
+    if (!openride_routing_engine_calculate(graph,
+                                           &request,
+                                           route,
+                                           route_error,
+                                           sizeof(route_error))) {
+        snprintf(status,
+                 status_size,
+                 "itineraire impossible: %.180s",
+                 route_error[0] ? route_error : "erreur inconnue");
+        return false;
+    }
+
+    snprintf(status, status_size, "itineraire calcule hors ligne");
+    return true;
+}
+
 static void draw_selection(SDL_Renderer *renderer,
                            const OpenRideMapCamera *camera,
                            const OpenRideMapSelection *selection,
+                           bool draw_direct_line,
                            int viewport_width,
                            int viewport_height)
 {
@@ -270,7 +401,7 @@ static void draw_selection(SDL_Renderer *renderer,
                                              viewport_height);
     }
 
-    if (selection->has_start && selection->has_destination) {
+    if (draw_direct_line && selection->has_start && selection->has_destination) {
         SDL_SetRenderDrawColor(renderer, 248, 248, 246, 205);
         draw_thick_line(renderer,
                         (float)start.x,
@@ -296,18 +427,39 @@ static void draw_selection(SDL_Renderer *renderer,
     }
 }
 
+static void format_duration(double seconds, char *text, size_t text_size)
+{
+    if (!text || text_size == 0U) return;
+    if (!isfinite(seconds) || seconds < 0.0) seconds = 0.0;
+    const unsigned total_minutes = (unsigned)llround(seconds / 60.0);
+    const unsigned hours = total_minutes / 60U;
+    const unsigned minutes = total_minutes % 60U;
+    if (hours > 0U) {
+        snprintf(text, text_size, "%u h %02u", hours, minutes);
+    } else {
+        snprintf(text, text_size, "%u min", minutes);
+    }
+}
+
 static void draw_overlay(SDL_Renderer *renderer,
                          const OpenRideMapCamera *camera,
                          const OpenRideMapSelection *selection,
                          const OpenRideMBTilesMetadata *metadata,
                          bool vector_map,
+                         bool graph_loaded,
+                         OpenRideRoutingProfile profile,
+                         const OpenRideRoute *route,
+                         bool route_valid,
+                         const char *route_status,
+                         double start_snap_m,
+                         double destination_snap_m,
                          int viewport_width,
                          int viewport_height)
 {
     const float panel_x = 10.0f;
     const float panel_y = 10.0f;
-    const float panel_w = 420.0f;
-    const float panel_h = 104.0f;
+    const float panel_w = 500.0f;
+    const float panel_h = 126.0f;
     SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
 
     SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
@@ -316,7 +468,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.8");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.9");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -366,30 +518,67 @@ static void draw_overlay(SDL_Renderer *renderer,
                             "Clique sur la carte pour choisir la destination");
     }
 
+    SDL_SetRenderDrawColor(renderer,
+                           graph_loaded ? 116 : 226,
+                           graph_loaded ? 188 : 158,
+                           graph_loaded ? 118 : 74,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugTextFormat(renderer,
+                              panel_x + 12.0f,
+                              panel_y + 79.0f,
+                              "Routage: %s  |  profil: %s",
+                              route_status ? route_status : "-",
+                              openride_routing_profile_name(profile));
+
+    if (route_valid) {
+        SDL_SetRenderDrawColor(renderer, 150, 181, 210, SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugTextFormat(renderer,
+                                  panel_x + 12.0f,
+                                  panel_y + 94.0f,
+                                  "accroche reseau: depart %.0f m | arrivee %.0f m",
+                                  start_snap_m,
+                                  destination_snap_m);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugText(renderer,
+                            panel_x + 12.0f,
+                            panel_y + 94.0f,
+                            "1 rapide | 2 balade | 3 trail");
+    }
+
     SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugText(renderer,
                         panel_x + 12.0f,
-                        panel_y + 82.0f,
-                        "glisser: deplacer  |  clic droit: supprimer  |  C: effacer");
+                        panel_y + 110.0f,
+                        "glisser: deplacer | clic droit: supprimer | C: effacer");
 
     if (selection->has_start && selection->has_destination) {
-        const double distance_m = openride_geo_distance_m(selection->start.lat,
-                                                          selection->start.lon,
-                                                          selection->destination.lat,
-                                                          selection->destination.lon);
+        double distance_m = openride_geo_distance_m(selection->start.lat,
+                                                     selection->start.lon,
+                                                     selection->destination.lat,
+                                                     selection->destination.lon);
         char distance_text[32];
+        char duration_text[32] = {0};
+        const char *title = "DISTANCE DIRECTE";
+
+        if (route_valid && route) {
+            distance_m = route->distance_m;
+            title = "ITINERAIRE HORS LIGNE";
+            format_duration(route->estimated_time_s, duration_text, sizeof(duration_text));
+        }
+
         if (distance_m >= 1000.0) {
             snprintf(distance_text, sizeof(distance_text), "%.1f km", distance_m / 1000.0);
         } else {
             snprintf(distance_text, sizeof(distance_text), "%.0f m", distance_m);
         }
 
-        const float distance_w = 210.0f;
-        const float distance_h = 66.0f;
-        const float distance_x = viewport_width >= 680
+        const float distance_w = 230.0f;
+        const float distance_h = route_valid ? 82.0f : 66.0f;
+        const float distance_x = viewport_width >= 760
             ? (float)viewport_width - distance_w - 10.0f
             : 10.0f;
-        const float distance_y = viewport_width >= 680
+        const float distance_y = viewport_width >= 760
             ? 10.0f
             : panel_y + panel_h + 8.0f;
         SDL_FRect distance_panel = {
@@ -408,13 +597,20 @@ static void draw_overlay(SDL_Renderer *renderer,
         SDL_RenderDebugText(renderer,
                             distance_x + 14.0f,
                             distance_y + 10.0f,
-                            "DISTANCE DIRECTE");
+                            title);
         SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
         draw_scaled_text(renderer,
                          distance_x + 14.0f,
                          distance_y + 30.0f,
                          1.75f,
                          distance_text);
+        if (route_valid) {
+            SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
+            SDL_RenderDebugText(renderer,
+                                distance_x + 14.0f,
+                                distance_y + 64.0f,
+                                duration_text);
+        }
     }
 
     if (metadata->attribution[0] != '\0' && viewport_height > 28) {
@@ -463,6 +659,7 @@ static OpenRideMapCamera camera_from_metadata(const OpenRideMBTilesMetadata *met
 int main(int argc, char **argv)
 {
     const char *map_path = argc >= 2 ? argv[1] : default_map_path();
+    const char *routing_graph_path = argc >= 3 ? argv[2] : default_routing_graph_path();
     char error[512] = {0};
 
     OpenRideMBTiles *map = openride_mbtiles_open(map_path, error, sizeof(error));
@@ -470,8 +667,31 @@ int main(int argc, char **argv)
         fprintf(stderr, "Unable to open offline map: %s\n", map_path);
         fprintf(stderr, "Reason: %s\n", error[0] ? error : "unknown error");
         fprintf(stderr, "\nRun ./scripts/download_real_map.sh to install the real OSM map.\n");
-        fprintf(stderr, "Usage: ./build/openride [path/to/map.mbtiles]\n");
+        fprintf(stderr, "Usage: ./build/openride [path/to/map.mbtiles] [path/to/routing.orgraph]\n");
         return 1;
+    }
+
+    OpenRideRoutingGraph routing_graph = {0};
+    bool graph_loaded = false;
+    if (routing_graph_path) {
+        graph_loaded = openride_routing_graph_load(&routing_graph,
+                                                   routing_graph_path,
+                                                   error,
+                                                   sizeof(error));
+        if (!graph_loaded) {
+            fprintf(stderr,
+                    "Routing graph unavailable (%s): %s\n",
+                    routing_graph_path,
+                    error[0] ? error : "unknown error");
+        } else {
+            fprintf(stdout,
+                    "Routing graph loaded: %u nodes, %u directed edges\n",
+                    routing_graph.node_count,
+                    routing_graph.edge_count);
+        }
+    } else {
+        fprintf(stdout,
+                "Routing graph not installed. Run ./scripts/prepare_routing_graph.sh\n");
     }
 
     const OpenRideMBTilesMetadata *metadata = openride_mbtiles_metadata(map);
@@ -479,6 +699,17 @@ int main(int argc, char **argv)
     OpenRideMapCamera camera = camera_from_metadata(metadata);
     OpenRideMapSelection selection;
     openride_map_selection_init(&selection);
+    OpenRideRoute route = {0};
+    OpenRideRoutingProfile routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
+    bool route_valid = false;
+    bool route_dirty = false;
+    double start_snap_m = 0.0;
+    double destination_snap_m = 0.0;
+    char route_status[256];
+    snprintf(route_status,
+             sizeof(route_status),
+             "%s",
+             graph_loaded ? "pret" : "graphe non installe");
 
     SDL_Window *window = NULL;
     SDL_Renderer *renderer = NULL;
@@ -494,6 +725,7 @@ int main(int argc, char **argv)
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         return 1;
     }
@@ -506,6 +738,7 @@ int main(int argc, char **argv)
             &window,
             &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
+        openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         SDL_Quit();
         return 1;
@@ -523,6 +756,7 @@ int main(int argc, char **argv)
         SDL_Log("Unable to initialize offline map renderer");
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
+        openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         SDL_Quit();
         return 1;
@@ -544,6 +778,24 @@ int main(int argc, char **argv)
                         running = false;
                     } else if (event.key.key == SDLK_C) {
                         openride_map_selection_clear(&selection);
+                        openride_route_destroy(&route);
+                        route_valid = false;
+                        route_dirty = false;
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "%s",
+                                 graph_loaded ? "pret" : "graphe non installe");
+                    } else if (event.key.key == SDLK_1
+                               || event.key.key == SDLK_2
+                               || event.key.key == SDLK_3) {
+                        if (event.key.key == SDLK_1) {
+                            routing_profile = OPENRIDE_ROUTING_PROFILE_FASTEST;
+                        } else if (event.key.key == SDLK_2) {
+                            routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
+                        } else {
+                            routing_profile = OPENRIDE_ROUTING_PROFILE_TRAIL;
+                        }
+                        route_dirty = openride_map_selection_complete(&selection);
                     }
                     break;
 
@@ -563,6 +815,10 @@ int main(int argc, char **argv)
                                                            width,
                                                            height);
                         dragging_map = dragging_marker == OPENRIDE_MARKER_NONE;
+                        if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                            openride_route_destroy(&route);
+                            route_valid = false;
+                        }
                     } else if (event.button.button == SDL_BUTTON_RIGHT) {
                         const OpenRideSelectionMarker marker = marker_at_screen(
                             &camera,
@@ -571,7 +827,17 @@ int main(int argc, char **argv)
                             (double)event.button.y,
                             width,
                             height);
-                        openride_map_selection_remove(&selection, marker);
+                        if (marker != OPENRIDE_MARKER_NONE) {
+                            openride_map_selection_remove(&selection, marker);
+                            openride_route_destroy(&route);
+                            route_valid = false;
+                            route_dirty = openride_map_selection_complete(&selection);
+                            if (!route_dirty) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "choisis un depart et une destination");
+                            }
+                        }
                     }
                     break;
                 }
@@ -580,6 +846,7 @@ int main(int argc, char **argv)
                     if (event.button.button == SDL_BUTTON_LEFT) {
                         if (dragging_marker != OPENRIDE_MARKER_NONE) {
                             dragging_marker = OPENRIDE_MARKER_NONE;
+                            route_dirty = openride_map_selection_complete(&selection);
                         } else if (dragging_map && !map_drag_moved) {
                             int width = 0;
                             int height = 0;
@@ -593,7 +860,16 @@ int main(int argc, char **argv)
                                                    height,
                                                    &lat,
                                                    &lon);
-                            (void)openride_map_selection_add(&selection, lat, lon);
+                            const OpenRideSelectionMarker added =
+                                openride_map_selection_add(&selection, lat, lon);
+                            if (added != OPENRIDE_MARKER_NONE) {
+                                route_dirty = openride_map_selection_complete(&selection);
+                                if (!route_dirty) {
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "choisis la destination");
+                                }
+                            }
                         }
                         dragging_map = false;
                         map_drag_moved = false;
@@ -661,6 +937,19 @@ int main(int argc, char **argv)
             }
         }
 
+        if (route_dirty) {
+            route_valid = recalculate_route(&routing_graph,
+                                            graph_loaded,
+                                            &selection,
+                                            routing_profile,
+                                            &route,
+                                            &start_snap_m,
+                                            &destination_snap_m,
+                                            route_status,
+                                            sizeof(route_status));
+            route_dirty = false;
+        }
+
         int width = 0;
         int height = 0;
         if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height)) {
@@ -676,13 +965,33 @@ int main(int argc, char **argv)
             openride_map_renderer_draw(&raster_renderer, &camera, width, height);
         }
 
-        draw_selection(renderer, &camera, &selection, width, height);
+        if (route_valid) {
+            draw_route(renderer,
+                       &camera,
+                       &routing_graph,
+                       &route,
+                       width,
+                       height);
+        }
+        draw_selection(renderer,
+                       &camera,
+                       &selection,
+                       !route_valid,
+                       width,
+                       height);
         draw_center_marker(renderer, width, height);
         draw_overlay(renderer,
                      &camera,
                      &selection,
                      metadata,
                      vector_map,
+                     graph_loaded,
+                     routing_profile,
+                     &route,
+                     route_valid,
+                     route_status,
+                     start_snap_m,
+                     destination_snap_m,
                      width,
                      height);
         SDL_RenderPresent(renderer);
@@ -694,6 +1003,8 @@ int main(int argc, char **argv)
         openride_map_renderer_destroy(&raster_renderer);
     }
 
+    openride_route_destroy(&route);
+    openride_routing_graph_destroy(&routing_graph);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     openride_mbtiles_close(map);

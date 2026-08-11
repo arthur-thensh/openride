@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.8.0 LANGUAGES C)
+project(OpenRide VERSION 0.9.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -23,6 +23,7 @@ add_library(openride_core STATIC
     src/core/routing_graph.c
     src/core/pathfinder.c
     src/core/routing_engine.c
+    src/osm/osm_import.c
     src/map/mbtiles.c
     src/map/mvt.c
     src/map/map_style.c
@@ -36,6 +37,7 @@ target_include_directories(openride_core
 target_link_libraries(openride_core
     PUBLIC
         SQLite::SQLite3
+        ZLIB::ZLIB
 )
 
 if(MSVC)
@@ -66,6 +68,22 @@ if(MSVC)
     target_compile_options(openride PRIVATE /W4)
 else()
     target_compile_options(openride PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+
+add_executable(openride_osm_import
+    src/tools/osm_import_main.c
+)
+
+target_link_libraries(openride_osm_import
+    PRIVATE
+        openride_core
+)
+
+if(MSVC)
+    target_compile_options(openride_osm_import PRIVATE /W4)
+else()
+    target_compile_options(openride_osm_import PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(OPENRIDE_BUILD_TESTS)
@@ -115,4 +133,13 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_routing_engine PRIVATE openride_core)
     add_test(NAME routing_engine COMMAND test_routing_engine)
+
+    add_executable(test_osm_import
+        tests/test_osm_import.c
+    )
+    target_link_libraries(test_osm_import PRIVATE openride_core)
+    add_test(
+        NAME osm_import
+        COMMAND test_osm_import "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.osm.pbf"
+    )
 endif()
