@@ -1,6 +1,17 @@
 #!/bin/sh
 set -eu
 
+# OpenRide est validé avec JDK 17. Sur macOS, sélectionne automatiquement
+# cette JVM lorsqu'elle est installée, même si une version plus récente est
+# la JVM globale du système.
+if [ "$(uname -s)" = "Darwin" ] && [ -x /usr/libexec/java_home ]; then
+    JAVA17_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || true)
+    if [ -n "$JAVA17_HOME" ]; then
+        export JAVA_HOME="$JAVA17_HOME"
+        export PATH="$JAVA_HOME/bin:$PATH"
+    fi
+fi
+
 SDK_ROOT=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
 if [ -z "$SDK_ROOT" ] && [ -d "$HOME/Library/Android/sdk" ]; then
     SDK_ROOT="$HOME/Library/Android/sdk"
@@ -18,10 +29,11 @@ fi
 if command -v java >/dev/null 2>&1; then
     java_line=$(java -version 2>&1 | head -n 1)
     java_major=$(java -version 2>&1 | awk -F'[\".]' '/version/ { if ($2 == "1") print $3; else print $2; exit }')
-    if [ -n "$java_major" ] && [ "$java_major" -ge 17 ] 2>/dev/null; then
+    if [ "$java_major" = "17" ]; then
         echo "[OK] Java : $java_line"
     else
-        echo "[ERREUR] JDK 17 ou plus récent requis (détecté : $java_line)." >&2
+        echo "[ERREUR] OpenRide utilise JDK 17 pour le build Android (détecté : $java_line)." >&2
+        echo "         Sur macOS : export JAVA_HOME=\$(/usr/libexec/java_home -v 17)" >&2
         status=1
     fi
 else

@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3/SDL_atomic.h>
 
 #include "map/map_renderer.h"
 #include "map/vector_map_renderer.h"
@@ -24,6 +25,7 @@
 #include "openride/touch_input.h"
 #include "openride/app_toolbar.h"
 #include "openride/drive_mode.h"
+#include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
 #include "openride/routing_engine.h"
 #include "openride/routing_graph.h"
@@ -47,6 +49,48 @@
 #define OPENRIDE_APP_LIST_MAX 12U
 #define OPENRIDE_REAL_MAP_PATH "data/maps/nord-pas-de-calais-shortbread.mbtiles"
 #define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"
+
+typedef enum OpenRideLifecycleSignal {
+    OPENRIDE_LIFECYCLE_SIGNAL_NONE = 0,
+    OPENRIDE_LIFECYCLE_SIGNAL_BACKGROUND,
+    OPENRIDE_LIFECYCLE_SIGNAL_FOREGROUND,
+    OPENRIDE_LIFECYCLE_SIGNAL_LOW_MEMORY,
+    OPENRIDE_LIFECYCLE_SIGNAL_TERMINATING
+} OpenRideLifecycleSignal;
+
+typedef struct OpenRideLifecycleWatch {
+    SDL_AtomicInt pending_signal;
+} OpenRideLifecycleWatch;
+
+static bool SDLCALL openride_lifecycle_event_watch(void *userdata, SDL_Event *event)
+{
+    OpenRideLifecycleWatch *watch = userdata;
+    if (!watch || !event) return true;
+
+    int signal = OPENRIDE_LIFECYCLE_SIGNAL_NONE;
+    switch (event->type) {
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+        case SDL_EVENT_DID_ENTER_BACKGROUND:
+            signal = OPENRIDE_LIFECYCLE_SIGNAL_BACKGROUND;
+            break;
+        case SDL_EVENT_WILL_ENTER_FOREGROUND:
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            signal = OPENRIDE_LIFECYCLE_SIGNAL_FOREGROUND;
+            break;
+        case SDL_EVENT_LOW_MEMORY:
+            signal = OPENRIDE_LIFECYCLE_SIGNAL_LOW_MEMORY;
+            break;
+        case SDL_EVENT_TERMINATING:
+            signal = OPENRIDE_LIFECYCLE_SIGNAL_TERMINATING;
+            break;
+        default:
+            break;
+    }
+    if (signal != OPENRIDE_LIFECYCLE_SIGNAL_NONE) {
+        SDL_SetAtomicInt(&watch->pending_signal, signal);
+    }
+    return true;
+}
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -885,7 +929,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.20");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.21");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -1284,6 +1328,56 @@ static bool app_panel_main_search_at(double x, double y, int viewport_width)
     const double panel_x = viewport_width > (int)w ? ((double)viewport_width - w) * 0.5 : 8.0;
     const double panel_w = viewport_width > (int)w ? w : (double)viewport_width - 16.0;
     return x >= panel_x && x <= panel_x + panel_w && y >= 60.0 && y < 88.0;
+}
+
+static int app_panel_place_at(double x,
+                              double y,
+                              int viewport_width,
+                              uint32_t count)
+{
+    if (count == 0U) return -1;
+    const double w = 580.0;
+    const double panel_x = viewport_width > (int)w ? ((double)viewport_width - w) * 0.5 : 8.0;
+    const double panel_w = viewport_width > (int)w ? w : (double)viewport_width - 16.0;
+    const double row_top = 18.0 + 45.0;
+    const double row_h = 24.0;
+    if (x < panel_x + 10.0 || x > panel_x + panel_w - 10.0 || y < row_top) return -1;
+    const int index = (int)((y - row_top) / row_h);
+    return index >= 0 && (uint32_t)index < count ? index : -1;
+}
+
+static void set_destination_from_place(OpenRideMapSelection *selection,
+                                       const OpenRideGPSSample *gps,
+                                       bool gps_valid,
+                                       double lat,
+                                       double lon,
+                                       const char *name,
+                                       bool *route_dirty,
+                                       char *status,
+                                       size_t status_size)
+{
+    if (!selection) return;
+#ifdef __ANDROID__
+    if (gps_valid && gps) {
+        openride_map_selection_set(selection,
+                                   OPENRIDE_MARKER_START,
+                                   gps->lat,
+                                   gps->lon);
+    }
+#else
+    (void)gps;
+    (void)gps_valid;
+#endif
+    openride_map_selection_set(selection, OPENRIDE_MARKER_DESTINATION, lat, lon);
+    if (route_dirty) *route_dirty = openride_map_selection_complete(selection);
+    if (status && status_size > 0U) {
+        snprintf(status,
+                 status_size,
+                 openride_map_selection_complete(selection)
+                     ? "destination %.120s | calcul itineraire"
+                     : "destination %.120s | choisis le depart",
+                 name && name[0] ? name : "selectionnee");
+    }
 }
 
 static void refresh_stored_places(OpenRideAppStorage *storage,
@@ -1691,7 +1785,7 @@ static void draw_android_status_overlay(SDL_Renderer *renderer,
     float panel_w = (float)safe.w - margin * 2.0f;
     if (panel_w > 390.0f * ui_scale) panel_w = 390.0f * ui_scale;
     if (panel_w < 180.0f * ui_scale) panel_w = 180.0f * ui_scale;
-    const float panel_h = 48.0f * ui_scale;
+    const float panel_h = (route_valid ? 64.0f : 48.0f) * ui_scale;
     SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
 
     SDL_SetRenderDrawColor(renderer, 20, 24, 28, 205);
@@ -1726,6 +1820,15 @@ static void draw_android_status_overlay(SDL_Renderer *renderer,
                      panel_y + 26.0f * ui_scale,
                      text_scale,
                      status_line);
+
+    if (route_valid) {
+        SDL_SetRenderDrawColor(renderer, 255, 214, 83, 255);
+        draw_scaled_text(renderer,
+                         panel_x + 10.0f * ui_scale,
+                         panel_y + 44.0f * ui_scale,
+                         text_scale,
+                         "TRAJET PRET - touche DEMARRER");
+    }
 
     /* Keep OSM attribution visible, but above the gesture/navigation area and toolbar. */
     if (metadata && metadata->attribution[0] != '\0') {
@@ -1908,7 +2011,7 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
 #endif
 }
 
-static void draw_mobile_toolbar(SDL_Renderer *renderer, int viewport_width, int viewport_height)
+static void draw_mobile_toolbar(SDL_Renderer *renderer, int viewport_width, int viewport_height, bool route_ready)
 {
     const SDL_Rect safe = openride_render_safe_area(renderer, viewport_width, viewport_height);
     const double ui_scale = (double)openride_ui_scale(renderer);
@@ -1948,6 +2051,7 @@ static void draw_mobile_toolbar(SDL_Renderer *renderer, int viewport_width, int 
         }
         SDL_SetRenderDrawColor(renderer, 238, 241, 243, 255);
         const char *label = openride_toolbar_action_label(action);
+        if (action == OPENRIDE_TOOLBAR_ROUTE && route_ready) label = "Demarrer";
         const float label_scale = (float)ui_scale;
         const float label_w = (float)strlen(label) * 8.0f * label_scale;
         const float label_h = 8.0f * label_scale;
@@ -2545,12 +2649,16 @@ int main(int argc, char **argv)
     OpenRideLocationFilter location_filter;
     OpenRideFilteredLocation filtered_location = {0};
     OpenRideDriveModeState drive_mode;
+    OpenRideGPSQuality last_drive_gps_quality = OPENRIDE_GPS_UNAVAILABLE;
+    OpenRideAppLifecycle app_lifecycle;
+    OpenRideLifecycleWatch lifecycle_watch = {0};
     OpenRideGPSSimulator gps_simulator;
 #ifdef __ANDROID__
     OpenRideLocationProvider location_provider;
     OpenRideAndroidLocationContext android_location_context;
     openride_android_location_provider_init(&location_provider, &android_location_context);
     bool real_gps_active = false;
+    bool real_gps_requested = false;
     double real_gps_sample_age_s = INFINITY;
     double real_gps_accuracy_m = 0.0;
 #endif
@@ -2573,6 +2681,7 @@ int main(int argc, char **argv)
     openride_navigation_session_init(&navigation_session);
     openride_location_filter_init(&location_filter);
     openride_drive_mode_init(&drive_mode);
+    openride_app_lifecycle_init(&app_lifecycle);
     openride_gps_simulator_init(&gps_simulator);
     OpenRideRoutingProfile routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
     OpenRideMapStyle map_style = OPENRIDE_MAP_STYLE_TRAIL;
@@ -2616,6 +2725,8 @@ int main(int argc, char **argv)
     OpenRideVectorMapRenderer vector_renderer;
     bool renderer_initialized = false;
     bool running = true;
+    bool render_suspended = false;
+    bool lifecycle_watch_installed = false;
     bool dragging_map = false;
     bool map_drag_moved = false;
     double mouse_down_x = 0.0;
@@ -2668,6 +2779,12 @@ int main(int argc, char **argv)
         openride_mbtiles_close(map);
         SDL_Quit();
         return 1;
+    }
+
+    lifecycle_watch_installed = SDL_AddEventWatch(openride_lifecycle_event_watch,
+                                                   &lifecycle_watch);
+    if (!lifecycle_watch_installed) {
+        SDL_Log("Unable to install lifecycle event watch: %s", SDL_GetError());
     }
 
     if (file_exists(region_status.search_path)) {
@@ -3503,6 +3620,15 @@ int main(int argc, char **argv)
                                                                  sizeof(error));
                                 refresh_stored_places(app_storage, false, history_places, &history_count);
                             }
+                            set_destination_from_place(&selection,
+                                                       &gps_sample,
+                                                       gps_sample_valid,
+                                                       chosen->lat,
+                                                       chosen->lon,
+                                                       chosen->name,
+                                                       &route_dirty,
+                                                       route_status,
+                                                       sizeof(route_status));
                             place_search_active = false;
                             SDL_StopTextInput(window);
                         }
@@ -3531,6 +3657,31 @@ int main(int argc, char **argv)
                                     refresh_stored_places(app_storage, false, history_places, &history_count);
                                 }
                             }
+                        }
+                        break;
+                    }
+                    if (app_panel == OPENRIDE_APP_PANEL_FAVORITES
+                        || app_panel == OPENRIDE_APP_PANEL_HISTORY) {
+                        const bool favorites_panel = app_panel == OPENRIDE_APP_PANEL_FAVORITES;
+                        const uint32_t count = favorites_panel ? favorite_count : history_count;
+                        OpenRideStoredPlace *items = favorites_panel ? favorite_places : history_places;
+                        const int chosen_index = app_panel_place_at(x, y, width, count);
+                        if (chosen_index >= 0) {
+                            const OpenRideStoredPlace *chosen = &items[chosen_index];
+                            app_panel_selected = (uint32_t)chosen_index;
+                            camera.center_lat = chosen->lat;
+                            camera.center_lon = chosen->lon;
+                            if (camera.zoom < 14.0) camera.zoom = 14.0;
+                            set_destination_from_place(&selection,
+                                                       &gps_sample,
+                                                       gps_sample_valid,
+                                                       chosen->lat,
+                                                       chosen->lon,
+                                                       chosen->name,
+                                                       &route_dirty,
+                                                       route_status,
+                                                       sizeof(route_status));
+                            app_panel = OPENRIDE_APP_PANEL_NONE;
                         }
                         break;
                     }
@@ -3651,6 +3802,68 @@ int main(int argc, char **argv)
             }
         }
 
+        const int lifecycle_signal = SDL_SetAtomicInt(&lifecycle_watch.pending_signal,
+                                                       OPENRIDE_LIFECYCLE_SIGNAL_NONE);
+        if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_BACKGROUND) {
+#ifdef __ANDROID__
+            openride_app_lifecycle_enter_background(&app_lifecycle,
+                                                     real_gps_requested || real_gps_active,
+                                                     drive_mode.active);
+            if (real_gps_active) {
+                openride_location_provider_stop(&location_provider);
+                real_gps_active = false;
+            }
+#else
+            openride_app_lifecycle_enter_background(&app_lifecycle,
+                                                     gps_simulator.active,
+                                                     drive_mode.active);
+#endif
+            render_suspended = true;
+        } else if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_FOREGROUND) {
+            openride_app_lifecycle_enter_foreground(&app_lifecycle);
+            render_suspended = false;
+            last_frame_ticks = SDL_GetTicks();
+            openride_location_filter_reset(&location_filter);
+            memset(&filtered_location, 0, sizeof(filtered_location));
+
+            bool restart_gps = false;
+            bool restore_drive = false;
+            if (openride_app_lifecycle_take_resume(&app_lifecycle,
+                                                    &restart_gps,
+                                                    &restore_drive)) {
+#ifdef __ANDROID__
+                if (restart_gps) {
+                    real_gps_requested = true;
+                    if (openride_location_provider_start(&location_provider)) {
+                        real_gps_active = true;
+                        real_gps_sample_age_s = INFINITY;
+                        snprintf(route_status, sizeof(route_status), "GPS repris apres retour application");
+                    } else {
+                        snprintf(route_status, sizeof(route_status), "GPS a relancer apres retour application");
+                    }
+                }
+                if (restore_drive && route_valid && real_gps_active) {
+                    openride_drive_mode_set_active(&drive_mode, true);
+                    openride_drive_mode_set_auto_zoom(&drive_mode, true);
+                    follow_gps = true;
+                }
+#else
+                (void)restart_gps;
+                (void)restore_drive;
+#endif
+            }
+        } else if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_LOW_MEMORY) {
+            snprintf(route_status, sizeof(route_status), "memoire faible: navigation conservee");
+        } else if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_TERMINATING) {
+            running = false;
+        }
+
+        if (!running) break;
+        if (render_suspended || app_lifecycle.in_background) {
+            SDL_Delay(50);
+            continue;
+        }
+
         if (pending_drive_action != OPENRIDE_DRIVE_ACTION_NONE) {
             const OpenRideDriveAction action = pending_drive_action;
             pending_drive_action = OPENRIDE_DRIVE_ACTION_NONE;
@@ -3672,6 +3885,7 @@ int main(int argc, char **argv)
                          drive_mode.heading_up ? "cap en haut" : "nord en haut");
             } else if (action == OPENRIDE_DRIVE_ACTION_GPS) {
 #ifdef __ANDROID__
+                real_gps_requested = false;
                 if (real_gps_active) {
                     openride_location_provider_stop(&location_provider);
                     real_gps_active = false;
@@ -3701,11 +3915,34 @@ int main(int argc, char **argv)
                                   route_status,
                                   sizeof(route_status));
             } else if (action == OPENRIDE_TOOLBAR_ROUTE) {
+#ifdef __ANDROID__
+                if (route_valid) {
+                    real_gps_requested = true;
+                    if (!real_gps_active) {
+                        real_gps_active = openride_location_provider_start(&location_provider);
+                        real_gps_sample_age_s = INFINITY;
+                    }
+                    if (real_gps_active) {
+                        openride_drive_mode_set_active(&drive_mode, true);
+                        openride_drive_mode_set_auto_zoom(&drive_mode, true);
+                        follow_gps = true;
+                        snprintf(route_status, sizeof(route_status), "navigation demarree");
+                    } else {
+                        snprintf(route_status, sizeof(route_status),
+                                 "autorise la localisation Android puis retouche Demarrer");
+                    }
+                } else if (openride_map_selection_complete(&selection)) {
+                    route_dirty = true;
+                } else {
+                    snprintf(route_status, sizeof(route_status), "touche la carte: depart puis destination");
+                }
+#else
                 if (openride_map_selection_complete(&selection)) {
                     route_dirty = true;
                 } else {
                     snprintf(route_status, sizeof(route_status), "touche la carte: depart puis destination");
                 }
+#endif
             } else if (action == OPENRIDE_TOOLBAR_LOOP) {
                 if (!selection.has_start) {
                     snprintf(route_status, sizeof(route_status), "choisis d'abord le depart de la boucle");
@@ -3759,26 +3996,30 @@ int main(int argc, char **argv)
                         follow_gps = true;
                         snprintf(route_status, sizeof(route_status), "mode conduite actif");
                     } else {
+                        real_gps_requested = false;
                         openride_location_provider_stop(&location_provider);
                         real_gps_active = false;
                         openride_drive_mode_set_active(&drive_mode, false);
                         camera.bearing_deg = 0.0;
                         snprintf(route_status, sizeof(route_status), "GPS reel arrete");
                     }
-                } else if (openride_location_provider_start(&location_provider)) {
-                    real_gps_active = true;
-                    real_gps_sample_age_s = INFINITY;
-                    if (route_valid) {
-                        openride_drive_mode_set_active(&drive_mode, true);
-                        openride_drive_mode_set_auto_zoom(&drive_mode, true);
-                        follow_gps = true;
-                    }
-                    snprintf(route_status,
-                             sizeof(route_status),
-                             route_valid ? "GPS reel + mode conduite" : "GPS reel actif");
                 } else {
-                    snprintf(route_status, sizeof(route_status),
-                             "autorise la localisation Android puis retouche GPS");
+                    real_gps_requested = true;
+                    if (openride_location_provider_start(&location_provider)) {
+                        real_gps_active = true;
+                        real_gps_sample_age_s = INFINITY;
+                        if (route_valid) {
+                            openride_drive_mode_set_active(&drive_mode, true);
+                            openride_drive_mode_set_auto_zoom(&drive_mode, true);
+                            follow_gps = true;
+                        }
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 route_valid ? "GPS reel + mode conduite" : "GPS reel actif");
+                    } else {
+                        snprintf(route_status, sizeof(route_status),
+                                 "autorise la localisation Android puis retouche GPS");
+                    }
                 }
 #else
                 if (route_valid && gps_simulator.route) {
@@ -4029,6 +4270,16 @@ int main(int argc, char **argv)
                                        drive_heading,
                                        maneuver_distance_m,
                                        delta_seconds);
+            if (drive_mode.gps_quality == OPENRIDE_GPS_LOST
+                && last_drive_gps_quality != OPENRIDE_GPS_LOST) {
+                snprintf(route_status, sizeof(route_status), "signal GPS perdu");
+            } else if ((last_drive_gps_quality == OPENRIDE_GPS_LOST
+                        || last_drive_gps_quality == OPENRIDE_GPS_UNAVAILABLE)
+                       && drive_mode.gps_quality != OPENRIDE_GPS_LOST
+                       && drive_mode.gps_quality != OPENRIDE_GPS_UNAVAILABLE) {
+                snprintf(route_status, sizeof(route_status), "signal GPS retrouve");
+            }
+            last_drive_gps_quality = drive_mode.gps_quality;
             if (follow_gps && drive_mode.initialized
                 && drive_mode.gps_quality != OPENRIDE_GPS_LOST) {
                 camera.center_lat = drive_mode.camera_lat;
@@ -4215,17 +4466,23 @@ int main(int argc, char **argv)
         if (!drive_mode.active
             && !place_search_active
             && app_panel == OPENRIDE_APP_PANEL_NONE) {
-            draw_mobile_toolbar(renderer, width, height);
+            draw_mobile_toolbar(renderer, width, height, route_valid);
         }
         SDL_RenderPresent(renderer);
     }
 
 #ifdef __ANDROID__
+    real_gps_requested = false;
     if (real_gps_active) {
         openride_location_provider_stop(&location_provider);
         real_gps_active = false;
     }
 #endif
+
+    if (lifecycle_watch_installed) {
+        SDL_RemoveEventWatch(openride_lifecycle_event_watch, &lifecycle_watch);
+        lifecycle_watch_installed = false;
+    }
 
     if (vector_map) {
         openride_vector_map_renderer_destroy(&vector_renderer);

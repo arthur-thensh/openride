@@ -124,6 +124,20 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
     }
 
     @Override
+    protected void onPause() {
+        stopLocationUpdatesOnUiThread();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (locationRequested && hasLocationPermission()) {
+            startLocationUpdatesOnUiThread();
+        }
+    }
+
+    @Override
     public void onRequestPermissionsResult(int requestCode,
                                            String[] permissions,
                                            int[] grantResults) {
