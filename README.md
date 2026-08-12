@@ -4,7 +4,7 @@ OpenRide est une application de navigation moto hors ligne écrite principalemen
 
 Le projet vise Android et iOS, avec un développement quotidien réalisé sur macOS. Le cœur de l'application reste indépendant des plateformes autant que possible : carte, routage, navigation, recherche, GPX, génération de boucles et logique GPS sont implémentés en C. Les couches Android/iOS doivent rester fines et limitées aux services fournis par le système, comme le GPS ou le cycle de vie de l'application.
 
-Version actuelle : **v0.22**.
+Version actuelle : **v0.22.1**.
 
 ## Objectifs
 
@@ -21,7 +21,7 @@ OpenRide doit permettre à terme de :
 - conserver favoris, historique et préférences ;
 - fonctionner sur Android puis iOS avec le même cœur C.
 
-Pendant une randonnée, **aucun accès Internet n'est requis**. Depuis la v0.22, Android peut aussi télécharger directement un extrait `.osm.pbf` puis fabriquer localement toutes les données de la région : carte `.ormap`, routage `.orgraph` et recherche `.orplaces.sqlite`. L'ordinateur n'est plus nécessaire pour installer une région sur le téléphone.
+Pendant une randonnée, **aucun accès Internet n'est requis**. Depuis la v0.22, Android peut télécharger directement un extrait `.osm.pbf` puis fabriquer localement toutes les données de la région : carte `.ormap`, routage `.orgraph` et recherche `.orplaces.sqlite`. Depuis la v0.22.1, la carte `.ormap` v3 utilise des surfaces vectorielles, des multipolygones OSM `outer` et un renderer SDL3 batché, validés sur macOS et Android. L'ordinateur n'est plus nécessaire pour installer une région sur le téléphone.
 
 ---
 
@@ -29,9 +29,13 @@ Pendant une randonnée, **aucun accès Internet n'est requis**. Depuis la v0.22,
 
 Les briques suivantes sont déjà fonctionnelles :
 
-- carte OpenRide `.ormap` générée directement depuis les données OSM ;
+- carte OpenRide `.ormap` v3 générée directement depuis les données OSM ;
+- eau surfacique et cours d'eau vectoriels ;
+- multipolygones OSM `outer` pour les surfaces cartographiques ;
+- zones bâties généralisées et polygonisées sans stocker les bâtiments individuels ;
+- niveaux de détail cartographiques jusqu'au zoom 16 ;
+- renderer cartographique SDL3 batché, fluide sur macOS et Android ;
 - compatibilité temporaire avec les anciennes MBTiles Shortbread pour la transition ;
-- renderer cartographique en C ;
 - styles `Road`, `Trail` et `Topo` ;
 - graphe routier `.orgraph` construit à partir d'un `.osm.pbf` ;
 - moteur de routage hors ligne ;
@@ -75,9 +79,11 @@ OpenRide
 │
 ├── Carte hors ligne
 │   ├── routes moto par niveaux de zoom
-│   ├── zones bâties simplifiées (pas de bâtiments individuels)
-│   ├── eau / forêts / labels
-│   └── renderer SDL3
+│   ├── surfaces vectorielles eau / zones bâties
+│   ├── waterways vectoriels
+│   ├── forêts / labels
+│   ├── LOD jusqu'au zoom 16
+│   └── renderer SDL3 batché
 │
 ├── Moteur de routage hors ligne
 │   ├── graphe dirigé
@@ -236,7 +242,15 @@ SDL est placé dans :
 vendor/SDL/
 ```
 
-## 6. Configurer et compiler la version macOS
+## 6. Configurer, compiler et tester la version macOS
+
+Le workflow recommandé est le script agrégé :
+
+```sh
+./scripts/build_macos.sh
+```
+
+Il enchaîne la configuration CMake, la compilation et les tests CTest. Les scripts unitaires restent disponibles si nécessaire :
 
 ```sh
 ./scripts/configure.sh
@@ -244,7 +258,7 @@ vendor/SDL/
 ./scripts/test.sh
 ```
 
-Puis :
+Puis lancer OpenRide :
 
 ```sh
 ./scripts/run.sh
@@ -279,17 +293,23 @@ Le format Shortbread/MBTiles n'est plus nécessaire pour une nouvelle installati
 
 `.ormap` est un conteneur SQLite versionné conçu spécifiquement pour OpenRide. Il ne cherche pas à conserver toute la complexité cartographique d'OSM : il stocke ce qui est utile à une navigation moto.
 
-La première version contient notamment :
+Le format courant est **`.ormap` v3**. Il contient notamment :
 
-- routes principales et secondaires ;
-- petites routes ;
+- routes principales, secondaires et locales avec niveaux de visibilité par zoom ;
 - `track` et `path` routables à moto ;
-- eau ;
+- waterways (`river`, `canal`, `stream`, `drain`) conservés sous forme de lignes vectorielles continues ;
+- surfaces d'eau stockées sous forme vectorielle ;
+- multipolygones OSM `outer` assemblés pendant l'import ;
+- zones bâties regroupées puis converties en polygones vectoriels simplifiés ;
 - forêts principales ;
 - labels de villes/villages ;
-- zones bâties simplifiées.
+- niveaux de détail cartographiques jusqu'au zoom 16.
 
-**Les bâtiments individuels ne sont volontairement pas conservés.** Pendant l'import, les footprints de bâtiments deviennent des échantillons d'occupation puis sont regroupés avec les zones `landuse` en blocs bâtis grossiers. Cela réduit fortement la quantité de géométrie à stocker et à dessiner sur téléphone, tout en gardant l'information visuelle utile pour se repérer.
+**Les bâtiments individuels ne sont volontairement pas conservés.** Pendant l'import, les footprints deviennent des échantillons d'occupation puis sont regroupés avec les zones `landuse`. Une grille haute résolution sert uniquement d'étape intermédiaire pour fusionner les zones bâties ; son contour est ensuite extrait, lissé, simplifié et stocké comme géométrie vectorielle. La grille n'est donc pas la représentation finale affichée à l'écran.
+
+Les surfaces vectorielles utilisent plusieurs niveaux de détail afin de limiter le coût du rendu au dézoom. Le renderer SDL3 regroupe également routes, casings, waterways, surfaces et masques en batches de géométrie pour éviter des milliers d'appels de rendu par frame.
+
+Limite actuelle : les membres `inner` des multipolygones sont détectés mais ne sont pas encore soustraits des surfaces. Une île ou un trou interne peut donc être rempli tant que la triangulation avec trous n'est pas implémentée.
 
 ## Méthode A — directement dans Android (méthode normale)
 
@@ -315,7 +335,7 @@ Le téléchargement demande Internet. **Toutes les étapes de transformation et 
 
 La préparation est volontairement effectuée sur un thread de travail, car le traitement d'une région peut durer plusieurs minutes et solliciter fortement le CPU. Pour une grosse région, il est préférable de laisser le téléphone branché.
 
-Après une première préparation en v0.22, OpenRide demande encore un redémarrage de l'application pour activer le nouveau `.ormap`. Une activation à chaud pourra être ajoutée plus tard.
+Après une préparation, OpenRide demande encore un redémarrage de l'application pour activer le nouveau `.ormap`. Une activation à chaud pourra être ajoutée plus tard.
 
 ## Méthode B — préparer la même région sur macOS (développement)
 
@@ -348,6 +368,18 @@ data/maps/nord-pas-de-calais.ormap
 data/routing/nord-pas-de-calais.orgraph
 data/search/nord-pas-de-calais.orplaces.sqlite
 ```
+
+## Référence v0.22.1 — Nord-Pas-de-Calais
+
+La chaîne complète a été validée sur macOS puis sur un téléphone Android réel avec génération locale depuis le PBF. Sur la région de référence, les ordres de grandeur observés sont :
+
+```text
+.ormap               ~65 Mo
+.orgraph             ~180 Mo
+.orplaces.sqlite     ~300 Ko
+```
+
+La génération v0.22.1 traite notamment plusieurs milliers de multipolygones OSM et produit les surfaces vectorielles directement sur le téléphone. Le PBF source est supprimé après succès afin de ne conserver que les trois formats OpenRide nécessaires à l'utilisation hors ligne.
 
 Pour lancer la version macOS :
 
@@ -799,17 +831,16 @@ git apply --check ~/Downloads/openride-vX.XX.patch
 git apply ~/Downloads/openride-vX.XX.patch
 ```
 
-Puis :
+Puis valider le jalon avec le workflow macOS :
 
 ```sh
-./scripts/configure.sh
-./scripts/build.sh
-./scripts/test.sh
+./scripts/build_macos.sh
 ```
 
 Pour Android :
 
 ```sh
+./scripts/android_check.sh
 ./scripts/android_build.sh
 ./scripts/android_install.sh
 ./scripts/android_run.sh
@@ -849,14 +880,14 @@ Quelques règles architecturales importantes :
 
 # Prochaines étapes
 
-Après v0.22, les priorités sont notamment :
+Après v0.22.1, les priorités sont notamment :
 
-- mesurer sur le téléphone réel le temps, la mémoire et la batterie nécessaires à la construction `.orgraph` / recherche / `.ormap` ;
-- améliorer le retour de progression pendant les longues phases d'import ;
-- ajouter plusieurs régions téléchargeables et leur sélection automatique ;
-- prendre en charge davantage de géométries OSM complexes (notamment certains multipolygones) dans `.ormap` ;
-- améliorer le format `.ormap`, son niveau de détail et le rendu des zones naturelles ;
+- améliorer le retour de progression et les métriques de temps/mémoire pendant les longues phases de préparation d'une région ;
+- ajouter plusieurs régions téléchargeables, leur gestion et leur sélection automatique ;
+- prendre en charge les trous `inner` des multipolygones et d'autres géométries OSM complexes réellement utiles à la navigation ;
+- poursuivre les mesures de consommation CPU, mémoire et batterie sur téléphone réel ;
 - enrichir les instructions avec noms/numéros de routes ;
 - fiabiliser encore la navigation longue durée et le GPS en arrière-plan ;
+- améliorer l'expérience de préparation et de départ d'un trajet ;
 - revenir plus tard sur le générateur de boucles ;
 - préparer ensuite le portage iOS.
