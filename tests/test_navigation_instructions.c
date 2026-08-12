@@ -1,0 +1,158 @@
+#include "openride/navigation_instructions.h"
+#include "openride/map_selection.h"
+
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static OpenRideRoute route_from_points(const OpenRideRoutePoint *points,
+                                       uint32_t count)
+{
+    OpenRideRoute route;
+    memset(&route, 0, sizeof(route));
+    route.geometry = calloc(count, sizeof(*route.geometry));
+    assert(route.geometry != NULL);
+    memcpy(route.geometry, points, count * sizeof(*points));
+    route.geometry_count = count;
+    double distance = 0.0;
+    for (uint32_t i = 1U; i < count; ++i) {
+        distance += openride_geo_distance_m(points[i - 1U].lat,
+                                            points[i - 1U].lon,
+                                            points[i].lat,
+                                            points[i].lon);
+    }
+    route.distance_m = distance;
+    return route;
+}
+
+static void test_right_turn(void)
+{
+    const OpenRideRoutePoint points[] = {
+        {50.0000, 3.0000},
+        {50.0010, 3.0000},
+        {50.0010, 3.0010}
+    };
+    OpenRideRoute route = route_from_points(points, 3U);
+    OpenRideNavigationInstructionList list = {0};
+    char error[128] = {0};
+    assert(openride_navigation_instructions_build(NULL,
+                                                   &route,
+                                                   &list,
+                                                   error,
+                                                   sizeof(error)));
+    assert(list.count == 3U);
+    assert(list.items[0].maneuver == OPENRIDE_MANEUVER_DEPART);
+    assert(list.items[1].maneuver == OPENRIDE_MANEUVER_RIGHT);
+    assert(list.items[2].maneuver == OPENRIDE_MANEUVER_ARRIVE);
+    assert(list.items[1].turn_angle_deg > 80.0
+           && list.items[1].turn_angle_deg < 100.0);
+
+    double remaining = 0.0;
+    const OpenRideNavigationInstruction *next =
+        openride_navigation_instructions_next(&list, 0.0, &remaining);
+    assert(next == &list.items[1]);
+    assert(remaining > 50.0);
+
+    char text[96];
+    openride_navigation_instruction_text_fr(next, text, sizeof(text));
+    assert(strcmp(text, "Tournez a droite") == 0);
+
+    openride_navigation_instructions_destroy(&list);
+    openride_route_destroy(&route);
+}
+
+static OpenRideRoutingGraph build_roundabout_graph(void)
+{
+    OpenRideRoutingGraph graph = {0};
+    OpenRideRoutingGraphBuilder *builder = openride_routing_graph_builder_create();
+    assert(builder != NULL);
+
+    const OpenRideRoutingNodeId n0 = openride_routing_graph_builder_add_node(builder, 50.0000, 3.0000);
+    const OpenRideRoutingNodeId n1 = openride_routing_graph_builder_add_node(builder, 50.0010, 3.0000);
+    const OpenRideRoutingNodeId n2 = openride_routing_graph_builder_add_node(builder, 50.0015, 3.0005);
+    const OpenRideRoutingNodeId n3 = openride_routing_graph_builder_add_node(builder, 50.0010, 3.0010);
+    const OpenRideRoutingNodeId n4 = openride_routing_graph_builder_add_node(builder, 50.0000, 3.0010);
+    const OpenRideRoutingNodeId exit1 = openride_routing_graph_builder_add_node(builder, 50.0022, 3.0005);
+    assert(n0 == 0U && n1 == 1U && n2 == 2U && n3 == 3U && n4 == 4U && exit1 == 5U);
+
+    OpenRideRoutingEdgeAttributes normal = openride_routing_edge_attributes_default();
+    OpenRideRoutingEdgeAttributes roundabout = normal;
+    roundabout.flags |= OPENRIDE_EDGE_FLAG_ROUNDABOUT;
+
+    assert(openride_routing_graph_builder_add_directed_edge(builder, n0, n1, &normal));
+    assert(openride_routing_graph_builder_add_directed_edge(builder, n1, n2, &roundabout));
+    assert(openride_routing_graph_builder_add_directed_edge(builder, n2, n3, &roundabout));
+    assert(openride_routing_graph_builder_add_directed_edge(builder, n2, exit1, &normal));
+    assert(openride_routing_graph_builder_add_directed_edge(builder, n3, n4, &normal));
+
+    char error[128] = {0};
+    assert(openride_routing_graph_builder_build(builder, &graph, error, sizeof(error)));
+    openride_routing_graph_builder_destroy(builder);
+    return graph;
+}
+
+static void test_roundabout_exit_number(void)
+{
+    OpenRideRoutingGraph graph = build_roundabout_graph();
+    OpenRideRoute route;
+    memset(&route, 0, sizeof(route));
+    route.node_count = 5U;
+    route.nodes = calloc(route.node_count, sizeof(*route.nodes));
+    route.geometry_count = route.node_count;
+    route.geometry = calloc(route.geometry_count, sizeof(*route.geometry));
+    assert(route.nodes && route.geometry);
+
+    for (uint32_t i = 0U; i < route.node_count; ++i) {
+        route.nodes[i] = i;
+        openride_routing_node_geo(&graph.nodes[i],
+                                  &route.geometry[i].lat,
+                                  &route.geometry[i].lon);
+        if (i > 0U) {
+            route.distance_m += openride_geo_distance_m(route.geometry[i - 1U].lat,
+                                                        route.geometry[i - 1U].lon,
+                                                        route.geometry[i].lat,
+                                                        route.geometry[i].lon);
+        }
+    }
+
+    OpenRideNavigationInstructionList list = {0};
+    char error[128] = {0};
+    assert(openride_navigation_instructions_build(&graph,
+                                                   &route,
+                                                   &list,
+                                                   error,
+                                                   sizeof(error)));
+
+    bool found = false;
+    for (uint32_t i = 0U; i < list.count; ++i) {
+        if (list.items[i].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT) {
+            found = true;
+            assert(list.items[i].roundabout_exit_number == 2U);
+        }
+    }
+    assert(found);
+
+    openride_navigation_instructions_destroy(&list);
+    openride_route_destroy(&route);
+    openride_routing_graph_destroy(&graph);
+}
+
+static void test_distance_format(void)
+{
+    char text[32];
+    openride_navigation_distance_text_fr(347.0, text, sizeof(text));
+    assert(strcmp(text, "350 m") == 0);
+    openride_navigation_distance_text_fr(2350.0, text, sizeof(text));
+    assert(strcmp(text, "2.4 km") == 0);
+}
+
+int main(void)
+{
+    test_right_turn();
+    test_roundabout_exit_number();
+    test_distance_format();
+    puts("Navigation instructions tests: OK");
+    return 0;
+}
