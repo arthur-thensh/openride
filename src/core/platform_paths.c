@@ -1,8 +1,13 @@
 #include "openride/platform_paths.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#if defined(_WIN32)
+#include <direct.h>
+#endif
 
 static void set_error(char *error, size_t error_size, const char *message)
 {
@@ -53,6 +58,51 @@ bool openride_platform_paths_init(OpenRidePlatformPaths *paths,
         set_error(error, error_size, "platform path is too long");
         memset(paths, 0, sizeof(*paths));
         return false;
+    }
+
+    set_error(error, error_size, "");
+    return true;
+}
+
+
+static bool ensure_directory(const char *path)
+{
+    struct stat info;
+    if (!path || path[0] == '\0') return false;
+    if (stat(path, &info) == 0) return S_ISDIR(info.st_mode);
+#if defined(_WIN32)
+    if (_mkdir(path) == 0) return true;
+#else
+    if (mkdir(path, 0755) == 0) return true;
+#endif
+    return errno == EEXIST;
+}
+
+bool openride_platform_paths_ensure_directories(const OpenRidePlatformPaths *paths,
+                                               char *error,
+                                               size_t error_size)
+{
+    if (!paths) {
+        set_error(error, error_size, "invalid platform paths");
+        return false;
+    }
+
+    const char *directories[] = {
+        paths->root,
+        paths->data_dir,
+        paths->maps_dir,
+        paths->routing_dir,
+        paths->search_dir,
+        paths->gpx_dir
+    };
+    const size_t count = sizeof(directories) / sizeof(directories[0]);
+    for (size_t i = 0; i < count; ++i) {
+        if (!ensure_directory(directories[i])) {
+            char message[640];
+            snprintf(message, sizeof(message), "unable to create directory: %s", directories[i]);
+            set_error(error, error_size, message);
+            return false;
+        }
     }
 
     set_error(error, error_size, "");

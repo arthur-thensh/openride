@@ -32,6 +32,10 @@ bool openride_platform_path_join(char *output,
                                  const char *directory,
                                  const char *filename);
 
+bool openride_platform_paths_ensure_directories(const OpenRidePlatformPaths *paths,
+                                               char *error,
+                                               size_t error_size);
+
 bool openride_platform_file_exists(const char *path);
 double openride_platform_file_size_mb(const char *path);
 

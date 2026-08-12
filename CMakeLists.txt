@@ -1,11 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.18.0 LANGUAGES C)
+project(OpenRide VERSION 0.19.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-option(OPENRIDE_BUILD_TESTS "Build OpenRide core tests" ON)
+if(ANDROID)
+    option(OPENRIDE_BUILD_TESTS "Build OpenRide core tests" OFF)
+else()
+    option(OPENRIDE_BUILD_TESTS "Build OpenRide core tests" ON)
+endif()
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL/CMakeLists.txt")
     message(FATAL_ERROR
@@ -13,9 +17,34 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL/CMakeLists.txt")
         "Expected: vendor/SDL/CMakeLists.txt")
 endif()
 
-find_package(SQLite3 REQUIRED)
-find_package(ZLIB REQUIRED)
-add_subdirectory(vendor/SDL EXCLUDE_FROM_ALL)
+if(ANDROID)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite/sqlite3.c")
+        message(FATAL_ERROR
+            "SQLite amalgamation is missing for Android. Run: ./scripts/bootstrap_sqlite.sh\n"
+            "Expected: vendor/sqlite/sqlite3.c")
+    endif()
+
+    add_library(openride_sqlite STATIC vendor/sqlite/sqlite3.c)
+    set_target_properties(openride_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(openride_sqlite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite)
+    target_compile_definitions(openride_sqlite PRIVATE
+        SQLITE_THREADSAFE=1
+        SQLITE_OMIT_LOAD_EXTENSION=1
+    )
+    add_library(SQLite::SQLite3 ALIAS openride_sqlite)
+
+    find_library(OPENRIDE_ANDROID_ZLIB z REQUIRED)
+    add_library(openride_android_zlib INTERFACE)
+    target_link_libraries(openride_android_zlib INTERFACE ${OPENRIDE_ANDROID_ZLIB})
+    add_library(ZLIB::ZLIB ALIAS openride_android_zlib)
+else()
+    find_package(SQLite3 REQUIRED)
+    find_package(ZLIB REQUIRED)
+endif()
+
+if(NOT TARGET SDL3::SDL3)
+    add_subdirectory(vendor/SDL EXCLUDE_FROM_ALL)
+endif()
 
 add_library(openride_core STATIC
     src/core/map_camera.c
@@ -49,6 +78,7 @@ target_include_directories(openride_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+set_target_properties(openride_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(openride_core
     PUBLIC
@@ -66,18 +96,29 @@ else()
     target_compile_options(openride_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_executable(openride
+set(OPENRIDE_APP_SOURCES
     src/main.c
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
 )
 
-target_include_directories(openride
+if(ANDROID)
+    add_library(main SHARED
+        ${OPENRIDE_APP_SOURCES}
+        src/platform/android_location_provider.c
+    )
+    set(OPENRIDE_APP_TARGET main)
+else()
+    add_executable(openride ${OPENRIDE_APP_SOURCES})
+    set(OPENRIDE_APP_TARGET openride)
+endif()
+
+target_include_directories(${OPENRIDE_APP_TARGET}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(openride
+target_link_libraries(${OPENRIDE_APP_TARGET}
     PRIVATE
         openride_core
         SDL3::SDL3
@@ -85,12 +126,12 @@ target_link_libraries(openride
 )
 
 if(MSVC)
-    target_compile_options(openride PRIVATE /W4)
+    target_compile_options(${OPENRIDE_APP_TARGET} PRIVATE /W4)
 else()
-    target_compile_options(openride PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(${OPENRIDE_APP_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-
+if(NOT ANDROID)
 add_executable(openride_osm_import
     src/tools/osm_import_main.c
 )
@@ -171,6 +212,8 @@ if(MSVC)
 else()
     target_compile_options(openride_loop_benchmark PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+endif() # NOT ANDROID desktop tools
 
 if(OPENRIDE_BUILD_TESTS)
     enable_testing()

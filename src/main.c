@@ -12,6 +12,11 @@
 #include "openride/navigation_instructions.h"
 #include "openride/navigation_session.h"
 #include "openride/location_filter.h"
+#include "openride/location_provider.h"
+#ifdef __ANDROID__
+#include "openride/android_location_provider.h"
+#include <SDL3/SDL_system.h>
+#endif
 #include "openride/place_search.h"
 #include "openride/app_storage.h"
 #include "openride/platform_paths.h"
@@ -35,9 +40,6 @@
 #define OPENRIDE_LOOP_DISTANCE_MAX_M 300000.0
 #define OPENRIDE_GPS_SIMULATION_TIME_SCALE 20.0
 #define OPENRIDE_GPX_RECORDING_MIN_STEP_M 10.0
-#define OPENRIDE_GPX_DEFAULT_IMPORT "data/gpx/import.gpx"
-#define OPENRIDE_GPX_ROUTE_EXPORT "data/gpx/openride-route.gpx"
-#define OPENRIDE_GPX_RECORDING_EXPORT "data/gpx/openride-recording.gpx"
 #define OPENRIDE_GPX_NAVIGATION_SPEED_KPH 50.0
 #define OPENRIDE_SEARCH_MAX_RESULTS 8U
 #define OPENRIDE_APP_LIST_MAX 12U
@@ -787,6 +789,50 @@ static void draw_selection(SDL_Renderer *renderer,
     }
 }
 
+static SDL_Rect openride_render_safe_area(SDL_Renderer *renderer,
+                                              int viewport_width,
+                                              int viewport_height)
+{
+    SDL_Rect safe = {0, 0, viewport_width, viewport_height};
+    SDL_Rect queried = {0};
+    if (renderer
+        && SDL_GetRenderSafeArea(renderer, &queried)
+        && queried.w > 0
+        && queried.h > 0) {
+        safe = queried;
+    }
+    return safe;
+}
+
+static float openride_ui_scale(SDL_Renderer *renderer)
+{
+    float scale = 1.0f;
+    SDL_Window *window = renderer ? SDL_GetRenderWindow(renderer) : NULL;
+    if (window) {
+        const float queried = SDL_GetWindowDisplayScale(window);
+        if (queried > 0.0f) scale = queried;
+    }
+    if (scale < 1.0f) scale = 1.0f;
+    if (scale > 3.0f) scale = 3.0f;
+    return scale;
+}
+
+static OpenRideToolbarAction mobile_toolbar_hit_test(SDL_Renderer *renderer,
+                                                       double x,
+                                                       double y,
+                                                       int viewport_width,
+                                                       int viewport_height)
+{
+    const SDL_Rect safe = openride_render_safe_area(renderer, viewport_width, viewport_height);
+    const double ui_scale = (double)openride_ui_scale(renderer);
+    const int logical_width = (int)((double)safe.w / ui_scale);
+    const int logical_height = (int)((double)safe.h / ui_scale);
+    return openride_toolbar_hit_test((x - (double)safe.x) / ui_scale,
+                                     (y - (double)safe.y) / ui_scale,
+                                     logical_width,
+                                     logical_height);
+}
+
 static void format_duration(double seconds, char *text, size_t text_size)
 {
     if (!text || text_size == 0U) return;
@@ -837,7 +883,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.18");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.19");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -1622,6 +1668,84 @@ static void draw_navigation_position(SDL_Renderer *renderer,
     draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
 }
 
+#ifdef __ANDROID__
+static void draw_android_status_overlay(SDL_Renderer *renderer,
+                                        const OpenRideMBTilesMetadata *metadata,
+                                        const OpenRideRoute *route,
+                                        bool route_valid,
+                                        const char *route_status,
+                                        OpenRideRoutingProfile profile,
+                                        int viewport_width,
+                                        int viewport_height)
+{
+    const SDL_Rect safe = openride_render_safe_area(renderer, viewport_width, viewport_height);
+    const float ui_scale = openride_ui_scale(renderer);
+    const float text_scale = ui_scale > 2.0f ? 2.0f : ui_scale;
+    const float attribution_scale = ui_scale > 1.5f ? 1.5f : ui_scale;
+    const float margin = 8.0f * ui_scale;
+    const float panel_x = (float)safe.x + margin;
+    const float panel_y = (float)safe.y + margin;
+    float panel_w = (float)safe.w - margin * 2.0f;
+    if (panel_w > 390.0f * ui_scale) panel_w = 390.0f * ui_scale;
+    if (panel_w < 180.0f * ui_scale) panel_w = 180.0f * ui_scale;
+    const float panel_h = 48.0f * ui_scale;
+    SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
+
+    SDL_SetRenderDrawColor(renderer, 20, 24, 28, 205);
+    SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 55);
+    SDL_RenderRect(renderer, &panel);
+
+    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
+    draw_scaled_text(renderer,
+                     panel_x + 10.0f * ui_scale,
+                     panel_y + 7.0f * ui_scale,
+                     text_scale,
+                     "OpenRide");
+
+    SDL_SetRenderDrawColor(renderer, 185, 194, 202, 255);
+    char status_line[96];
+    if (route_valid && route) {
+        snprintf(status_line,
+                 sizeof(status_line),
+                 "%.1f km | %.0f min | %s",
+                 route->distance_m / 1000.0,
+                 route->estimated_time_s / 60.0,
+                 openride_routing_profile_name(profile));
+    } else {
+        snprintf(status_line,
+                 sizeof(status_line),
+                 "%.30s",
+                 route_status && route_status[0] ? route_status : "pret");
+    }
+    draw_scaled_text(renderer,
+                     panel_x + 10.0f * ui_scale,
+                     panel_y + 26.0f * ui_scale,
+                     text_scale,
+                     status_line);
+
+    /* Keep OSM attribution visible, but above the gesture/navigation area and toolbar. */
+    if (metadata && metadata->attribution[0] != '\0') {
+        const float toolbar_clearance = 90.0f * ui_scale;
+        const float attribution_y = (float)(safe.y + safe.h) - toolbar_clearance;
+        if (attribution_y > panel_y + panel_h + 8.0f * ui_scale) {
+            SDL_FRect backing = {(float)safe.x + 8.0f * ui_scale,
+                                 attribution_y,
+                                 250.0f * ui_scale,
+                                 14.0f * ui_scale};
+            SDL_SetRenderDrawColor(renderer, 249, 249, 247, 210);
+            SDL_RenderFillRect(renderer, &backing);
+            SDL_SetRenderDrawColor(renderer, 65, 68, 70, 255);
+            draw_scaled_text(renderer,
+                             backing.x + 5.0f * ui_scale,
+                             backing.y + 3.0f * ui_scale,
+                             attribution_scale,
+                             "(c) OpenStreetMap contributors | ODbL");
+        }
+    }
+}
+#endif
+
 static void draw_navigation_overlay(SDL_Renderer *renderer,
                                     const OpenRideNavigationState *navigation,
                                     const OpenRideNavigationInstructionList *instructions,
@@ -1635,6 +1759,10 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
                                     bool gpx_navigation,
                                     int viewport_height)
 {
+#ifdef __ANDROID__
+    (void)simulator;
+    (void)deviation_enabled;
+#endif
     if (!gps_sample_valid || !navigation || !navigation->valid) return;
 
     const float x = 10.0f;
@@ -1650,11 +1778,19 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
+#ifdef __ANDROID__
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 10.0f,
+                              "NAVIGATION GPS REEL%s",
+                              gpx_navigation ? " | GPX" : " | ROUTAGE");
+#else
     SDL_RenderDebugTextFormat(renderer,
                               x + 12.0f,
                               y + 10.0f,
                               "NAVIGATION GPS SIMULEE%s",
                               gpx_navigation ? " | GPX" : " | ROUTAGE");
+#endif
 
     if (navigation->status == OPENRIDE_NAVIGATION_OFF_ROUTE) {
         SDL_SetRenderDrawColor(renderer, 230, 98, 75, 255);
@@ -1663,12 +1799,20 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
     } else {
         SDL_SetRenderDrawColor(renderer, 100, 190, 126, 255);
     }
+#ifdef __ANDROID__
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 27.0f,
+                              "%s | GPS actif",
+                              openride_navigation_status_name(navigation->status));
+#else
     SDL_RenderDebugTextFormat(renderer,
                               x + 12.0f,
                               y + 27.0f,
                               "%s%s",
                               openride_navigation_status_name(navigation->status),
                               simulator && simulator->active ? " | lecture" : " | pause");
+#endif
 
     double instruction_distance_m = 0.0;
     const OpenRideNavigationInstruction *next_instruction =
@@ -1743,6 +1887,14 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
     }
 
     SDL_SetRenderDrawColor(renderer, 158, 168, 176, 255);
+#ifdef __ANDROID__
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 145.0f,
+                              "GPS tactile | F suivi %s | A auto %s | R manuel",
+                              follow_gps ? "ON" : "OFF",
+                              auto_reroute ? "ON" : "OFF");
+#else
     SDL_RenderDebugTextFormat(renderer,
                               x + 12.0f,
                               y + 145.0f,
@@ -1750,11 +1902,20 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
                               follow_gps ? "ON" : "OFF",
                               auto_reroute ? "ON" : "OFF",
                               deviation_enabled ? "ON" : "OFF");
+#endif
 }
 
 static void draw_mobile_toolbar(SDL_Renderer *renderer, int viewport_width, int viewport_height)
 {
-    const OpenRideToolbarRect bar = openride_toolbar_bounds(viewport_width, viewport_height);
+    const SDL_Rect safe = openride_render_safe_area(renderer, viewport_width, viewport_height);
+    const double ui_scale = (double)openride_ui_scale(renderer);
+    const int logical_width = (int)((double)safe.w / ui_scale);
+    const int logical_height = (int)((double)safe.h / ui_scale);
+    OpenRideToolbarRect bar = openride_toolbar_bounds(logical_width, logical_height);
+    bar.x = (double)safe.x + bar.x * ui_scale;
+    bar.y = (double)safe.y + bar.y * ui_scale;
+    bar.w *= ui_scale;
+    bar.h *= ui_scale;
     if (bar.w <= 0.0 || bar.h <= 0.0) return;
 
     SDL_FRect box = {(float)bar.x, (float)bar.y, (float)bar.w, (float)bar.h};
@@ -1766,9 +1927,13 @@ static void draw_mobile_toolbar(SDL_Renderer *renderer, int viewport_width, int 
     for (OpenRideToolbarAction action = OPENRIDE_TOOLBAR_MENU;
          action <= OPENRIDE_TOOLBAR_GPS;
          action = (OpenRideToolbarAction)(action + 1)) {
-        const OpenRideToolbarRect item = openride_toolbar_item_bounds(action,
-                                                                       viewport_width,
-                                                                       viewport_height);
+        OpenRideToolbarRect item = openride_toolbar_item_bounds(action,
+                                                                  logical_width,
+                                                                  logical_height);
+        item.x = (double)safe.x + item.x * ui_scale;
+        item.y = (double)safe.y + item.y * ui_scale;
+        item.w *= ui_scale;
+        item.h *= ui_scale;
         SDL_FRect item_rect = {(float)item.x, (float)item.y, (float)item.w, (float)item.h};
         if (action != OPENRIDE_TOOLBAR_MENU) {
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, 35);
@@ -1780,8 +1945,12 @@ static void draw_mobile_toolbar(SDL_Renderer *renderer, int viewport_width, int 
         }
         SDL_SetRenderDrawColor(renderer, 238, 241, 243, 255);
         const char *label = openride_toolbar_action_label(action);
-        const float label_x = item_rect.x + item_rect.w * 0.5f - (float)strlen(label) * 4.0f;
-        SDL_RenderDebugText(renderer, label_x, item_rect.y + 29.0f, label);
+        const float label_scale = (float)ui_scale;
+        const float label_w = (float)strlen(label) * 8.0f * label_scale;
+        const float label_h = 8.0f * label_scale;
+        const float label_x = item_rect.x + (item_rect.w - label_w) * 0.5f;
+        const float label_y = item_rect.y + (item_rect.h - label_h) * 0.5f;
+        draw_scaled_text(renderer, label_x, label_y, label_scale, label);
     }
 }
 
@@ -1843,30 +2012,102 @@ static OpenRideMapCamera camera_from_metadata(const OpenRideMBTilesMetadata *met
 
 int main(int argc, char **argv)
 {
-    const char *map_path = argc >= 2 ? argv[1] : default_map_path();
-    const char *routing_graph_path = argc >= 3 ? argv[2] : default_routing_graph_path();
-    const char *gpx_import_path = argc >= 4 ? argv[3] : OPENRIDE_GPX_DEFAULT_IMPORT;
     char error[512] = {0};
-    OpenRidePlatformPaths platform_paths;
-    OpenRideRegionStatus region_status;
-    const OpenRideRegionDefinition *region = openride_region_default();
-    if (!openride_platform_paths_init(&platform_paths,
-                                      OPENRIDE_PLATFORM_DESKTOP,
-                                      ".",
-                                      error,
-                                      sizeof(error))) {
-        fprintf(stderr, "Unable to initialize platform paths: %s\n", error);
+
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
+
+    OpenRidePlatformPaths platform_paths;
+    OpenRidePlatformKind platform_kind = OPENRIDE_PLATFORM_DESKTOP;
+    const char *platform_root = ".";
+#ifdef __ANDROID__
+    platform_kind = OPENRIDE_PLATFORM_ANDROID;
+    platform_root = SDL_GetAndroidInternalStoragePath();
+    if (!platform_root || platform_root[0] == '\0') {
+        platform_root = SDL_GetAndroidExternalStoragePath();
+    }
+    if (!platform_root || platform_root[0] == '\0') {
+        SDL_Log("Unable to resolve Android application storage: %s", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+#endif
+
+    if (!openride_platform_paths_init(&platform_paths,
+                                      platform_kind,
+                                      platform_root,
+                                      error,
+                                      sizeof(error))
+        || !openride_platform_paths_ensure_directories(&platform_paths,
+                                                        error,
+                                                        sizeof(error))) {
+        SDL_Log("Unable to initialize platform paths: %s", error);
+        SDL_Quit();
+        return 1;
+    }
+
+    OpenRideRegionStatus region_status;
+    const OpenRideRegionDefinition *region = openride_region_default();
     memset(&region_status, 0, sizeof(region_status));
     openride_region_get_status(&platform_paths, region, &region_status, error, sizeof(error));
 
+    const char *map_path = argc >= 2 ? argv[1] : NULL;
+    const char *routing_graph_path = argc >= 3 ? argv[2] : NULL;
+    char gpx_default_import_path[512] = {0};
+    char gpx_route_export_path[512] = {0};
+    char gpx_recording_export_path[512] = {0};
+    openride_platform_path_join(gpx_default_import_path,
+                                sizeof(gpx_default_import_path),
+                                platform_paths.gpx_dir,
+                                "import.gpx");
+    openride_platform_path_join(gpx_route_export_path,
+                                sizeof(gpx_route_export_path),
+                                platform_paths.gpx_dir,
+                                "openride-route.gpx");
+    openride_platform_path_join(gpx_recording_export_path,
+                                sizeof(gpx_recording_export_path),
+                                platform_paths.gpx_dir,
+                                "openride-recording.gpx");
+    const char *gpx_import_path = argc >= 4 ? argv[3] : gpx_default_import_path;
+
+    if (!map_path) {
+        if (region_status.map_installed) {
+            map_path = region_status.map_path;
+        } else {
+#ifndef __ANDROID__
+            map_path = default_map_path();
+#endif
+        }
+    }
+    if (!routing_graph_path && region_status.routing_installed) {
+        routing_graph_path = region_status.routing_path;
+    }
+#ifndef __ANDROID__
+    if (!routing_graph_path) routing_graph_path = default_routing_graph_path();
+#endif
+
+    if (!map_path || !file_exists(map_path)) {
+#ifdef __ANDROID__
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                                 "OpenRide - données hors ligne absentes",
+                                 "Installe les données Nord-Pas-de-Calais avec ./scripts/android_push_data.sh puis relance OpenRide.",
+                                 NULL);
+        SDL_Log("Offline map missing from Android storage: %s", platform_paths.maps_dir);
+#else
+        SDL_Log("Offline map is missing: %s", map_path ? map_path : "(null)");
+#endif
+        SDL_Quit();
+        return 1;
+    }
+
     OpenRideMBTiles *map = openride_mbtiles_open(map_path, error, sizeof(error));
     if (!map) {
-        fprintf(stderr, "Unable to open offline map: %s\n", map_path);
-        fprintf(stderr, "Reason: %s\n", error[0] ? error : "unknown error");
-        fprintf(stderr, "\nRun ./scripts/download_real_map.sh to install the real OSM map.\n");
-        fprintf(stderr, "Usage: ./build/openride [path/to/map.mbtiles] [path/to/routing.orgraph] [path/to/import.gpx]\n");
+        SDL_Log("Unable to open offline map %s: %s",
+                map_path,
+                error[0] ? error : "unknown error");
+        SDL_Quit();
         return 1;
     }
 
@@ -1907,6 +2148,12 @@ int main(int argc, char **argv)
     OpenRideLocationFilter location_filter;
     OpenRideFilteredLocation filtered_location = {0};
     OpenRideGPSSimulator gps_simulator;
+#ifdef __ANDROID__
+    OpenRideLocationProvider location_provider;
+    OpenRideAndroidLocationContext android_location_context;
+    openride_android_location_provider_init(&location_provider, &android_location_context);
+    bool real_gps_active = false;
+#endif
     OpenRideNavigationState navigation_state = {0};
     OpenRideGPSSample gps_sample = {0};
     bool gps_sample_valid = false;
@@ -1976,17 +2223,6 @@ int main(int argc, char **argv)
     OpenRideTouchInput touch_input;
     OpenRideToolbarAction pending_toolbar_action = OPENRIDE_TOOLBAR_NONE;
     openride_touch_input_init(&touch_input, 7.0);
-
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("SDL_Init failed: %s", SDL_GetError());
-        openride_gpx_document_destroy(&gpx_recording);
-        openride_gpx_document_destroy(&gpx_overlay);
-        openride_gps_simulator_destroy(&gps_simulator);
-        openride_navigation_engine_destroy(&navigation);
-        openride_routing_graph_destroy(&routing_graph);
-        openride_mbtiles_close(map);
-        return 1;
-    }
 
     if (!SDL_CreateWindowAndRenderer(
             "OpenRide - Offline map",
@@ -2337,6 +2573,19 @@ int main(int argc, char **argv)
                                                        sizeof(route_status));
                         }
                     } else if (event.key.key == SDLK_S) {
+#ifdef __ANDROID__
+                        if (real_gps_active) {
+                            openride_location_provider_stop(&location_provider);
+                            real_gps_active = false;
+                            snprintf(route_status, sizeof(route_status), "GPS reel arrete");
+                        } else if (openride_location_provider_start(&location_provider)) {
+                            real_gps_active = true;
+                            snprintf(route_status, sizeof(route_status), "GPS reel actif");
+                        } else {
+                            snprintf(route_status, sizeof(route_status),
+                                     "GPS indisponible: autorise la localisation puis reessaie");
+                        }
+#else
                         if (route_valid && gps_simulator.route) {
                             const bool active = openride_gps_simulator_toggle(&gps_simulator);
                             if (openride_gps_simulator_sample(&gps_simulator, &gps_sample)) {
@@ -2357,7 +2606,12 @@ int main(int argc, char **argv)
                                      sizeof(route_status),
                                      "calcule un itineraire avant de lancer le GPS");
                         }
+#endif
                     } else if (event.key.key == SDLK_X) {
+#ifdef __ANDROID__
+                        snprintf(route_status, sizeof(route_status),
+                                 "test deviation X disponible sur macOS");
+#else
                         simulator_deviation = !simulator_deviation;
                         openride_gps_simulator_set_lateral_offset_m(
                             &gps_simulator,
@@ -2366,6 +2620,7 @@ int main(int argc, char **argv)
                                  sizeof(route_status),
                                  "deviation GPS test: %s",
                                  simulator_deviation ? "80 m" : "desactivee");
+#endif
                     } else if (event.key.key == SDLK_F) {
                         follow_gps = !follow_gps;
                         if (app_storage) openride_app_storage_set_int(app_storage, "follow_gps", follow_gps ? 1 : 0, error, sizeof(error));
@@ -2529,7 +2784,7 @@ int main(int argc, char **argv)
                                      "aucun itineraire a exporter en GPX");
                         } else {
                             char gpx_error[192] = {0};
-                            if (openride_gpx_save_route(OPENRIDE_GPX_ROUTE_EXPORT,
+                            if (openride_gpx_save_route(gpx_route_export_path,
                                                         &route,
                                                         loop_active ? "OpenRide boucle" : "OpenRide itineraire",
                                                         gpx_error,
@@ -2537,7 +2792,7 @@ int main(int argc, char **argv)
                                 snprintf(route_status,
                                          sizeof(route_status),
                                          "GPX exporte: %s",
-                                         OPENRIDE_GPX_ROUTE_EXPORT);
+                                         gpx_route_export_path);
                             } else {
                                 snprintf(route_status,
                                          sizeof(route_status),
@@ -2571,7 +2826,7 @@ int main(int argc, char **argv)
                             gpx_recording_active = false;
                             if (gpx_recording.track_points.count >= 2U) {
                                 char gpx_error[192] = {0};
-                                if (openride_gpx_save_document(OPENRIDE_GPX_RECORDING_EXPORT,
+                                if (openride_gpx_save_document(gpx_recording_export_path,
                                                                &gpx_recording,
                                                                "OpenRide",
                                                                gpx_error,
@@ -2579,7 +2834,7 @@ int main(int argc, char **argv)
                                     snprintf(route_status,
                                              sizeof(route_status),
                                              "trace GPX enregistree: %s",
-                                             OPENRIDE_GPX_RECORDING_EXPORT);
+                                             gpx_recording_export_path);
                                 } else {
                                     snprintf(route_status,
                                              sizeof(route_status),
@@ -2661,7 +2916,8 @@ int main(int argc, char **argv)
                     if (place_search_active || app_panel != OPENRIDE_APP_PANEL_NONE) break;
 
                     if (event.button.button == SDL_BUTTON_LEFT) {
-                        const OpenRideToolbarAction toolbar_action = openride_toolbar_hit_test(
+                        const OpenRideToolbarAction toolbar_action = mobile_toolbar_hit_test(
+                            renderer,
                             (double)event.button.x,
                             (double)event.button.y,
                             width,
@@ -2878,7 +3134,8 @@ int main(int argc, char **argv)
                     }
                     if (app_panel != OPENRIDE_APP_PANEL_NONE) break;
 
-                    const OpenRideToolbarAction toolbar_action = openride_toolbar_hit_test(x, y, width, height);
+                    const OpenRideToolbarAction toolbar_action = mobile_toolbar_hit_test(
+                        renderer, x, y, width, height);
                     if (toolbar_action != OPENRIDE_TOOLBAR_NONE) {
                         pending_toolbar_action = toolbar_action;
                         openride_touch_input_cancel(&touch_input);
@@ -3041,6 +3298,19 @@ int main(int argc, char **argv)
                     }
                 }
             } else if (action == OPENRIDE_TOOLBAR_GPS) {
+#ifdef __ANDROID__
+                if (real_gps_active) {
+                    openride_location_provider_stop(&location_provider);
+                    real_gps_active = false;
+                    snprintf(route_status, sizeof(route_status), "GPS reel arrete");
+                } else if (openride_location_provider_start(&location_provider)) {
+                    real_gps_active = true;
+                    snprintf(route_status, sizeof(route_status), "GPS reel actif");
+                } else {
+                    snprintf(route_status, sizeof(route_status),
+                             "autorise la localisation Android puis retouche GPS");
+                }
+#else
                 if (route_valid && gps_simulator.route) {
                     const bool active = openride_gps_simulator_toggle(&gps_simulator);
                     snprintf(route_status,
@@ -3050,6 +3320,7 @@ int main(int argc, char **argv)
                 } else {
                     snprintf(route_status, sizeof(route_status), "calcule un itineraire avant le GPS");
                 }
+#endif
             }
         }
 
@@ -3103,6 +3374,59 @@ int main(int argc, char **argv)
         if (delta_seconds < 0.0) delta_seconds = 0.0;
         if (delta_seconds > 0.25) delta_seconds = 0.25;
 
+#ifdef __ANDROID__
+        if (real_gps_active) {
+            OpenRideLocationSample real_sample;
+            if (openride_location_provider_poll(&location_provider, delta_seconds, &real_sample)) {
+                gps_sample_valid = real_sample.valid;
+                gps_sample.valid = real_sample.valid;
+                gps_sample.finished = false;
+                gps_sample.lat = real_sample.lat;
+                gps_sample.lon = real_sample.lon;
+                gps_sample.speed_mps = real_sample.speed_mps;
+                gps_sample.heading_deg = real_sample.heading_deg;
+
+                if (openride_location_filter_update(&location_filter,
+                                                    gps_sample.lat,
+                                                    gps_sample.lon,
+                                                    gps_sample.speed_mps,
+                                                    gps_sample.heading_deg,
+                                                    delta_seconds,
+                                                    &filtered_location)) {
+                    if (route_valid && navigation.route != NULL) {
+                        openride_navigation_engine_update(&navigation,
+                                                          filtered_location.lat,
+                                                          filtered_location.lon,
+                                                          filtered_location.speed_mps,
+                                                          filtered_location.heading_deg,
+                                                          &navigation_state);
+                        gps_sample.route_position_m = navigation_state.valid
+                            ? navigation_state.traveled_m : 0.0;
+                        openride_navigation_session_update(&navigation_session,
+                                                           &navigation_state,
+                                                           filtered_location.lat,
+                                                           filtered_location.lon,
+                                                           filtered_location.speed_mps,
+                                                           delta_seconds);
+                    }
+                }
+
+                if (gpx_recording_active) {
+                    record_gps_sample(&gpx_recording,
+                                      &gps_sample,
+                                      &gpx_last_recorded_position_m);
+                }
+                if (follow_gps) {
+                    camera.center_lat = filtered_location.valid
+                        ? filtered_location.lat : gps_sample.lat;
+                    camera.center_lon = filtered_location.valid
+                        ? filtered_location.lon : gps_sample.lon;
+                }
+            }
+        }
+#endif
+
+#ifndef __ANDROID__
         if (route_valid && gps_simulator.route
             && (gps_simulator.active || gps_sample_valid)) {
             const double navigation_delta_s = gps_simulator.active
@@ -3147,12 +3471,17 @@ int main(int argc, char **argv)
                 }
             }
         }
+#endif
 
         if (route_valid && gps_sample_valid && auto_reroute
             && !loop_active && !gpx_navigation_active
             && selection.has_destination
             && openride_navigation_session_take_reroute_request(&navigation_session)) {
+#ifdef __ANDROID__
+            const bool resume_simulator = false;
+#else
             const bool resume_simulator = gps_simulator.active;
+#endif
             const double reroute_lat = filtered_location.valid
                 ? filtered_location.lat : gps_sample.lat;
             const double reroute_lon = filtered_location.valid
@@ -3260,6 +3589,16 @@ int main(int argc, char **argv)
                                      height);
         }
         draw_center_marker(renderer, width, height);
+#ifdef __ANDROID__
+        draw_android_status_overlay(renderer,
+                                    metadata,
+                                    &route,
+                                    route_valid,
+                                    route_status,
+                                    routing_profile,
+                                    width,
+                                    height);
+#else
         draw_overlay(renderer,
                      &camera,
                      &selection,
@@ -3283,6 +3622,7 @@ int main(int argc, char **argv)
                      gpx_navigation_active,
                      width,
                      height);
+#endif
         draw_navigation_overlay(renderer,
                                 &navigation_state,
                                 &navigation_instructions,
@@ -3322,6 +3662,13 @@ int main(int argc, char **argv)
         }
         SDL_RenderPresent(renderer);
     }
+
+#ifdef __ANDROID__
+    if (real_gps_active) {
+        openride_location_provider_stop(&location_provider);
+        real_gps_active = false;
+    }
+#endif
 
     if (vector_map) {
         openride_vector_map_renderer_destroy(&vector_renderer);
