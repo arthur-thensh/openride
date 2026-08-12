@@ -7,6 +7,7 @@
 #include "openride/map_selection.h"
 #include "openride/loop_generator.h"
 #include "openride/gps_simulator.h"
+#include "openride/gpx.h"
 #include "openride/navigation_engine.h"
 #include "openride/navigation_instructions.h"
 #include "openride/mbtiles.h"
@@ -25,6 +26,10 @@
 #define OPENRIDE_LOOP_DISTANCE_MIN_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MAX_M 300000.0
 #define OPENRIDE_GPS_SIMULATION_TIME_SCALE 20.0
+#define OPENRIDE_GPX_RECORDING_MIN_STEP_M 10.0
+#define OPENRIDE_GPX_DEFAULT_IMPORT "data/gpx/import.gpx"
+#define OPENRIDE_GPX_ROUTE_EXPORT "data/gpx/openride-route.gpx"
+#define OPENRIDE_GPX_RECORDING_EXPORT "data/gpx/openride-recording.gpx"
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -336,6 +341,172 @@ static void draw_route(SDL_Renderer *renderer,
     }
 }
 
+
+static void draw_gpx_point_list(SDL_Renderer *renderer,
+                                const OpenRideMapCamera *camera,
+                                const OpenRideGPXPointList *list,
+                                int viewport_width,
+                                int viewport_height,
+                                Uint8 r,
+                                Uint8 g,
+                                Uint8 b,
+                                int width)
+{
+    if (!renderer || !camera || !list || list->count < 2U) return;
+
+    for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 0) {
+            SDL_SetRenderDrawColor(renderer, 250, 250, 248, 210);
+        } else {
+            SDL_SetRenderDrawColor(renderer, r, g, b, 235);
+        }
+        const int draw_width = pass == 0 ? width + 3 : width;
+        for (uint32_t i = 1U; i < list->count; ++i) {
+            if (list->points[i].starts_new_segment) continue;
+            const OpenRidePointD a = openride_geo_to_screen(camera,
+                                                             list->points[i - 1U].lat,
+                                                             list->points[i - 1U].lon,
+                                                             viewport_width,
+                                                             viewport_height);
+            const OpenRidePointD c = openride_geo_to_screen(camera,
+                                                             list->points[i].lat,
+                                                             list->points[i].lon,
+                                                             viewport_width,
+                                                             viewport_height);
+            draw_thick_line(renderer,
+                            (float)a.x,
+                            (float)a.y,
+                            (float)c.x,
+                            (float)c.y,
+                            draw_width);
+        }
+    }
+}
+
+static void draw_gpx_document(SDL_Renderer *renderer,
+                              const OpenRideMapCamera *camera,
+                              const OpenRideGPXDocument *document,
+                              int viewport_width,
+                              int viewport_height)
+{
+    if (!document) return;
+
+    draw_gpx_point_list(renderer,
+                        camera,
+                        &document->track_points,
+                        viewport_width,
+                        viewport_height,
+                        148, 76, 183,
+                        4);
+    draw_gpx_point_list(renderer,
+                        camera,
+                        &document->route_points,
+                        viewport_width,
+                        viewport_height,
+                        229, 126, 34,
+                        3);
+
+    for (uint32_t i = 0U; i < document->waypoints.count; ++i) {
+        const OpenRideGPXPoint *point = &document->waypoints.points[i];
+        const OpenRidePointD p = openride_geo_to_screen(camera,
+                                                         point->lat,
+                                                         point->lon,
+                                                         viewport_width,
+                                                         viewport_height);
+        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
+        draw_filled_circle(renderer, (float)p.x, (float)p.y, 7.0f);
+        SDL_SetRenderDrawColor(renderer, 0, 142, 153, 245);
+        draw_filled_circle(renderer, (float)p.x, (float)p.y, 4.5f);
+    }
+}
+
+static void fit_camera_to_gpx(OpenRideMapCamera *camera,
+                              const OpenRideGPXDocument *document,
+                              int viewport_width,
+                              int viewport_height,
+                              double min_zoom,
+                              double max_zoom)
+{
+    if (!camera || !document || viewport_width <= 100 || viewport_height <= 100) return;
+    const OpenRideGPXBounds bounds = openride_gpx_document_bounds(document);
+    if (!bounds.valid) return;
+
+    const OpenRidePointD nw = openride_mercator_forward(bounds.max_lat, bounds.min_lon);
+    const OpenRidePointD se = openride_mercator_forward(bounds.min_lat, bounds.max_lon);
+    double dx = fabs(se.x - nw.x);
+    if (dx > 0.5) dx = 1.0 - dx;
+    const double dy = fabs(se.y - nw.y);
+    const double usable_w = (double)viewport_width - 100.0;
+    const double usable_h = (double)viewport_height - 100.0;
+    double zoom = max_zoom;
+
+    if (dx > 1e-12 && dy > 1e-12) {
+        const double zoom_x = log2(usable_w / (256.0 * dx));
+        const double zoom_y = log2(usable_h / (256.0 * dy));
+        zoom = fmin(zoom_x, zoom_y);
+    } else if (dx > 1e-12) {
+        zoom = log2(usable_w / (256.0 * dx));
+    } else if (dy > 1e-12) {
+        zoom = log2(usable_h / (256.0 * dy));
+    }
+
+    camera->zoom = clampd(zoom, min_zoom, max_zoom);
+    camera->center_lat = (bounds.min_lat + bounds.max_lat) * 0.5;
+    camera->center_lon = (bounds.min_lon + bounds.max_lon) * 0.5;
+}
+
+static bool load_gpx_overlay(const char *path,
+                             OpenRideGPXDocument *document,
+                             char *status,
+                             size_t status_size)
+{
+    char error[256] = {0};
+    if (!path || !file_exists(path)) {
+        snprintf(status,
+                 status_size,
+                 "GPX introuvable: %.180s",
+                 path ? path : "-");
+        return false;
+    }
+
+    if (!openride_gpx_load_file(path, document, error, sizeof(error))) {
+        snprintf(status,
+                 status_size,
+                 "import GPX impossible: %.160s",
+                 error[0] ? error : "erreur inconnue");
+        return false;
+    }
+
+    snprintf(status,
+             status_size,
+             "GPX charge: %u track | %u route | %u waypoint",
+             document->track_points.count,
+             document->route_points.count,
+             document->waypoints.count);
+    return true;
+}
+
+static void record_gps_sample(OpenRideGPXDocument *recording,
+                              const OpenRideGPSSample *sample,
+                              double *last_recorded_position_m)
+{
+    if (!recording || !sample || !sample->valid || !last_recorded_position_m) return;
+    if (*last_recorded_position_m >= 0.0
+        && sample->route_position_m - *last_recorded_position_m < OPENRIDE_GPX_RECORDING_MIN_STEP_M) {
+        return;
+    }
+
+    OpenRideGPXPoint point;
+    memset(&point, 0, sizeof(point));
+    point.lat = sample->lat;
+    point.lon = sample->lon;
+    point.starts_new_segment = (recording->track_points.count == 0U);
+    if (openride_gpx_document_append(recording, OPENRIDE_GPX_POINT_TRACK, &point)) {
+        if (recording->track_points.count == 1U) recording->track_segment_count = 1U;
+        *last_recorded_position_m = sample->route_position_m;
+    }
+}
+
 static bool recalculate_route(const OpenRideRoutingGraph *graph,
                               bool graph_loaded,
                               const OpenRideMapSelection *selection,
@@ -636,13 +807,16 @@ static void draw_overlay(SDL_Renderer *renderer,
                          double loop_target_distance_m,
                          OpenRideLoopDirection loop_direction,
                          const OpenRideLoopStats *loop_stats,
+                         const OpenRideGPXDocument *gpx_document,
+                         bool gpx_loaded,
+                         bool gpx_recording,
                          int viewport_width,
                          int viewport_height)
 {
     const float panel_x = 10.0f;
     const float panel_y = 10.0f;
     const float panel_w = 500.0f;
-    const float panel_h = 190.0f;
+    const float panel_h = 222.0f;
     SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
 
     SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
@@ -651,7 +825,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.14");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.15");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -763,6 +937,27 @@ static void draw_overlay(SDL_Renderer *renderer,
                         panel_x + 12.0f,
                         panel_y + 158.0f,
                         "glisser: deplacer | clic droit: supprimer | C: effacer");
+
+    SDL_SetRenderDrawColor(renderer,
+                           gpx_loaded ? 190 : 157,
+                           gpx_loaded ? 142 : 166,
+                           gpx_loaded ? 214 : 174,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugTextFormat(renderer,
+                              panel_x + 12.0f,
+                              panel_y + 174.0f,
+                              "GPX: %s | track %u | route %u | wpt %u%s",
+                              gpx_loaded ? "charge" : "aucun",
+                              gpx_document ? gpx_document->track_points.count : 0U,
+                              gpx_document ? gpx_document->route_points.count : 0U,
+                              gpx_document ? gpx_document->waypoints.count : 0U,
+                              gpx_recording ? " | ENREG" : "");
+
+    SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
+    SDL_RenderDebugText(renderer,
+                        panel_x + 12.0f,
+                        panel_y + 190.0f,
+                        "I: importer GPX | E: exporter route | G: enregistrer trace");
 
     if (route_valid || (selection->has_start && selection->has_destination)) {
         double distance_m = selection->has_start && selection->has_destination
@@ -969,7 +1164,7 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
     if (!gps_sample_valid || !navigation || !navigation->valid) return;
 
     const float x = 10.0f;
-    const float y = 210.0f;
+    const float y = 242.0f;
     const float w = 500.0f;
     const float h = 132.0f;
     if (viewport_height < (int)(y + h + 30.0f)) return;
@@ -1078,6 +1273,7 @@ int main(int argc, char **argv)
 {
     const char *map_path = argc >= 2 ? argv[1] : default_map_path();
     const char *routing_graph_path = argc >= 3 ? argv[2] : default_routing_graph_path();
+    const char *gpx_import_path = argc >= 4 ? argv[3] : OPENRIDE_GPX_DEFAULT_IMPORT;
     char error[512] = {0};
 
     OpenRideMBTiles *map = openride_mbtiles_open(map_path, error, sizeof(error));
@@ -1085,7 +1281,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Unable to open offline map: %s\n", map_path);
         fprintf(stderr, "Reason: %s\n", error[0] ? error : "unknown error");
         fprintf(stderr, "\nRun ./scripts/download_real_map.sh to install the real OSM map.\n");
-        fprintf(stderr, "Usage: ./build/openride [path/to/map.mbtiles] [path/to/routing.orgraph]\n");
+        fprintf(stderr, "Usage: ./build/openride [path/to/map.mbtiles] [path/to/routing.orgraph] [path/to/import.gpx]\n");
         return 1;
     }
 
@@ -1126,6 +1322,13 @@ int main(int argc, char **argv)
     OpenRideNavigationState navigation_state = {0};
     OpenRideGPSSample gps_sample = {0};
     bool gps_sample_valid = false;
+    OpenRideGPXDocument gpx_overlay;
+    OpenRideGPXDocument gpx_recording;
+    openride_gpx_document_init(&gpx_overlay);
+    openride_gpx_document_init(&gpx_recording);
+    bool gpx_loaded = false;
+    bool gpx_recording_active = false;
+    double gpx_last_recorded_position_m = -1.0;
     bool follow_gps = true;
     bool simulator_deviation = false;
     Uint64 last_frame_ticks = 0;
@@ -1166,6 +1369,8 @@ int main(int argc, char **argv)
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        openride_gpx_document_destroy(&gpx_recording);
+        openride_gpx_document_destroy(&gpx_overlay);
         openride_gps_simulator_destroy(&gps_simulator);
         openride_navigation_engine_destroy(&navigation);
         openride_routing_graph_destroy(&routing_graph);
@@ -1181,6 +1386,8 @@ int main(int argc, char **argv)
             &window,
             &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
+        openride_gpx_document_destroy(&gpx_recording);
+        openride_gpx_document_destroy(&gpx_overlay);
         openride_gps_simulator_destroy(&gps_simulator);
         openride_navigation_engine_destroy(&navigation);
         openride_routing_graph_destroy(&routing_graph);
@@ -1205,12 +1412,32 @@ int main(int argc, char **argv)
         SDL_Log("Unable to initialize offline map renderer");
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
+        openride_gpx_document_destroy(&gpx_recording);
+        openride_gpx_document_destroy(&gpx_overlay);
         openride_gps_simulator_destroy(&gps_simulator);
         openride_navigation_engine_destroy(&navigation);
         openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         SDL_Quit();
         return 1;
+    }
+
+    if (file_exists(gpx_import_path)) {
+        gpx_loaded = load_gpx_overlay(gpx_import_path,
+                                      &gpx_overlay,
+                                      route_status,
+                                      sizeof(route_status));
+        if (gpx_loaded) {
+            int gpx_width = 0;
+            int gpx_height = 0;
+            SDL_GetCurrentRenderOutputSize(renderer, &gpx_width, &gpx_height);
+            fit_camera_to_gpx(&camera,
+                              &gpx_overlay,
+                              gpx_width,
+                              gpx_height,
+                              (double)metadata->min_zoom,
+                              vector_map ? 18.0 : (double)metadata->max_zoom);
+        }
     }
 
     while (running) {
@@ -1235,6 +1462,9 @@ int main(int argc, char **argv)
                                                  &gps_sample,
                                                  &gps_sample_valid);
                         simulator_deviation = false;
+                        gpx_recording_active = false;
+                        openride_gpx_document_clear(&gpx_recording);
+                        gpx_last_recorded_position_m = -1.0;
                         openride_route_destroy(&route);
                         route_valid = false;
                         route_dirty = false;
@@ -1404,6 +1634,92 @@ int main(int argc, char **argv)
                                  sizeof(route_status),
                                  "boucle cible %.0f km | B pour generer",
                                  loop_target_distance_m / 1000.0);
+                    } else if (event.key.key == SDLK_I) {
+                        gpx_loaded = load_gpx_overlay(gpx_import_path,
+                                                      &gpx_overlay,
+                                                      route_status,
+                                                      sizeof(route_status));
+                        if (gpx_loaded) {
+                            int gpx_width = 0;
+                            int gpx_height = 0;
+                            SDL_GetCurrentRenderOutputSize(renderer, &gpx_width, &gpx_height);
+                            fit_camera_to_gpx(&camera,
+                                              &gpx_overlay,
+                                              gpx_width,
+                                              gpx_height,
+                                              (double)metadata->min_zoom,
+                                              vector_map ? 18.0 : (double)metadata->max_zoom);
+                        }
+                    } else if (event.key.key == SDLK_E) {
+                        if (!route_valid) {
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "aucun itineraire a exporter en GPX");
+                        } else {
+                            char gpx_error[192] = {0};
+                            if (openride_gpx_save_route(OPENRIDE_GPX_ROUTE_EXPORT,
+                                                        &route,
+                                                        loop_active ? "OpenRide boucle" : "OpenRide itineraire",
+                                                        gpx_error,
+                                                        sizeof(gpx_error))) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "GPX exporte: %s",
+                                         OPENRIDE_GPX_ROUTE_EXPORT);
+                            } else {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "export GPX impossible: %.145s",
+                                         gpx_error[0] ? gpx_error : "erreur inconnue");
+                            }
+                        }
+                    } else if (event.key.key == SDLK_G) {
+                        if (!gpx_recording_active) {
+                            if (!route_valid || !gps_simulator.route) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "G necessite un itineraire avec GPS simule");
+                            } else {
+                                openride_gpx_document_clear(&gpx_recording);
+                                snprintf(gpx_recording.name,
+                                         sizeof(gpx_recording.name),
+                                         "OpenRide GPS recording");
+                                gpx_recording_active = true;
+                                gpx_last_recorded_position_m = -1.0;
+                                if (gps_sample_valid) {
+                                    record_gps_sample(&gpx_recording,
+                                                      &gps_sample,
+                                                      &gpx_last_recorded_position_m);
+                                }
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "enregistrement GPX demarre");
+                            }
+                        } else {
+                            gpx_recording_active = false;
+                            if (gpx_recording.track_points.count >= 2U) {
+                                char gpx_error[192] = {0};
+                                if (openride_gpx_save_document(OPENRIDE_GPX_RECORDING_EXPORT,
+                                                               &gpx_recording,
+                                                               "OpenRide",
+                                                               gpx_error,
+                                                               sizeof(gpx_error))) {
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "trace GPX enregistree: %s",
+                                             OPENRIDE_GPX_RECORDING_EXPORT);
+                                } else {
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "trace GPX non ecrite: %.140s",
+                                             gpx_error[0] ? gpx_error : "erreur inconnue");
+                                }
+                            } else {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "trace GPX trop courte pour etre enregistree");
+                            }
+                        }
                     } else if (event.key.key == SDLK_M && vector_map) {
                         map_style = openride_map_style_next(map_style);
                         openride_vector_map_renderer_set_style(&vector_renderer, map_style);
@@ -1641,6 +1957,11 @@ int main(int argc, char **argv)
                                                   gps_sample.speed_mps,
                                                   gps_sample.heading_deg,
                                                   &navigation_state);
+                if (gpx_recording_active) {
+                    record_gps_sample(&gpx_recording,
+                                      &gps_sample,
+                                      &gpx_last_recorded_position_m);
+                }
                 if (follow_gps && gps_simulator.active) {
                     camera.center_lat = gps_sample.lat;
                     camera.center_lon = gps_sample.lon;
@@ -1667,6 +1988,13 @@ int main(int argc, char **argv)
             openride_map_renderer_draw(&raster_renderer, &camera, width, height);
         }
 
+        if (gpx_loaded) {
+            draw_gpx_document(renderer,
+                              &camera,
+                              &gpx_overlay,
+                              width,
+                              height);
+        }
         if (route_valid) {
             draw_route(renderer,
                        &camera,
@@ -1732,6 +2060,9 @@ int main(int argc, char **argv)
                      loop_target_distance_m,
                      loop_direction,
                      &loop_stats,
+                     &gpx_overlay,
+                     gpx_loaded,
+                     gpx_recording_active,
                      width,
                      height);
         draw_navigation_overlay(renderer,
@@ -1752,6 +2083,8 @@ int main(int argc, char **argv)
     }
 
     openride_navigation_instructions_destroy(&navigation_instructions);
+    openride_gpx_document_destroy(&gpx_recording);
+    openride_gpx_document_destroy(&gpx_overlay);
     openride_gps_simulator_destroy(&gps_simulator);
     openride_navigation_engine_destroy(&navigation);
     openride_route_destroy(&route);

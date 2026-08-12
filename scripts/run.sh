@@ -10,14 +10,28 @@ if [ ! -x build/openride ]; then
     exit 1
 fi
 
+LOCAL_MAP="data/maps/nord-pas-de-calais-shortbread.mbtiles"
+LOCAL_GRAPH="data/routing/nord-pas-de-calais.orgraph"
+
+# Import GPX pratique sans avoir à répéter les chemins carte/graphe :
+#   ./scripts/run.sh --gpx ~/Downloads/balade.gpx
+if [ "${1:-}" = "--gpx" ]; then
+    if [ "$#" -ne 2 ]; then
+        echo "Usage: ./scripts/run.sh --gpx chemin/trace.gpx" >&2
+        exit 1
+    fi
+    if [ ! -f "$LOCAL_MAP" ] || [ ! -f "$LOCAL_GRAPH" ]; then
+        echo "--gpx nécessite la carte et le graphe régionaux installés." >&2
+        exit 1
+    fi
+    exec ./build/openride "$LOCAL_MAP" "$LOCAL_GRAPH" "$2"
+fi
+
 # Des chemins fournis explicitement restent prioritaires :
-#   ./scripts/run.sh carte.mbtiles [graphe.orgraph]
+#   ./scripts/run.sh carte.mbtiles [graphe.orgraph] [trace.gpx]
 if [ "$#" -gt 0 ]; then
     exec ./build/openride "$@"
 fi
-
-LOCAL_MAP="data/maps/nord-pas-de-calais-shortbread.mbtiles"
-LOCAL_GRAPH="data/routing/nord-pas-de-calais.orgraph"
 
 if [ -f "$LOCAL_MAP" ] && [ -f "$LOCAL_GRAPH" ]; then
     exec ./build/openride "$LOCAL_MAP" "$LOCAL_GRAPH"
