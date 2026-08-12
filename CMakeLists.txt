@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.16.0 LANGUAGES C)
+project(OpenRide VERSION 0.17.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -28,6 +28,8 @@ add_library(openride_core STATIC
     src/core/loop_generator.c
     src/core/navigation_engine.c
     src/core/navigation_instructions.c
+    src/core/navigation_session.c
+    src/core/location_filter.c
     src/core/gps_simulator.c
     src/core/gpx.c
     src/core/place_search.c
@@ -48,6 +50,10 @@ target_link_libraries(openride_core
         SQLite::SQLite3
         ZLIB::ZLIB
 )
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(openride_core PUBLIC m)
+endif()
 
 if(MSVC)
     target_compile_options(openride_core PRIVATE /W4)
@@ -232,6 +238,18 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_navigation_instructions PRIVATE openride_core)
     add_test(NAME navigation_instructions COMMAND test_navigation_instructions)
+
+    add_executable(test_navigation_session
+        tests/test_navigation_session.c
+    )
+    target_link_libraries(test_navigation_session PRIVATE openride_core)
+    add_test(NAME navigation_session COMMAND test_navigation_session)
+
+    add_executable(test_location_filter
+        tests/test_location_filter.c
+    )
+    target_link_libraries(test_location_filter PRIVATE openride_core)
+    add_test(NAME location_filter COMMAND test_location_filter)
 
     add_executable(test_gpx
         tests/test_gpx.c

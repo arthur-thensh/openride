@@ -1,4 +1,5 @@
 #include "openride/gpx.h"
+#include "openride/map_selection.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -599,4 +600,98 @@ OpenRideGPXBounds openride_gpx_document_bounds(const OpenRideGPXDocument *docume
         for (uint32_t i = 0U; i < list->count; ++i) bounds_add(&bounds, &list->points[i]);
     }
     return bounds;
+}
+
+
+static bool longest_track_segment(const OpenRideGPXPointList *track,
+                                  uint32_t *first,
+                                  uint32_t *count)
+{
+    if (!track || !first || !count || track->count < 2U) return false;
+    uint32_t best_first = 0U;
+    uint32_t best_count = 0U;
+    uint32_t segment_first = 0U;
+
+    for (uint32_t i = 0U; i <= track->count; ++i) {
+        const bool boundary = i == track->count
+            || (i > segment_first && track->points[i].starts_new_segment);
+        if (!boundary) continue;
+        const uint32_t segment_count = i - segment_first;
+        if (segment_count > best_count) {
+            best_first = segment_first;
+            best_count = segment_count;
+        }
+        segment_first = i;
+    }
+
+    if (best_count < 2U) return false;
+    *first = best_first;
+    *count = best_count;
+    return true;
+}
+
+bool openride_gpx_build_navigation_route(const OpenRideGPXDocument *document,
+                                         double default_speed_kph,
+                                         OpenRideRoute *route,
+                                         char *error,
+                                         size_t error_size)
+{
+    if (!document || !route) {
+        set_error(error, error_size, "parametre GPX invalide");
+        return false;
+    }
+
+    const OpenRideGPXPointList *source = NULL;
+    uint32_t first = 0U;
+    uint32_t count = 0U;
+    if (document->track_points.count >= 2U
+        && longest_track_segment(&document->track_points, &first, &count)) {
+        source = &document->track_points;
+    } else if (document->route_points.count >= 2U) {
+        source = &document->route_points;
+        first = 0U;
+        count = source->count;
+    } else {
+        set_error(error, error_size, "GPX sans trace ou route navigable");
+        return false;
+    }
+
+    OpenRideRoute built;
+    memset(&built, 0, sizeof(built));
+    built.geometry = calloc(count, sizeof(*built.geometry));
+    if (!built.geometry) {
+        set_error(error, error_size, "memoire insuffisante pour la navigation GPX");
+        return false;
+    }
+    built.geometry_count = count;
+
+    double distance_m = 0.0;
+    for (uint32_t i = 0U; i < count; ++i) {
+        const OpenRideGPXPoint *point = &source->points[first + i];
+        built.geometry[i].lat = point->lat;
+        built.geometry[i].lon = point->lon;
+        if (i > 0U) {
+            distance_m += openride_geo_distance_m(built.geometry[i - 1U].lat,
+                                                  built.geometry[i - 1U].lon,
+                                                  built.geometry[i].lat,
+                                                  built.geometry[i].lon);
+        }
+    }
+
+    if (!(distance_m > 0.0) || !isfinite(distance_m)) {
+        openride_route_destroy(&built);
+        set_error(error, error_size, "trace GPX trop courte");
+        return false;
+    }
+
+    if (!isfinite(default_speed_kph) || default_speed_kph < 5.0) default_speed_kph = 50.0;
+    if (default_speed_kph > 160.0) default_speed_kph = 160.0;
+    built.distance_m = distance_m;
+    built.estimated_time_s = distance_m / (default_speed_kph / 3.6);
+    built.weighted_cost_s = built.estimated_time_s;
+
+    openride_route_destroy(route);
+    *route = built;
+    set_error(error, error_size, "");
+    return true;
 }

@@ -79,6 +79,17 @@ int main(void)
     assert(exported.track_points.count == 3U);
     assert(exported.track_segment_count == 1U);
 
+    OpenRideRoute navigation_route = {0};
+    assert(openride_gpx_build_navigation_route(&exported,
+                                               45.0,
+                                               &navigation_route,
+                                               error,
+                                               sizeof(error)));
+    assert(navigation_route.geometry_count == 3U);
+    assert(navigation_route.distance_m > 0.0);
+    assert(navigation_route.estimated_time_s > 0.0);
+    openride_route_destroy(&navigation_route);
+
     openride_gpx_document_destroy(&exported);
     openride_gpx_document_destroy(&loaded);
     openride_gpx_document_destroy(&doc);

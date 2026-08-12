@@ -72,4 +72,10 @@ bool openride_gpx_save_route(const char *path,
 
 OpenRideGPXBounds openride_gpx_document_bounds(const OpenRideGPXDocument *document);
 
+bool openride_gpx_build_navigation_route(const OpenRideGPXDocument *document,
+                                         double default_speed_kph,
+                                         OpenRideRoute *route,
+                                         char *error,
+                                         size_t error_size);
+
 #endif
