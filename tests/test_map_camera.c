@@ -49,6 +49,43 @@ static void test_screen_round_trip(void)
     assert(nearly_equal(lon, result_lon, 1e-7));
 }
 
+
+static void test_bearing_screen_round_trip(void)
+{
+    OpenRideMapCamera camera = {
+        .center_lat = 48.8566,
+        .center_lon = 2.3522,
+        .zoom = 13.0,
+        .bearing_deg = 73.0
+    };
+
+    const double lat = 48.8620;
+    const double lon = 2.3650;
+    const OpenRidePointD screen = openride_geo_to_screen(&camera, lat, lon, 1200, 800);
+    double result_lat = 0.0;
+    double result_lon = 0.0;
+    openride_screen_to_geo(&camera,
+                           screen.x,
+                           screen.y,
+                           1200,
+                           800,
+                           &result_lat,
+                           &result_lon);
+    assert(nearly_equal(lat, result_lat, 1e-7));
+    assert(nearly_equal(lon, result_lon, 1e-7));
+}
+
+static void test_bearing_heading_up(void)
+{
+    OpenRideMapCamera camera = {
+        .center_lat = 50.0,
+        .center_lon = 3.0,
+        .zoom = 15.0,
+        .bearing_deg = 90.0
+    };
+    const OpenRidePointD east = openride_geo_to_screen(&camera, 50.0, 3.01, 1000, 1000);
+    assert(east.y < 500.0);
+}
 static void test_zoom_anchor(void)
 {
     OpenRideMapCamera camera = {
@@ -74,6 +111,8 @@ int main(void)
 {
     test_mercator_round_trip();
     test_screen_round_trip();
+    test_bearing_screen_round_trip();
+    test_bearing_heading_up();
     test_zoom_anchor();
 
     puts("OpenRide map camera tests: OK");

@@ -5,6 +5,8 @@ typedef struct OpenRideMapCamera {
     double center_lat;
     double center_lon;
     double zoom;
+    /* Clockwise degrees from north. 0 keeps the classic north-up view. */
+    double bearing_deg;
 } OpenRideMapCamera;
 
 typedef struct OpenRidePointD {

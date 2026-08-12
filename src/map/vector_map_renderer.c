@@ -39,6 +39,9 @@ typedef struct DrawContext {
     double tile_top;
     double tile_size;
     double camera_zoom;
+    double viewport_center_x;
+    double viewport_center_y;
+    double bearing_rad;
     OpenRideMapStyle style;
     int pass;
     LabelLayout *labels;
@@ -247,6 +250,17 @@ static void set_draw_color(SDL_Renderer *renderer, float r, float g, float b, fl
                            (Uint8)a);
 }
 
+static void rotate_draw_point(const DrawContext *draw, float *x, float *y)
+{
+    if (!draw || !x || !y || fabs(draw->bearing_rad) < 1e-12) return;
+    const double dx = (double)(*x) - draw->viewport_center_x;
+    const double dy = (double)(*y) - draw->viewport_center_y;
+    const double c = cos(draw->bearing_rad);
+    const double sn = sin(draw->bearing_rad);
+    *x = (float)(draw->viewport_center_x + dx * c + dy * sn);
+    *y = (float)(draw->viewport_center_y - dx * sn + dy * c);
+}
+
 static void draw_thick_line(SDL_Renderer *renderer,
                             float x1,
                             float y1,
@@ -343,10 +357,11 @@ static bool draw_geometry_callback(OpenRideMVTGeometryCommand command,
                                    void *user_data)
 {
     GeometryDrawState *state = (GeometryDrawState *)user_data;
-    const float sx = (float)(state->draw->tile_left
-                    + ((double)x / (double)state->extent) * state->draw->tile_size);
-    const float sy = (float)(state->draw->tile_top
-                    + ((double)y / (double)state->extent) * state->draw->tile_size);
+    float sx = (float)(state->draw->tile_left
+               + ((double)x / (double)state->extent) * state->draw->tile_size);
+    float sy = (float)(state->draw->tile_top
+               + ((double)y / (double)state->extent) * state->draw->tile_size);
+    rotate_draw_point(state->draw, &sx, &sy);
 
     if (command == OPENRIDE_MVT_MOVE_TO) {
         state->has_previous = true;
@@ -421,6 +436,7 @@ static bool capture_point_callback(OpenRideMVTGeometryCommand command,
                + ((double)x / (double)capture->extent) * capture->draw->tile_size);
     capture->y = (float)(capture->draw->tile_top
                + ((double)y / (double)capture->extent) * capture->draw->tile_size);
+    rotate_draw_point(capture->draw, &capture->x, &capture->y);
     capture->found = true;
     return true;
 }
@@ -625,6 +641,9 @@ static void draw_one_tile(OpenRideVectorMapRenderer *renderer,
                           double top,
                           double tile_size,
                           double camera_zoom,
+                          double viewport_center_x,
+                          double viewport_center_y,
+                          double bearing_rad,
                           int pass,
                           LabelLayout *labels)
 {
@@ -636,6 +655,9 @@ static void draw_one_tile(OpenRideVectorMapRenderer *renderer,
         .tile_top = top,
         .tile_size = tile_size,
         .camera_zoom = camera_zoom,
+        .viewport_center_x = viewport_center_x,
+        .viewport_center_y = viewport_center_y,
+        .bearing_rad = bearing_rad,
         .style = renderer->style,
         .pass = pass,
         .labels = labels
@@ -713,10 +735,18 @@ void openride_vector_map_renderer_draw(OpenRideVectorMapRenderer *map_renderer,
     const double world_size = tile_screen_size * (double)tile_count;
     const double center_world_x = center.x * world_size;
     const double center_world_y = center.y * world_size;
-    const double left_world = center_world_x - (double)viewport_width * 0.5;
-    const double top_world = center_world_y - (double)viewport_height * 0.5;
-    const double right_world = center_world_x + (double)viewport_width * 0.5;
-    const double bottom_world = center_world_y + (double)viewport_height * 0.5;
+    /* Axis-aligned source extent required by the rotated viewport. */
+    const double bearing_rad = camera->bearing_deg * 3.14159265358979323846 / 180.0;
+    const double abs_c = fabs(cos(bearing_rad));
+    const double abs_s = fabs(sin(bearing_rad));
+    const double half_width = abs_c * (double)viewport_width * 0.5
+        + abs_s * (double)viewport_height * 0.5;
+    const double half_height = abs_s * (double)viewport_width * 0.5
+        + abs_c * (double)viewport_height * 0.5;
+    const double left_world = center_world_x - half_width;
+    const double top_world = center_world_y - half_height;
+    const double right_world = center_world_x + half_width;
+    const double bottom_world = center_world_y + half_height;
 
     const int first_x = (int)floor(left_world / tile_screen_size);
     const int last_x = (int)floor(right_world / tile_screen_size);
@@ -749,8 +779,10 @@ void openride_vector_map_renderer_draw(OpenRideVectorMapRenderer *map_renderer,
                                                                 ty);
                 if (!tile) continue;
 
-                const double left = (double)tx * tile_screen_size - left_world;
-                const double top = (double)ty * tile_screen_size - top_world;
+                const double left = (double)viewport_width * 0.5
+                    + (double)tx * tile_screen_size - center_world_x;
+                const double top = (double)viewport_height * 0.5
+                    + (double)ty * tile_screen_size - center_world_y;
 
                 draw_one_tile(map_renderer,
                               tile,
@@ -758,6 +790,9 @@ void openride_vector_map_renderer_draw(OpenRideVectorMapRenderer *map_renderer,
                               top,
                               tile_screen_size,
                               camera->zoom,
+                              (double)viewport_width * 0.5,
+                              (double)viewport_height * 0.5,
+                              bearing_rad,
                               pass,
                               &labels);
             }

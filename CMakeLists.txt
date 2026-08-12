@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.19.0 LANGUAGES C)
+project(OpenRide VERSION 0.20.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -68,6 +68,7 @@ add_library(openride_core STATIC
     src/core/touch_input.c
     src/core/location_provider.c
     src/core/app_toolbar.c
+    src/core/drive_mode.c
     src/osm/osm_import.c
     src/map/mbtiles.c
     src/map/mvt.c
@@ -343,6 +344,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_app_toolbar PRIVATE openride_core)
     add_test(NAME app_toolbar COMMAND test_app_toolbar)
+
+    add_executable(test_drive_mode
+        tests/test_drive_mode.c
+    )
+    target_link_libraries(test_drive_mode PRIVATE openride_core)
+    add_test(NAME drive_mode COMMAND test_drive_mode)
 
     add_executable(test_osm_import
         tests/test_osm_import.c

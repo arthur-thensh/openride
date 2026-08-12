@@ -13,6 +13,22 @@ static int wrap_tile_x(int x, int tile_count)
     return wrapped;
 }
 
+static void rotate_point(double bearing_deg,
+                         double center_x,
+                         double center_y,
+                         double *x,
+                         double *y)
+{
+    if (!x || !y || fabs(bearing_deg) < 1e-12) return;
+    const double angle = bearing_deg * 3.14159265358979323846 / 180.0;
+    const double c = cos(angle);
+    const double s = sin(angle);
+    const double dx = *x - center_x;
+    const double dy = *y - center_y;
+    *x = center_x + dx * c + dy * s;
+    *y = center_y - dx * s + dy * c;
+}
+
 static OpenRideTileCacheEntry *find_cache_entry(OpenRideMapRenderer *map_renderer,
                                                  int zoom,
                                                  int x,
@@ -167,10 +183,17 @@ void openride_map_renderer_draw(OpenRideMapRenderer *map_renderer,
     const double world_size = tile_screen_size * (double)tile_count;
     const double center_world_x = center.x * world_size;
     const double center_world_y = center.y * world_size;
-    const double left_world = center_world_x - (double)viewport_width * 0.5;
-    const double top_world = center_world_y - (double)viewport_height * 0.5;
-    const double right_world = center_world_x + (double)viewport_width * 0.5;
-    const double bottom_world = center_world_y + (double)viewport_height * 0.5;
+    const double bearing_rad = camera->bearing_deg * 3.14159265358979323846 / 180.0;
+    const double abs_c = fabs(cos(bearing_rad));
+    const double abs_s = fabs(sin(bearing_rad));
+    const double half_width = abs_c * (double)viewport_width * 0.5
+        + abs_s * (double)viewport_height * 0.5;
+    const double half_height = abs_s * (double)viewport_width * 0.5
+        + abs_c * (double)viewport_height * 0.5;
+    const double left_world = center_world_x - half_width;
+    const double top_world = center_world_y - half_height;
+    const double right_world = center_world_x + half_width;
+    const double bottom_world = center_world_y + half_height;
 
     const int first_x = (int)floor(left_world / tile_screen_size);
     const int last_x = (int)floor(right_world / tile_screen_size);
@@ -187,15 +210,31 @@ void openride_map_renderer_draw(OpenRideMapRenderer *map_renderer,
                                                      query_x,
                                                      ty);
 
+            double tile_center_x = (double)viewport_width * 0.5
+                + ((double)tx + 0.5) * tile_screen_size - center_world_x;
+            double tile_center_y = (double)viewport_height * 0.5
+                + ((double)ty + 0.5) * tile_screen_size - center_world_y;
+            rotate_point(camera->bearing_deg,
+                         (double)viewport_width * 0.5,
+                         (double)viewport_height * 0.5,
+                         &tile_center_x,
+                         &tile_center_y);
+
             SDL_FRect destination = {
-                .x = (float)((double)tx * tile_screen_size - left_world),
-                .y = (float)((double)ty * tile_screen_size - top_world),
-                .w = (float)(tile_screen_size + 0.5),
-                .h = (float)(tile_screen_size + 0.5)
+                .x = (float)(tile_center_x - tile_screen_size * 0.5),
+                .y = (float)(tile_center_y - tile_screen_size * 0.5),
+                .w = (float)(tile_screen_size + 0.75),
+                .h = (float)(tile_screen_size + 0.75)
             };
 
             if (texture) {
-                SDL_RenderTexture(map_renderer->renderer, texture, NULL, &destination);
+                SDL_RenderTextureRotated(map_renderer->renderer,
+                                         texture,
+                                         NULL,
+                                         &destination,
+                                         -camera->bearing_deg,
+                                         NULL,
+                                         SDL_FLIP_NONE);
             } else {
                 SDL_SetRenderDrawColor(map_renderer->renderer, 38, 42, 48, SDL_ALPHA_OPAQUE);
                 SDL_RenderFillRect(map_renderer->renderer, &destination);

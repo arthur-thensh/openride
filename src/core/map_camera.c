@@ -33,6 +33,32 @@ static double rad_to_deg(double radians)
     return radians * 180.0 / OPENRIDE_PI;
 }
 
+static void rotate_screen_forward(double bearing_deg, double *x, double *y)
+{
+    if (!x || !y || fabs(bearing_deg) < 1e-12) return;
+    const double angle = deg_to_rad(bearing_deg);
+    const double c = cos(angle);
+    const double s = sin(angle);
+    const double ox = *x;
+    const double oy = *y;
+    /* Positive bearing rotates the world counter-clockwise on screen so that
+       the selected heading points toward the top of the display. */
+    *x = ox * c + oy * s;
+    *y = -ox * s + oy * c;
+}
+
+static void rotate_screen_inverse(double bearing_deg, double *x, double *y)
+{
+    if (!x || !y || fabs(bearing_deg) < 1e-12) return;
+    const double angle = deg_to_rad(bearing_deg);
+    const double c = cos(angle);
+    const double s = sin(angle);
+    const double ox = *x;
+    const double oy = *y;
+    *x = ox * c - oy * s;
+    *y = ox * s + oy * c;
+}
+
 double openride_world_size_pixels(double zoom)
 {
     return OPENRIDE_TILE_SIZE * pow(2.0, zoom);
@@ -73,6 +99,9 @@ void openride_camera_pan(OpenRideMapCamera *camera, double drag_x, double drag_y
     OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
     const double world_size = openride_world_size_pixels(camera->zoom);
 
+    /* Convert the screen drag back to north-up world axes before panning. */
+    rotate_screen_inverse(camera->bearing_deg, &drag_x, &drag_y);
+
     /* Dragging the map right/down moves the camera center left/up. */
     center.x -= drag_x / world_size;
     center.y -= drag_y / world_size;
@@ -100,8 +129,9 @@ void openride_camera_zoom_at(OpenRideMapCamera *camera,
     OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
     const double old_world = openride_world_size_pixels(old_zoom);
     const double new_world = openride_world_size_pixels(new_zoom);
-    const double dx = cursor_x - (double)viewport_width * 0.5;
-    const double dy = cursor_y - (double)viewport_height * 0.5;
+    double dx = cursor_x - (double)viewport_width * 0.5;
+    double dy = cursor_y - (double)viewport_height * 0.5;
+    rotate_screen_inverse(camera->bearing_deg, &dx, &dy);
 
     /* Geographic point currently under the cursor. */
     OpenRidePointD anchor = {
@@ -135,9 +165,13 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
     if (dx > 0.5) dx -= 1.0;
     if (dx < -0.5) dx += 1.0;
 
+    double screen_dx = dx * world_size;
+    double screen_dy = (point.y - center.y) * world_size;
+    rotate_screen_forward(camera->bearing_deg, &screen_dx, &screen_dy);
+
     OpenRidePointD result = {
-        (double)viewport_width * 0.5 + dx * world_size,
-        (double)viewport_height * 0.5 + (point.y - center.y) * world_size
+        (double)viewport_width * 0.5 + screen_dx,
+        (double)viewport_height * 0.5 + screen_dy
     };
 
     return result;
@@ -154,9 +188,13 @@ void openride_screen_to_geo(const OpenRideMapCamera *camera,
     OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
     const double world_size = openride_world_size_pixels(camera->zoom);
 
+    double dx = screen_x - (double)viewport_width * 0.5;
+    double dy = screen_y - (double)viewport_height * 0.5;
+    rotate_screen_inverse(camera->bearing_deg, &dx, &dy);
+
     OpenRidePointD point = {
-        center.x + (screen_x - (double)viewport_width * 0.5) / world_size,
-        center.y + (screen_y - (double)viewport_height * 0.5) / world_size
+        center.x + dx / world_size,
+        center.y + dy / world_size
     };
 
     openride_mercator_inverse(point, lat_deg, lon_deg);
