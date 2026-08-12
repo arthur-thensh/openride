@@ -1,0 +1,4 @@
+# Local OpenRide user data (favorites, history, settings)
+openride-app.sqlite
+openride-app.sqlite-shm
+openride-app.sqlite-wal

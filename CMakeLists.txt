@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.15.0 LANGUAGES C)
+project(OpenRide VERSION 0.16.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -30,6 +30,8 @@ add_library(openride_core STATIC
     src/core/navigation_instructions.c
     src/core/gps_simulator.c
     src/core/gpx.c
+    src/core/place_search.c
+    src/core/app_storage.c
     src/osm/osm_import.c
     src/map/mbtiles.c
     src/map/mvt.c
@@ -91,6 +93,27 @@ if(MSVC)
     target_compile_options(openride_osm_import PRIVATE /W4)
 else()
     target_compile_options(openride_osm_import PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+
+add_executable(openride_place_import
+    src/tools/place_import_main.c
+)
+target_link_libraries(openride_place_import PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_place_import PRIVATE /W4)
+else()
+    target_compile_options(openride_place_import PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(openride_place_search
+    src/tools/place_search_main.c
+)
+target_link_libraries(openride_place_search PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_place_search PRIVATE /W4)
+else()
+    target_compile_options(openride_place_search PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 add_executable(openride_spatial_benchmark
@@ -215,6 +238,21 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_gpx PRIVATE openride_core)
     add_test(NAME gpx COMMAND test_gpx)
+
+    add_executable(test_place_search
+        tests/test_place_search.c
+    )
+    target_link_libraries(test_place_search PRIVATE openride_core)
+    add_test(
+        NAME place_search
+        COMMAND test_place_search "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny_places.osm.pbf"
+    )
+
+    add_executable(test_app_storage
+        tests/test_app_storage.c
+    )
+    target_link_libraries(test_app_storage PRIVATE openride_core)
+    add_test(NAME app_storage COMMAND test_app_storage)
 
     add_executable(test_osm_import
         tests/test_osm_import.c

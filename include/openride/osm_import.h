@@ -2,10 +2,17 @@
 #define OPENRIDE_OSM_IMPORT_H
 
 #include "openride/routing_graph.h"
+#include "openride/place_search.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+
+typedef struct OpenRideOSMPlaceImportStats {
+    uint64_t osm_node_count;
+    uint64_t indexed_place_count;
+} OpenRideOSMPlaceImportStats;
 
 typedef struct OpenRideOSMImportStats {
     uint64_t osm_way_count;
@@ -35,5 +42,12 @@ bool openride_osm_pbf_import_file(const char *pbf_path,
                                   OpenRideOSMImportStats *stats,
                                   char *error,
                                   size_t error_size);
+
+/* Build the offline place/POI search database from OSM node tags. */
+bool openride_osm_pbf_import_places(const char *pbf_path,
+                                    const char *database_path,
+                                    OpenRideOSMPlaceImportStats *stats,
+                                    char *error,
+                                    size_t error_size);
 
 #endif

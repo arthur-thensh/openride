@@ -1,4 +1,5 @@
 #include "openride/osm_import.h"
+#include "openride/place_search.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -8,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sqlite3.h>
 #include <zlib.h>
 
 typedef struct ProtoReader {
@@ -1438,4 +1440,605 @@ bool openride_osm_pbf_import_file(const char *pbf_path,
     if (stats) *stats = local_stats;
     openride_routing_graph_destroy(&graph);
     return ok;
+}
+
+typedef struct PlaceTags {
+    ProtoSlice name;
+    ProtoSlice name_fr;
+    ProtoSlice place;
+    ProtoSlice amenity;
+    ProtoSlice tourism;
+    ProtoSlice shop;
+    ProtoSlice population;
+} PlaceTags;
+
+typedef struct PlaceImportContext {
+    sqlite3 *db;
+    sqlite3_stmt *insert_statement;
+    OpenRideOSMPlaceImportStats stats;
+} PlaceImportContext;
+
+static void place_tags_add(PlaceTags *tags,
+                           const OSMStringTable *table,
+                           uint32_t key_index,
+                           uint32_t value_index)
+{
+    if (!tags || !table) return;
+    const ProtoSlice key = table_string(table, key_index);
+    const ProtoSlice value = table_string(table, value_index);
+    if (slice_equals(key, "name")) tags->name = value;
+    else if (slice_equals(key, "name:fr")) tags->name_fr = value;
+    else if (slice_equals(key, "place")) tags->place = value;
+    else if (slice_equals(key, "amenity")) tags->amenity = value;
+    else if (slice_equals(key, "tourism")) tags->tourism = value;
+    else if (slice_equals(key, "shop")) tags->shop = value;
+    else if (slice_equals(key, "population")) tags->population = value;
+}
+
+static bool slice_copy_text(ProtoSlice slice, char *text, size_t text_size)
+{
+    if (!text || text_size == 0U || !slice.data || slice.size == 0U) return false;
+    size_t length = slice.size;
+    if (length >= text_size) length = text_size - 1U;
+    memcpy(text, slice.data, length);
+    text[length] = '\0';
+    return length > 0U;
+}
+
+static uint64_t slice_parse_population(ProtoSlice slice)
+{
+    char buffer[32];
+    if (!slice_copy_text(slice, buffer, sizeof(buffer))) return 0U;
+    uint64_t value = 0U;
+    bool saw_digit = false;
+    for (size_t i = 0U; buffer[i] != '\0'; ++i) {
+        const unsigned char c = (unsigned char)buffer[i];
+        if (isdigit(c)) {
+            saw_digit = true;
+            if (value <= UINT64_MAX / 10U) value = value * 10U + (uint64_t)(c - '0');
+        } else if (c == ' ' || c == ',' || c == '.') {
+            continue;
+        } else {
+            break;
+        }
+    }
+    return saw_digit ? value : 0U;
+}
+
+static OpenRidePlaceKind place_kind_from_tags(const PlaceTags *tags, int *rank)
+{
+    if (rank) *rank = 0;
+    if (!tags) return OPENRIDE_PLACE_UNKNOWN;
+
+    OpenRidePlaceKind kind = OPENRIDE_PLACE_UNKNOWN;
+    int base_rank = 0;
+    if (tag_is(tags->place, "city")) {
+        kind = OPENRIDE_PLACE_CITY; base_rank = 1000;
+    } else if (tag_is(tags->place, "town")) {
+        kind = OPENRIDE_PLACE_TOWN; base_rank = 850;
+    } else if (tag_is(tags->place, "village")) {
+        kind = OPENRIDE_PLACE_VILLAGE; base_rank = 700;
+    } else if (tag_is(tags->place, "hamlet")) {
+        kind = OPENRIDE_PLACE_HAMLET; base_rank = 500;
+    } else if (tag_is(tags->place, "suburb")) {
+        kind = OPENRIDE_PLACE_SUBURB; base_rank = 420;
+    } else if (tag_is(tags->place, "quarter")) {
+        kind = OPENRIDE_PLACE_QUARTER; base_rank = 380;
+    } else if (tag_is(tags->amenity, "fuel")) {
+        kind = OPENRIDE_PLACE_FUEL; base_rank = 620;
+    } else if (tag_is(tags->tourism, "camp_site")) {
+        kind = OPENRIDE_PLACE_CAMP_SITE; base_rank = 560;
+    } else if (tag_is(tags->tourism, "viewpoint")) {
+        kind = OPENRIDE_PLACE_VIEWPOINT; base_rank = 480;
+    } else if (tag_is(tags->shop, "motorcycle")) {
+        kind = OPENRIDE_PLACE_MOTORCYCLE_SHOP; base_rank = 540;
+    }
+
+    if (kind == OPENRIDE_PLACE_UNKNOWN) return kind;
+
+    const uint64_t population = slice_parse_population(tags->population);
+    if (population > 0U && base_rank >= 700) {
+        uint64_t bonus = 0U;
+        uint64_t n = population;
+        while (n >= 10U) {
+            n /= 10U;
+            bonus += 20U;
+        }
+        if (bonus > 180U) bonus = 180U;
+        base_rank += (int)bonus;
+    }
+    if (rank) *rank = base_rank;
+    return kind;
+}
+
+static bool place_import_insert(PlaceImportContext *context,
+                                int64_t osm_id,
+                                int32_t lat_e7,
+                                int32_t lon_e7,
+                                const PlaceTags *tags,
+                                char *error,
+                                size_t error_size)
+{
+    if (!context || !tags) return false;
+    const ProtoSlice display_name = tags->name_fr.size > 0U ? tags->name_fr : tags->name;
+    if (display_name.size == 0U) return true;
+
+    int rank = 0;
+    const OpenRidePlaceKind kind = place_kind_from_tags(tags, &rank);
+    if (kind == OPENRIDE_PLACE_UNKNOWN) return true;
+
+    char name[192];
+    char normalized[256];
+    if (!slice_copy_text(display_name, name, sizeof(name))
+        || !openride_place_normalize(name, normalized, sizeof(normalized))) {
+        return true;
+    }
+
+    sqlite3_stmt *statement = context->insert_statement;
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    sqlite3_bind_int64(statement, 1, osm_id);
+    sqlite3_bind_int(statement, 2, lat_e7);
+    sqlite3_bind_int(statement, 3, lon_e7);
+    sqlite3_bind_int(statement, 4, (int)kind);
+    sqlite3_bind_int(statement, 5, rank);
+    sqlite3_bind_text(statement, 6, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(statement, 7, normalized, -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+        set_error(error, error_size, sqlite3_errmsg(context->db));
+        return false;
+    }
+    ++context->stats.indexed_place_count;
+    return true;
+}
+
+static bool parse_dense_nodes_places(ProtoSlice message,
+                                     const OSMStringTable *table,
+                                     int64_t lat_offset,
+                                     int64_t lon_offset,
+                                     int32_t granularity,
+                                     PlaceImportContext *context,
+                                     char *error,
+                                     size_t error_size)
+{
+    ProtoSlice ids = {0};
+    ProtoSlice lats = {0};
+    ProtoSlice lons = {0};
+    ProtoSlice keys_vals_slice = {0};
+    ProtoReader reader = {message.data, message.data + message.size};
+
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) {
+            set_error(error, error_size, "invalid DenseNodes key");
+            return false;
+        }
+        if ((field == 1U || field == 8U || field == 9U || field == 10U) && wire == 2U) {
+            ProtoSlice packed = {0};
+            if (!proto_read_slice(&reader, &packed)) {
+                set_error(error, error_size, "invalid DenseNodes packed field");
+                return false;
+            }
+            if (field == 1U) ids = packed;
+            else if (field == 8U) lats = packed;
+            else if (field == 9U) lons = packed;
+            else keys_vals_slice = packed;
+        } else if (!proto_skip(&reader, wire)) {
+            set_error(error, error_size, "invalid DenseNodes field");
+            return false;
+        }
+    }
+
+    U32Vector keys_vals = {0};
+    if (keys_vals_slice.data && !parse_packed_u32(keys_vals_slice, &keys_vals)) {
+        set_error(error, error_size, "invalid DenseNodes tags");
+        u32_destroy(&keys_vals);
+        return false;
+    }
+
+    ProtoReader id_reader = {ids.data, ids.data + ids.size};
+    ProtoReader lat_reader = {lats.data, lats.data + lats.size};
+    ProtoReader lon_reader = {lons.data, lons.data + lons.size};
+    int64_t id = 0;
+    int64_t lat = 0;
+    int64_t lon = 0;
+    uint32_t tag_index = 0U;
+    bool ok = true;
+
+    while (id_reader.cursor < id_reader.end) {
+        uint64_t raw_id = 0U;
+        uint64_t raw_lat = 0U;
+        uint64_t raw_lon = 0U;
+        if (!proto_read_varint(&id_reader, &raw_id)
+            || !proto_read_varint(&lat_reader, &raw_lat)
+            || !proto_read_varint(&lon_reader, &raw_lon)) {
+            set_error(error, error_size, "DenseNodes arrays have inconsistent lengths");
+            ok = false;
+            break;
+        }
+        id += proto_zigzag64(raw_id);
+        lat += proto_zigzag64(raw_lat);
+        lon += proto_zigzag64(raw_lon);
+        ++context->stats.osm_node_count;
+
+        PlaceTags tags = {0};
+        while (tag_index < keys_vals.count && keys_vals.items[tag_index] != 0U) {
+            if (tag_index + 1U >= keys_vals.count) {
+                set_error(error, error_size, "DenseNodes tag pair is truncated");
+                ok = false;
+                break;
+            }
+            place_tags_add(&tags,
+                           table,
+                           keys_vals.items[tag_index],
+                           keys_vals.items[tag_index + 1U]);
+            tag_index += 2U;
+        }
+        if (!ok) break;
+        if (tag_index < keys_vals.count && keys_vals.items[tag_index] == 0U) ++tag_index;
+
+        if (!place_import_insert(context,
+                                 id,
+                                 pbf_coordinate_e7(lat, lat_offset, granularity),
+                                 pbf_coordinate_e7(lon, lon_offset, granularity),
+                                 &tags,
+                                 error,
+                                 error_size)) {
+            ok = false;
+            break;
+        }
+    }
+
+    if (ok && (lat_reader.cursor != lat_reader.end || lon_reader.cursor != lon_reader.end)) {
+        set_error(error, error_size, "DenseNodes arrays have inconsistent lengths");
+        ok = false;
+    }
+
+    u32_destroy(&keys_vals);
+    return ok;
+}
+
+static bool parse_node_places(ProtoSlice message,
+                              const OSMStringTable *table,
+                              int64_t lat_offset,
+                              int64_t lon_offset,
+                              int32_t granularity,
+                              PlaceImportContext *context,
+                              char *error,
+                              size_t error_size)
+{
+    ProtoReader reader = {message.data, message.data + message.size};
+    int64_t id = 0;
+    int64_t lat = 0;
+    int64_t lon = 0;
+    bool has_id = false;
+    bool has_lat = false;
+    bool has_lon = false;
+    U32Vector keys = {0};
+    U32Vector vals = {0};
+    bool ok = true;
+
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) { ok = false; break; }
+        if ((field == 1U || field == 8U || field == 9U) && wire == 0U) {
+            uint64_t raw = 0U;
+            if (!proto_read_varint(&reader, &raw)) { ok = false; break; }
+            if (field == 1U) { id = proto_zigzag64(raw); has_id = true; }
+            else if (field == 8U) { lat = proto_zigzag64(raw); has_lat = true; }
+            else { lon = proto_zigzag64(raw); has_lon = true; }
+        } else if ((field == 2U || field == 3U) && wire == 2U) {
+            ProtoSlice packed = {0};
+            if (!proto_read_slice(&reader, &packed)
+                || !parse_packed_u32(packed, field == 2U ? &keys : &vals)) {
+                ok = false;
+                break;
+            }
+        } else if (!proto_skip(&reader, wire)) {
+            ok = false;
+            break;
+        }
+    }
+
+    if (!ok || keys.count != vals.count) {
+        set_error(error, error_size, "invalid tagged OSM node");
+        u32_destroy(&keys);
+        u32_destroy(&vals);
+        return false;
+    }
+
+    if (has_id && has_lat && has_lon) {
+        ++context->stats.osm_node_count;
+        PlaceTags tags = {0};
+        for (uint32_t i = 0U; i < keys.count; ++i) {
+            place_tags_add(&tags, table, keys.items[i], vals.items[i]);
+        }
+        ok = place_import_insert(context,
+                                 id,
+                                 pbf_coordinate_e7(lat, lat_offset, granularity),
+                                 pbf_coordinate_e7(lon, lon_offset, granularity),
+                                 &tags,
+                                 error,
+                                 error_size);
+    }
+
+    u32_destroy(&keys);
+    u32_destroy(&vals);
+    return ok;
+}
+
+static bool parse_primitive_group_places(ProtoSlice message,
+                                         const OSMStringTable *table,
+                                         int64_t lat_offset,
+                                         int64_t lon_offset,
+                                         int32_t granularity,
+                                         PlaceImportContext *context,
+                                         char *error,
+                                         size_t error_size)
+{
+    ProtoReader reader = {message.data, message.data + message.size};
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) {
+            set_error(error, error_size, "invalid PrimitiveGroup key");
+            return false;
+        }
+        if (wire == 2U && (field == 1U || field == 2U)) {
+            ProtoSlice child = {0};
+            if (!proto_read_slice(&reader, &child)) {
+                set_error(error, error_size, "invalid PrimitiveGroup node");
+                return false;
+            }
+            if (field == 1U) {
+                if (!parse_node_places(child,
+                                       table,
+                                       lat_offset,
+                                       lon_offset,
+                                       granularity,
+                                       context,
+                                       error,
+                                       error_size)) return false;
+            } else {
+                if (!parse_dense_nodes_places(child,
+                                              table,
+                                              lat_offset,
+                                              lon_offset,
+                                              granularity,
+                                              context,
+                                              error,
+                                              error_size)) return false;
+            }
+        } else if (!proto_skip(&reader, wire)) {
+            set_error(error, error_size, "invalid PrimitiveGroup field");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool parse_primitive_block_places(ProtoSlice block,
+                                         PlaceImportContext *context,
+                                         char *error,
+                                         size_t error_size)
+{
+    ProtoSlice string_table_message = {0};
+    int32_t granularity = 100;
+    int64_t lat_offset = 0;
+    int64_t lon_offset = 0;
+
+    ProtoReader metadata_reader = {block.data, block.data + block.size};
+    while (metadata_reader.cursor < metadata_reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&metadata_reader, &field, &wire)) return false;
+        if (field == 1U && wire == 2U) {
+            if (!proto_read_slice(&metadata_reader, &string_table_message)) return false;
+        } else if (field == 17U && wire == 0U) {
+            uint64_t value = 0U;
+            if (!proto_read_varint(&metadata_reader, &value) || value > INT32_MAX) return false;
+            granularity = (int32_t)value;
+        } else if ((field == 19U || field == 20U) && wire == 0U) {
+            uint64_t value = 0U;
+            if (!proto_read_varint(&metadata_reader, &value)) return false;
+            if (field == 19U) lat_offset = (int64_t)value;
+            else lon_offset = (int64_t)value;
+        } else if (!proto_skip(&metadata_reader, wire)) {
+            return false;
+        }
+    }
+
+    OSMStringTable table = {0};
+    if (string_table_message.data
+        && !parse_string_table(string_table_message, &table, error, error_size)) {
+        string_table_destroy(&table);
+        return false;
+    }
+
+    ProtoReader group_reader = {block.data, block.data + block.size};
+    bool ok = true;
+    while (group_reader.cursor < group_reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&group_reader, &field, &wire)) { ok = false; break; }
+        if (field == 2U && wire == 2U) {
+            ProtoSlice group = {0};
+            if (!proto_read_slice(&group_reader, &group)
+                || !parse_primitive_group_places(group,
+                                                 &table,
+                                                 lat_offset,
+                                                 lon_offset,
+                                                 granularity,
+                                                 context,
+                                                 error,
+                                                 error_size)) {
+                ok = false;
+                break;
+            }
+        } else if (!proto_skip(&group_reader, wire)) {
+            ok = false;
+            break;
+        }
+    }
+
+    string_table_destroy(&table);
+    if (!ok && (!error || error[0] == '\0')) {
+        set_error(error, error_size, "invalid PrimitiveBlock while importing places");
+    }
+    return ok;
+}
+
+static bool scan_pbf_places(const char *path,
+                            PlaceImportContext *context,
+                            char *error,
+                            size_t error_size)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        set_errorf(error, error_size, "unable to open OSM PBF", strerror(errno));
+        return false;
+    }
+
+    bool ok = true;
+    for (;;) {
+        uint32_t header_size = 0U;
+        bool at_eof = false;
+        if (!read_u32_be(file, &header_size, &at_eof)) { ok = false; break; }
+        if (at_eof) break;
+        if (header_size == 0U || header_size > 65536U) { ok = false; break; }
+
+        unsigned char *header = malloc(header_size);
+        if (!header || fread(header, 1U, header_size, file) != header_size) {
+            free(header); ok = false; break;
+        }
+        char type[32];
+        uint32_t blob_size = 0U;
+        const bool header_ok = parse_blob_header(header,
+                                                 header_size,
+                                                 type,
+                                                 sizeof(type),
+                                                 &blob_size);
+        free(header);
+        if (!header_ok || blob_size == 0U || blob_size > 64U * 1024U * 1024U) {
+            ok = false; break;
+        }
+
+        unsigned char *blob = malloc(blob_size);
+        if (!blob || fread(blob, 1U, blob_size, file) != blob_size) {
+            free(blob); ok = false; break;
+        }
+        if (strcmp(type, "OSMData") == 0) {
+            unsigned char *owned_payload = NULL;
+            ProtoSlice payload = {0};
+            if (!decode_blob(blob,
+                             blob_size,
+                             &owned_payload,
+                             &payload,
+                             error,
+                             error_size)
+                || !parse_primitive_block_places(payload,
+                                                 context,
+                                                 error,
+                                                 error_size)) {
+                free(owned_payload);
+                free(blob);
+                ok = false;
+                break;
+            }
+            free(owned_payload);
+        }
+        free(blob);
+    }
+
+    if (!ok && (!error || error[0] == '\0')) {
+        set_error(error, error_size, "unable to scan OSM PBF for places");
+    }
+    fclose(file);
+    return ok;
+}
+
+bool openride_osm_pbf_import_places(const char *pbf_path,
+                                    const char *database_path,
+                                    OpenRideOSMPlaceImportStats *stats,
+                                    char *error,
+                                    size_t error_size)
+{
+    if (!pbf_path || !database_path) {
+        set_error(error, error_size, "invalid place import arguments");
+        return false;
+    }
+
+    remove(database_path);
+    PlaceImportContext context = {0};
+    if (sqlite3_open(database_path, &context.db) != SQLITE_OK) {
+        set_error(error,
+                  error_size,
+                  context.db ? sqlite3_errmsg(context.db) : "unable to create place index");
+        if (context.db) sqlite3_close(context.db);
+        return false;
+    }
+
+    const char *schema =
+        "PRAGMA journal_mode=OFF;"
+        "PRAGMA synchronous=OFF;"
+        "PRAGMA temp_store=MEMORY;"
+        "CREATE TABLE metadata(name TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "INSERT INTO metadata(name,value) VALUES('schema_version','1');"
+        "CREATE TABLE places("
+        "osm_id INTEGER PRIMARY KEY,"
+        "lat_e7 INTEGER NOT NULL,"
+        "lon_e7 INTEGER NOT NULL,"
+        "kind INTEGER NOT NULL,"
+        "rank INTEGER NOT NULL,"
+        "name TEXT NOT NULL,"
+        "normalized TEXT NOT NULL);";
+
+    char *sqlite_error = NULL;
+    bool ok = sqlite3_exec(context.db, schema, NULL, NULL, &sqlite_error) == SQLITE_OK;
+    if (!ok) {
+        set_error(error, error_size, sqlite_error ? sqlite_error : sqlite3_errmsg(context.db));
+        sqlite3_free(sqlite_error);
+    }
+
+    if (ok) {
+        static const char *insert_sql =
+            "INSERT OR REPLACE INTO places(osm_id,lat_e7,lon_e7,kind,rank,name,normalized) "
+            "VALUES(?1,?2,?3,?4,?5,?6,?7)";
+        ok = sqlite3_prepare_v2(context.db,
+                                insert_sql,
+                                -1,
+                                &context.insert_statement,
+                                NULL) == SQLITE_OK;
+        if (!ok) set_error(error, error_size, sqlite3_errmsg(context.db));
+    }
+
+    if (ok) ok = sqlite3_exec(context.db, "BEGIN", NULL, NULL, NULL) == SQLITE_OK;
+    if (ok) ok = scan_pbf_places(pbf_path, &context, error, error_size);
+    if (ok) ok = sqlite3_exec(context.db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK;
+    else sqlite3_exec(context.db, "ROLLBACK", NULL, NULL, NULL);
+
+    if (context.insert_statement) sqlite3_finalize(context.insert_statement);
+
+    if (ok) {
+        const char *indexes =
+            "CREATE INDEX idx_places_normalized ON places(normalized);"
+            "CREATE INDEX idx_places_kind_rank ON places(kind,rank DESC);";
+        ok = sqlite3_exec(context.db, indexes, NULL, NULL, &sqlite_error) == SQLITE_OK;
+        if (!ok) {
+            set_error(error, error_size, sqlite_error ? sqlite_error : sqlite3_errmsg(context.db));
+            sqlite3_free(sqlite_error);
+        }
+    }
+
+    if (stats) *stats = context.stats;
+    sqlite3_close(context.db);
+    if (!ok) {
+        remove(database_path);
+        return false;
+    }
+    set_error(error, error_size, "");
+    return true;
 }
