@@ -21,6 +21,13 @@ int main(void)
     char joined[64];
     assert(openride_platform_path_join(joined, sizeof(joined), "a/b", "c.dat"));
     assert(strcmp(joined, "a/b/c.dat") == 0);
+    assert(openride_region_count() >= 20U);
+    assert(openride_region_find("nord-pas-de-calais") == openride_region_default());
+    const OpenRideRegionDefinition *picardie = openride_region_find("picardie");
+    assert(picardie != NULL);
+    assert(strcmp(picardie->name, "Picardie") == 0);
+    assert(strstr(picardie->pbf_url, "picardie-latest.osm.pbf") != NULL);
+    assert(openride_region_at(openride_region_count()) == NULL);
 
     OpenRideRegionStatus status;
     assert(openride_region_get_status(&paths,
@@ -40,6 +47,8 @@ int main(void)
     }
     assert(strstr(status.routing_path, "nord-pas-de-calais.orgraph") != NULL);
     assert(strstr(status.search_path, "nord-pas-de-calais.orplaces.sqlite") != NULL);
+    assert(openride_region_status_ready(&status)
+           == (status.ormap_installed && status.routing_installed && status.search_installed));
 
     puts("Platform paths tests: OK");
     return 0;

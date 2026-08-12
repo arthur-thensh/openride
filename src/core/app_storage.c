@@ -64,6 +64,9 @@ OpenRideAppStorage *openride_app_storage_open(const char *path,
         ");"
         "CREATE TABLE IF NOT EXISTS settings("
         " key TEXT PRIMARY KEY, value INTEGER NOT NULL"
+        ");"
+        "CREATE TABLE IF NOT EXISTS text_settings("
+        " key TEXT PRIMARY KEY, value TEXT NOT NULL"
         ");";
 
     if (!exec_sql(storage->db, schema, error, error_size)) {
@@ -262,6 +265,59 @@ bool openride_app_storage_set_int(OpenRideAppStorage *storage,
     }
     sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 2, value);
+    const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    if (!ok) set_error(error, error_size, sqlite3_errmsg(storage->db));
+    else set_error(error, error_size, "");
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool openride_app_storage_get_text(OpenRideAppStorage *storage,
+                                   const char *key,
+                                   const char *fallback,
+                                   char *value,
+                                   size_t value_size)
+{
+    if (!value || value_size == 0U) return false;
+    snprintf(value, value_size, "%s", fallback ? fallback : "");
+    if (!storage || !storage->db || !key) return false;
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(storage->db,
+                           "SELECT value FROM text_settings WHERE key=?1",
+                           -1,
+                           &stmt,
+                           NULL) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *text = sqlite3_column_text(stmt, 0);
+        snprintf(value, value_size, "%s", text ? (const char *)text : "");
+    }
+    sqlite3_finalize(stmt);
+    return true;
+}
+
+bool openride_app_storage_set_text(OpenRideAppStorage *storage,
+                                   const char *key,
+                                   const char *value,
+                                   char *error,
+                                   size_t error_size)
+{
+    if (!storage || !storage->db || !key || !value) return false;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(storage->db,
+                           "INSERT INTO text_settings(key,value) VALUES(?1,?2) "
+                           "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                           -1,
+                           &stmt,
+                           NULL) != SQLITE_OK) {
+        set_error(error, error_size, sqlite3_errmsg(storage->db));
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, value, -1, SQLITE_TRANSIENT);
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     if (!ok) set_error(error, error_size, sqlite3_errmsg(storage->db));
     else set_error(error, error_size, "");

@@ -37,7 +37,12 @@ typedef struct OpenRideRegionStatus {
     char source_pbf_path[512];
 } OpenRideRegionStatus;
 
+size_t openride_region_count(void);
+const OpenRideRegionDefinition *openride_region_at(size_t index);
+const OpenRideRegionDefinition *openride_region_find(const char *id);
 const OpenRideRegionDefinition *openride_region_default(void);
+
+bool openride_region_status_ready(const OpenRideRegionStatus *status);
 
 bool openride_region_get_status(const OpenRidePlatformPaths *paths,
                                 const OpenRideRegionDefinition *region,

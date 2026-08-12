@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 int main(void)
@@ -18,6 +19,24 @@ int main(void)
     assert(openride_app_storage_add_history(storage, "Arras", 50.29, 2.78, 2, error, sizeof(error)));
     assert(openride_app_storage_set_int(storage, "map_style", 2, error, sizeof(error)));
     assert(openride_app_storage_get_int(storage, "map_style", -1) == 2);
+    char active_region[64];
+    assert(openride_app_storage_get_text(storage,
+                                         "active_region_id",
+                                         "nord-pas-de-calais",
+                                         active_region,
+                                         sizeof(active_region)));
+    assert(strcmp(active_region, "nord-pas-de-calais") == 0);
+    assert(openride_app_storage_set_text(storage,
+                                         "active_region_id",
+                                         "picardie",
+                                         error,
+                                         sizeof(error)));
+    assert(openride_app_storage_get_text(storage,
+                                         "active_region_id",
+                                         "",
+                                         active_region,
+                                         sizeof(active_region)));
+    assert(strcmp(active_region, "picardie") == 0);
 
     OpenRideStoredPlace places[8];
     uint32_t count = 0U;

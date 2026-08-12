@@ -3,16 +3,49 @@
 #include <stdio.h>
 #include <string.h>
 
-static const OpenRideRegionDefinition DEFAULT_REGION = {
-    .id = "nord-pas-de-calais",
-    .name = "Nord-Pas-de-Calais",
-    .ormap_filename = "nord-pas-de-calais.ormap",
-    .legacy_map_filename = "nord-pas-de-calais-shortbread.mbtiles",
-    .routing_filename = "nord-pas-de-calais.orgraph",
-    .search_filename = "nord-pas-de-calais.orplaces.sqlite",
-    .pbf_filename = "nord-pas-de-calais-latest.osm.pbf",
-    .pbf_url = "https://download.geofabrik.de/europe/france/nord-pas-de-calais-latest.osm.pbf"
+#define REGION(slug, display_name) { \
+    .id = slug, \
+    .name = display_name, \
+    .ormap_filename = slug ".ormap", \
+    .legacy_map_filename = slug "-shortbread.mbtiles", \
+    .routing_filename = slug ".orgraph", \
+    .search_filename = slug ".orplaces.sqlite", \
+    .pbf_filename = slug "-latest.osm.pbf", \
+    .pbf_url = "https://download.geofabrik.de/europe/france/" slug "-latest.osm.pbf" \
+}
+
+/* Geofabrik France currently exposes these historical regional extracts. */
+static const OpenRideRegionDefinition REGIONS[] = {
+    REGION("alsace", "Alsace"),
+    REGION("aquitaine", "Aquitaine"),
+    REGION("auvergne", "Auvergne"),
+    REGION("basse-normandie", "Basse-Normandie"),
+    REGION("bourgogne", "Bourgogne"),
+    REGION("bretagne", "Bretagne"),
+    REGION("centre", "Centre"),
+    REGION("champagne-ardenne", "Champagne-Ardenne"),
+    REGION("corse", "Corse"),
+    REGION("franche-comte", "Franche-Comte"),
+    REGION("guadeloupe", "Guadeloupe"),
+    REGION("guyane", "Guyane"),
+    REGION("haute-normandie", "Haute-Normandie"),
+    REGION("ile-de-france", "Ile-de-France"),
+    REGION("languedoc-roussillon", "Languedoc-Roussillon"),
+    REGION("limousin", "Limousin"),
+    REGION("lorraine", "Lorraine"),
+    REGION("martinique", "Martinique"),
+    REGION("mayotte", "Mayotte"),
+    REGION("midi-pyrenees", "Midi-Pyrenees"),
+    REGION("nord-pas-de-calais", "Nord-Pas-de-Calais"),
+    REGION("pays-de-la-loire", "Pays de la Loire"),
+    REGION("picardie", "Picardie"),
+    REGION("poitou-charentes", "Poitou-Charentes"),
+    REGION("provence-alpes-cote-d-azur", "Provence-Alpes-Cote d'Azur"),
+    REGION("reunion", "Reunion"),
+    REGION("rhone-alpes", "Rhone-Alpes")
 };
+
+#undef REGION
 
 static void set_error(char *error, size_t error_size, const char *message)
 {
@@ -20,9 +53,37 @@ static void set_error(char *error, size_t error_size, const char *message)
     snprintf(error, error_size, "%s", message ? message : "unknown error");
 }
 
+size_t openride_region_count(void)
+{
+    return sizeof(REGIONS) / sizeof(REGIONS[0]);
+}
+
+const OpenRideRegionDefinition *openride_region_at(size_t index)
+{
+    return index < openride_region_count() ? &REGIONS[index] : NULL;
+}
+
+const OpenRideRegionDefinition *openride_region_find(const char *id)
+{
+    if (!id || id[0] == '\0') return NULL;
+    for (size_t i = 0U; i < openride_region_count(); ++i) {
+        if (strcmp(REGIONS[i].id, id) == 0) return &REGIONS[i];
+    }
+    return NULL;
+}
+
 const OpenRideRegionDefinition *openride_region_default(void)
 {
-    return &DEFAULT_REGION;
+    const OpenRideRegionDefinition *region = openride_region_find("nord-pas-de-calais");
+    return region ? region : &REGIONS[0];
+}
+
+bool openride_region_status_ready(const OpenRideRegionStatus *status)
+{
+    return status
+        && status->ormap_installed
+        && status->routing_installed
+        && status->search_installed;
 }
 
 bool openride_region_get_status(const OpenRidePlatformPaths *paths,

@@ -65,4 +65,16 @@ bool openride_app_storage_set_int(OpenRideAppStorage *storage,
                                   char *error,
                                   size_t error_size);
 
+bool openride_app_storage_get_text(OpenRideAppStorage *storage,
+                                   const char *key,
+                                   const char *fallback,
+                                   char *value,
+                                   size_t value_size);
+
+bool openride_app_storage_set_text(OpenRideAppStorage *storage,
+                                   const char *key,
+                                   const char *value,
+                                   char *error,
+                                   size_t error_size);
+
 #endif
