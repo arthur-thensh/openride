@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.12.1 LANGUAGES C)
+project(OpenRide VERSION 0.13.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -26,6 +26,8 @@ add_library(openride_core STATIC
     src/core/pathfinder.c
     src/core/routing_engine.c
     src/core/loop_generator.c
+    src/core/navigation_engine.c
+    src/core/gps_simulator.c
     src/osm/osm_import.c
     src/map/mbtiles.c
     src/map/mvt.c
@@ -187,6 +189,18 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_loop_generator PRIVATE openride_core)
     add_test(NAME loop_generator COMMAND test_loop_generator)
+
+    add_executable(test_navigation_engine
+        tests/test_navigation_engine.c
+    )
+    target_link_libraries(test_navigation_engine PRIVATE openride_core)
+    add_test(NAME navigation_engine COMMAND test_navigation_engine)
+
+    add_executable(test_gps_simulator
+        tests/test_gps_simulator.c
+    )
+    target_link_libraries(test_gps_simulator PRIVATE openride_core)
+    add_test(NAME gps_simulator COMMAND test_gps_simulator)
 
     add_executable(test_osm_import
         tests/test_osm_import.c

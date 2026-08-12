@@ -6,6 +6,8 @@
 #include "openride/map_camera.h"
 #include "openride/map_selection.h"
 #include "openride/loop_generator.h"
+#include "openride/gps_simulator.h"
+#include "openride/navigation_engine.h"
 #include "openride/mbtiles.h"
 #include "openride/routing_engine.h"
 #include "openride/routing_graph.h"
@@ -21,6 +23,7 @@
 #define OPENRIDE_LOOP_DISTANCE_STEP_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MIN_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MAX_M 300000.0
+#define OPENRIDE_GPS_SIMULATION_TIME_SCALE 20.0
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -638,7 +641,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     const float panel_x = 10.0f;
     const float panel_y = 10.0f;
     const float panel_w = 500.0f;
-    const float panel_h = 174.0f;
+    const float panel_h = 190.0f;
     SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
 
     SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
@@ -647,7 +650,7 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.12.1");
+    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.13");
 
     SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
     SDL_RenderDebugTextFormat(renderer,
@@ -753,6 +756,11 @@ static void draw_overlay(SDL_Renderer *renderer,
     SDL_RenderDebugText(renderer,
                         panel_x + 12.0f,
                         panel_y + 142.0f,
+                        "S: GPS | F: suivi | X: ecart test | R: recalcul");
+
+    SDL_RenderDebugText(renderer,
+                        panel_x + 12.0f,
+                        panel_y + 158.0f,
                         "glisser: deplacer | clic droit: supprimer | C: effacer");
 
     if (route_valid || (selection->has_start && selection->has_destination)) {
@@ -838,6 +846,163 @@ static void draw_overlay(SDL_Renderer *renderer,
     }
 }
 
+static void clear_navigation_session(OpenRideNavigationEngine *navigation,
+                                     OpenRideGPSSimulator *simulator,
+                                     OpenRideNavigationState *navigation_state,
+                                     OpenRideGPSSample *gps_sample,
+                                     bool *gps_sample_valid)
+{
+    openride_navigation_engine_clear_route(navigation);
+    openride_gps_simulator_clear_route(simulator);
+    if (navigation_state) memset(navigation_state, 0, sizeof(*navigation_state));
+    if (gps_sample) memset(gps_sample, 0, sizeof(*gps_sample));
+    if (gps_sample_valid) *gps_sample_valid = false;
+}
+
+static bool prepare_navigation_session(OpenRideNavigationEngine *navigation,
+                                       OpenRideGPSSimulator *simulator,
+                                       const OpenRideRoute *route,
+                                       char *status,
+                                       size_t status_size)
+{
+    char error[192] = {0};
+    if (!openride_navigation_engine_set_route(navigation,
+                                              route,
+                                              error,
+                                              sizeof(error))) {
+        snprintf(status,
+                 status_size,
+                 "navigation indisponible: %.140s",
+                 error[0] ? error : "geometrie invalide");
+        return false;
+    }
+    if (!openride_gps_simulator_set_route(simulator,
+                                          route,
+                                          60.0,
+                                          error,
+                                          sizeof(error))) {
+        openride_navigation_engine_clear_route(navigation);
+        snprintf(status,
+                 status_size,
+                 "simulateur GPS indisponible: %.130s",
+                 error[0] ? error : "geometrie invalide");
+        return false;
+    }
+    return true;
+}
+
+static void draw_navigation_position(SDL_Renderer *renderer,
+                                     const OpenRideMapCamera *camera,
+                                     const OpenRideGPSSample *gps,
+                                     const OpenRideNavigationState *navigation,
+                                     int viewport_width,
+                                     int viewport_height)
+{
+    if (!gps || !gps->valid) return;
+
+    const OpenRidePointD raw = openride_geo_to_screen(camera,
+                                                       gps->lat,
+                                                       gps->lon,
+                                                       viewport_width,
+                                                       viewport_height);
+
+    if (navigation && navigation->valid) {
+        const OpenRidePointD matched = openride_geo_to_screen(camera,
+                                                               navigation->matched_lat,
+                                                               navigation->matched_lon,
+                                                               viewport_width,
+                                                               viewport_height);
+        if (navigation->distance_from_route_m > 1.0) {
+            SDL_SetRenderDrawColor(renderer, 54, 65, 76, 180);
+            draw_thick_line(renderer,
+                            (float)raw.x,
+                            (float)raw.y,
+                            (float)matched.x,
+                            (float)matched.y,
+                            2);
+        }
+        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
+        draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 5.0f);
+        SDL_SetRenderDrawColor(renderer, 35, 112, 190, 245);
+        draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 3.0f);
+    }
+
+    SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
+    draw_filled_circle(renderer, (float)raw.x, (float)raw.y, 11.0f);
+    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
+    draw_filled_circle(renderer, (float)raw.x, (float)raw.y, 8.0f);
+
+    const double heading_rad = gps->heading_deg * 0.01745329251994329577;
+    const float hx = (float)raw.x + (float)(sin(heading_rad) * 18.0);
+    const float hy = (float)raw.y - (float)(cos(heading_rad) * 18.0);
+    SDL_SetRenderDrawColor(renderer, 248, 248, 246, 255);
+    draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 5);
+    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
+    draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
+}
+
+static void draw_navigation_overlay(SDL_Renderer *renderer,
+                                    const OpenRideNavigationState *navigation,
+                                    const OpenRideGPSSimulator *simulator,
+                                    bool gps_sample_valid,
+                                    bool follow_gps,
+                                    bool deviation_enabled,
+                                    int viewport_height)
+{
+    if (!gps_sample_valid || !navigation || !navigation->valid) return;
+
+    const float x = 10.0f;
+    const float y = 210.0f;
+    const float w = 500.0f;
+    const float h = 102.0f;
+    if (viewport_height < (int)(y + h + 30.0f)) return;
+
+    SDL_FRect panel = {x, y, w, h};
+    SDL_SetRenderDrawColor(renderer, 24, 28, 32, 222);
+    SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
+    SDL_RenderRect(renderer, &panel);
+
+    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
+    SDL_RenderDebugText(renderer, x + 12.0f, y + 10.0f, "NAVIGATION GPS SIMULEE");
+
+    if (navigation->status == OPENRIDE_NAVIGATION_OFF_ROUTE) {
+        SDL_SetRenderDrawColor(renderer, 230, 98, 75, 255);
+    } else if (navigation->status == OPENRIDE_NAVIGATION_ARRIVED) {
+        SDL_SetRenderDrawColor(renderer, 86, 190, 118, 255);
+    } else {
+        SDL_SetRenderDrawColor(renderer, 100, 190, 126, 255);
+    }
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 27.0f,
+                              "%s%s",
+                              openride_navigation_status_name(navigation->status),
+                              simulator && simulator->active ? " | lecture" : " | pause");
+
+    SDL_SetRenderDrawColor(renderer, 220, 225, 229, 255);
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 44.0f,
+                              "reste %.1f km | progression %.1f%%",
+                              navigation->remaining_m / 1000.0,
+                              navigation->progress_ratio * 100.0);
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 59.0f,
+                              "ecart %.1f m | vitesse %.0f km/h",
+                              navigation->distance_from_route_m,
+                              navigation->speed_mps * 3.6);
+
+    SDL_SetRenderDrawColor(renderer, 158, 168, 176, 255);
+    SDL_RenderDebugTextFormat(renderer,
+                              x + 12.0f,
+                              y + 76.0f,
+                              "S lecture/pause | F suivi %s | X deviation %s | R recalcul",
+                              follow_gps ? "ON" : "OFF",
+                              deviation_enabled ? "ON" : "OFF");
+}
+
 static OpenRideMapCamera camera_from_metadata(const OpenRideMBTilesMetadata *metadata)
 {
     OpenRideMapCamera camera = {
@@ -907,6 +1072,16 @@ int main(int argc, char **argv)
     OpenRideMapSelection selection;
     openride_map_selection_init(&selection);
     OpenRideRoute route = {0};
+    OpenRideNavigationEngine navigation;
+    OpenRideGPSSimulator gps_simulator;
+    OpenRideNavigationState navigation_state = {0};
+    OpenRideGPSSample gps_sample = {0};
+    bool gps_sample_valid = false;
+    bool follow_gps = true;
+    bool simulator_deviation = false;
+    Uint64 last_frame_ticks = 0;
+    openride_navigation_engine_init(&navigation);
+    openride_gps_simulator_init(&gps_simulator);
     OpenRideRoutingProfile routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
     OpenRideMapStyle map_style = OPENRIDE_MAP_STYLE_TRAIL;
     double loop_target_distance_m = 100000.0;
@@ -942,6 +1117,8 @@ int main(int argc, char **argv)
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        openride_gps_simulator_destroy(&gps_simulator);
+        openride_navigation_engine_destroy(&navigation);
         openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         return 1;
@@ -955,6 +1132,8 @@ int main(int argc, char **argv)
             &window,
             &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
+        openride_gps_simulator_destroy(&gps_simulator);
+        openride_navigation_engine_destroy(&navigation);
         openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         SDL_Quit();
@@ -962,6 +1141,7 @@ int main(int argc, char **argv)
     }
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    last_frame_ticks = SDL_GetTicks();
 
     if (vector_map) {
         renderer_initialized = openride_vector_map_renderer_init(&vector_renderer, renderer, map);
@@ -976,6 +1156,8 @@ int main(int argc, char **argv)
         SDL_Log("Unable to initialize offline map renderer");
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
+        openride_gps_simulator_destroy(&gps_simulator);
+        openride_navigation_engine_destroy(&navigation);
         openride_routing_graph_destroy(&routing_graph);
         openride_mbtiles_close(map);
         SDL_Quit();
@@ -998,6 +1180,12 @@ int main(int argc, char **argv)
                         running = false;
                     } else if (event.key.key == SDLK_C) {
                         openride_map_selection_clear(&selection);
+                        clear_navigation_session(&navigation,
+                                                 &gps_simulator,
+                                                 &navigation_state,
+                                                 &gps_sample,
+                                                 &gps_sample_valid);
+                        simulator_deviation = false;
                         openride_route_destroy(&route);
                         route_valid = false;
                         route_dirty = false;
@@ -1017,6 +1205,12 @@ int main(int argc, char **argv)
                         }
                         destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
                         route_dirty = false;
+                        clear_navigation_session(&navigation,
+                                                 &gps_simulator,
+                                                 &navigation_state,
+                                                 &gps_sample,
+                                                 &gps_sample_valid);
+                        simulator_deviation = false;
                         route_valid = generate_loop_route(&routing_graph,
                                                           graph_loaded,
                                                           &selection,
@@ -1032,9 +1226,81 @@ int main(int argc, char **argv)
                                                           route_status,
                                                           sizeof(route_status));
                         loop_active = route_valid;
+                        if (route_valid) {
+                            prepare_navigation_session(&navigation,
+                                                       &gps_simulator,
+                                                       &route,
+                                                       route_status,
+                                                       sizeof(route_status));
+                        }
+                    } else if (event.key.key == SDLK_S) {
+                        if (route_valid && gps_simulator.route) {
+                            const bool active = openride_gps_simulator_toggle(&gps_simulator);
+                            if (openride_gps_simulator_sample(&gps_simulator, &gps_sample)) {
+                                gps_sample_valid = true;
+                                openride_navigation_engine_update(&navigation,
+                                                                  gps_sample.lat,
+                                                                  gps_sample.lon,
+                                                                  gps_sample.speed_mps,
+                                                                  gps_sample.heading_deg,
+                                                                  &navigation_state);
+                            }
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "simulation GPS %s",
+                                     active ? "en cours" : "en pause");
+                        } else {
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "calcule un itineraire avant de lancer le GPS");
+                        }
+                    } else if (event.key.key == SDLK_X) {
+                        simulator_deviation = !simulator_deviation;
+                        openride_gps_simulator_set_lateral_offset_m(
+                            &gps_simulator,
+                            simulator_deviation ? 80.0 : 0.0);
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "deviation GPS test: %s",
+                                 simulator_deviation ? "80 m" : "desactivee");
+                    } else if (event.key.key == SDLK_F) {
+                        follow_gps = !follow_gps;
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "suivi camera GPS: %s",
+                                 follow_gps ? "actif" : "inactif");
+                    } else if (event.key.key == SDLK_R) {
+                        if (gps_sample_valid && selection.has_destination && !loop_active) {
+                            const double reroute_lat = gps_sample.lat;
+                            const double reroute_lon = gps_sample.lon;
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
+                            openride_route_destroy(&route);
+                            openride_map_selection_set(&selection,
+                                                       OPENRIDE_MARKER_START,
+                                                       reroute_lat,
+                                                       reroute_lon);
+                            route_valid = false;
+                            route_dirty = true;
+                            loop_active = false;
+                            simulator_deviation = false;
+                            snprintf(route_status, sizeof(route_status), "recalcul depuis GPS...");
+                        } else {
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "R necessite un GPS actif et une destination");
+                        }
                     } else if (event.key.key == SDLK_O) {
                         loop_direction = openride_loop_direction_next(loop_direction);
                         if (loop_active) {
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
                             openride_route_destroy(&route);
                             route_valid = false;
                             loop_active = false;
@@ -1052,6 +1318,11 @@ int main(int argc, char **argv)
                             OPENRIDE_LOOP_DISTANCE_MIN_M,
                             OPENRIDE_LOOP_DISTANCE_MAX_M);
                         if (loop_active) {
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
                             openride_route_destroy(&route);
                             route_valid = false;
                             loop_active = false;
@@ -1068,6 +1339,11 @@ int main(int argc, char **argv)
                             OPENRIDE_LOOP_DISTANCE_MIN_M,
                             OPENRIDE_LOOP_DISTANCE_MAX_M);
                         if (loop_active) {
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
                             openride_route_destroy(&route);
                             route_valid = false;
                             loop_active = false;
@@ -1091,6 +1367,11 @@ int main(int argc, char **argv)
                             routing_profile = OPENRIDE_ROUTING_PROFILE_TRAIL;
                         }
                         if (loop_active) {
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
                             openride_route_destroy(&route);
                             route_valid = false;
                             loop_active = false;
@@ -1122,6 +1403,11 @@ int main(int argc, char **argv)
                                                            height);
                         dragging_map = dragging_marker == OPENRIDE_MARKER_NONE;
                         if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
                             openride_route_destroy(&route);
                             route_valid = false;
                             loop_active = false;
@@ -1137,6 +1423,11 @@ int main(int argc, char **argv)
                             height);
                         if (marker != OPENRIDE_MARKER_NONE) {
                             openride_map_selection_remove(&selection, marker);
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
                             openride_route_destroy(&route);
                             route_valid = false;
                             loop_active = false;
@@ -1254,6 +1545,12 @@ int main(int argc, char **argv)
         if (route_dirty) {
             loop_active = false;
             loop_waypoint_count = 0U;
+            clear_navigation_session(&navigation,
+                                     &gps_simulator,
+                                     &navigation_state,
+                                     &gps_sample,
+                                     &gps_sample_valid);
+            simulator_deviation = false;
             route_valid = recalculate_route(&routing_graph,
                                             graph_loaded,
                                             &selection,
@@ -1263,7 +1560,43 @@ int main(int argc, char **argv)
                                             &destination_snap,
                                             route_status,
                                             sizeof(route_status));
+            if (route_valid) {
+                prepare_navigation_session(&navigation,
+                                           &gps_simulator,
+                                           &route,
+                                           route_status,
+                                           sizeof(route_status));
+            }
             route_dirty = false;
+        }
+
+        const Uint64 current_ticks = SDL_GetTicks();
+        double delta_seconds = (double)(current_ticks - last_frame_ticks) / 1000.0;
+        last_frame_ticks = current_ticks;
+        if (delta_seconds < 0.0) delta_seconds = 0.0;
+        if (delta_seconds > 0.25) delta_seconds = 0.25;
+
+        if (route_valid && gps_simulator.route
+            && (gps_simulator.active || gps_sample_valid)) {
+            if (openride_gps_simulator_update(&gps_simulator,
+                                              delta_seconds * OPENRIDE_GPS_SIMULATION_TIME_SCALE,
+                                              &gps_sample)) {
+                gps_sample_valid = true;
+                openride_navigation_engine_update(&navigation,
+                                                  gps_sample.lat,
+                                                  gps_sample.lon,
+                                                  gps_sample.speed_mps,
+                                                  gps_sample.heading_deg,
+                                                  &navigation_state);
+                if (follow_gps && gps_simulator.active) {
+                    camera.center_lat = gps_sample.lat;
+                    camera.center_lon = gps_sample.lon;
+                }
+                if (navigation_state.status == OPENRIDE_NAVIGATION_ARRIVED
+                    && gps_simulator.finished) {
+                    snprintf(route_status, sizeof(route_status), "destination atteinte");
+                }
+            }
         }
 
         int width = 0;
@@ -1320,6 +1653,14 @@ int main(int argc, char **argv)
                        !route_valid,
                        width,
                        height);
+        if (gps_sample_valid) {
+            draw_navigation_position(renderer,
+                                     &camera,
+                                     &gps_sample,
+                                     &navigation_state,
+                                     width,
+                                     height);
+        }
         draw_center_marker(renderer, width, height);
         draw_overlay(renderer,
                      &camera,
@@ -1340,6 +1681,13 @@ int main(int argc, char **argv)
                      &loop_stats,
                      width,
                      height);
+        draw_navigation_overlay(renderer,
+                                &navigation_state,
+                                &gps_simulator,
+                                gps_sample_valid,
+                                follow_gps,
+                                simulator_deviation,
+                                height);
         SDL_RenderPresent(renderer);
     }
 
@@ -1349,6 +1697,8 @@ int main(int argc, char **argv)
         openride_map_renderer_destroy(&raster_renderer);
     }
 
+    openride_gps_simulator_destroy(&gps_simulator);
+    openride_navigation_engine_destroy(&navigation);
     openride_route_destroy(&route);
     openride_routing_graph_destroy(&routing_graph);
     SDL_DestroyRenderer(renderer);
