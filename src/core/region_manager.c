@@ -6,9 +6,12 @@
 static const OpenRideRegionDefinition DEFAULT_REGION = {
     .id = "nord-pas-de-calais",
     .name = "Nord-Pas-de-Calais",
-    .map_filename = "nord-pas-de-calais-shortbread.mbtiles",
+    .ormap_filename = "nord-pas-de-calais.ormap",
+    .legacy_map_filename = "nord-pas-de-calais-shortbread.mbtiles",
     .routing_filename = "nord-pas-de-calais.orgraph",
-    .search_filename = "nord-pas-de-calais.orplaces.sqlite"
+    .search_filename = "nord-pas-de-calais.orplaces.sqlite",
+    .pbf_filename = "nord-pas-de-calais-latest.osm.pbf",
+    .pbf_url = "https://download.geofabrik.de/europe/france/nord-pas-de-calais-latest.osm.pbf"
 };
 
 static void set_error(char *error, size_t error_size, const char *message)
@@ -32,12 +35,15 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
         set_error(error, error_size, "invalid region status arguments");
         return false;
     }
-
     memset(status, 0, sizeof(*status));
-    if (!openride_platform_path_join(status->map_path,
-                                     sizeof(status->map_path),
+    if (!openride_platform_path_join(status->ormap_path,
+                                     sizeof(status->ormap_path),
                                      paths->maps_dir,
-                                     region->map_filename)
+                                     region->ormap_filename)
+        || !openride_platform_path_join(status->legacy_map_path,
+                                        sizeof(status->legacy_map_path),
+                                        paths->maps_dir,
+                                        region->legacy_map_filename)
         || !openride_platform_path_join(status->routing_path,
                                         sizeof(status->routing_path),
                                         paths->routing_dir,
@@ -45,21 +51,61 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
         || !openride_platform_path_join(status->search_path,
                                         sizeof(status->search_path),
                                         paths->search_dir,
-                                        region->search_filename)) {
+                                        region->search_filename)
+        || !openride_platform_path_join(status->source_pbf_path,
+                                        sizeof(status->source_pbf_path),
+                                        paths->downloads_dir,
+                                        region->pbf_filename)) {
         set_error(error, error_size, "region path is too long");
         return false;
     }
 
-    status->map_size_mb = openride_platform_file_size_mb(status->map_path);
+    const double ormap_size = openride_platform_file_size_mb(status->ormap_path);
+    const double legacy_size = openride_platform_file_size_mb(status->legacy_map_path);
+    status->ormap_installed = ormap_size >= 0.0;
+    status->legacy_map_installed = legacy_size >= 0.0;
+    status->map_installed = status->ormap_installed || status->legacy_map_installed;
+    if (status->ormap_installed) {
+        snprintf(status->map_path, sizeof(status->map_path), "%s", status->ormap_path);
+        status->map_size_mb = ormap_size;
+    } else if (status->legacy_map_installed) {
+        snprintf(status->map_path, sizeof(status->map_path), "%s", status->legacy_map_path);
+        status->map_size_mb = legacy_size;
+    }
+
     status->routing_size_mb = openride_platform_file_size_mb(status->routing_path);
     status->search_size_mb = openride_platform_file_size_mb(status->search_path);
-    status->map_installed = status->map_size_mb >= 0.0;
+    status->source_pbf_size_mb = openride_platform_file_size_mb(status->source_pbf_path);
     status->routing_installed = status->routing_size_mb >= 0.0;
     status->search_installed = status->search_size_mb >= 0.0;
+    status->source_pbf_present = status->source_pbf_size_mb >= 0.0;
     status->total_size_mb = (status->map_installed ? status->map_size_mb : 0.0)
         + (status->routing_installed ? status->routing_size_mb : 0.0)
-        + (status->search_installed ? status->search_size_mb : 0.0);
+        + (status->search_installed ? status->search_size_mb : 0.0)
+        + (status->source_pbf_present ? status->source_pbf_size_mb : 0.0);
+    set_error(error, error_size, "");
+    return true;
+}
 
+bool openride_region_remove_generated(const OpenRidePlatformPaths *paths,
+                                      const OpenRideRegionDefinition *region,
+                                      char *error,
+                                      size_t error_size)
+{
+    OpenRideRegionStatus status;
+    if (!openride_region_get_status(paths, region, &status, error, error_size)) return false;
+    const char *files[] = {
+        status.ormap_path,
+        status.routing_path,
+        status.search_path,
+        status.source_pbf_path
+    };
+    for (size_t i = 0U; i < sizeof(files) / sizeof(files[0]); ++i) {
+        if (openride_platform_file_exists(files[i]) && remove(files[i]) != 0) {
+            set_error(error, error_size, "unable to remove region file");
+            return false;
+        }
+    }
     set_error(error, error_size, "");
     return true;
 }

@@ -20,7 +20,7 @@ if ! command -v "$ADB" >/dev/null 2>&1; then
     exit 1
 fi
 
-MAP="$ROOT_DIR/data/maps/nord-pas-de-calais-shortbread.mbtiles"
+MAP="$ROOT_DIR/data/maps/nord-pas-de-calais.ormap"
 GRAPH="$ROOT_DIR/data/routing/nord-pas-de-calais.orgraph"
 SEARCH="$ROOT_DIR/data/search/nord-pas-de-calais.orplaces.sqlite"
 
@@ -63,7 +63,7 @@ push_app_file() {
     "$ADB" shell rm -f "$temporary"
 }
 
-echo "Copie de la carte..."
+echo "Copie de la carte .ormap..."
 push_app_file "$MAP" "$REMOTE/maps"
 echo "Copie du graphe de routage..."
 push_app_file "$GRAPH" "$REMOTE/routing"
@@ -73,7 +73,7 @@ push_app_file "$SEARCH" "$REMOTE/search"
 echo
 echo "Vérification des fichiers installés..."
 "$ADB" shell run-as "$PACKAGE" ls -lh \
-    "$REMOTE/maps/nord-pas-de-calais-shortbread.mbtiles" \
+    "$REMOTE/maps/nord-pas-de-calais.ormap" \
     "$REMOTE/routing/nord-pas-de-calais.orgraph" \
     "$REMOTE/search/nord-pas-de-calais.orplaces.sqlite"
 

@@ -18,6 +18,7 @@ typedef struct OpenRidePlatformPaths {
     char routing_dir[512];
     char search_dir[512];
     char gpx_dir[512];
+    char downloads_dir[512];
     char app_storage_path[512];
 } OpenRidePlatformPaths;
 

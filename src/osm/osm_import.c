@@ -2042,3 +2042,1139 @@ bool openride_osm_pbf_import_places(const char *pbf_path,
     set_error(error, error_size, "");
     return true;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Lightweight cartographic feature visitor used by the .ormap builder.      */
+/* ------------------------------------------------------------------------- */
+
+typedef struct MapPolygonWay {
+    int64_t osm_id;
+    uint64_t ref_offset;
+    uint32_t ref_count;
+    uint8_t kind;
+} MapPolygonWay;
+
+typedef struct MapPolygonWayVector {
+    MapPolygonWay *items;
+    uint32_t count;
+    uint32_t capacity;
+} MapPolygonWayVector;
+
+typedef struct MapRelationMember {
+    int64_t way_id;
+} MapRelationMember;
+
+typedef struct MapRelationMemberVector {
+    MapRelationMember *items;
+    uint32_t count;
+    uint32_t capacity;
+} MapRelationMemberVector;
+
+typedef struct MapPolygonRelation {
+    uint64_t member_offset;
+    uint32_t member_count;
+    uint8_t kind;
+} MapPolygonRelation;
+
+typedef struct MapPolygonRelationVector {
+    MapPolygonRelation *items;
+    uint32_t count;
+    uint32_t capacity;
+} MapPolygonRelationVector;
+
+typedef struct MapPolygonNode {
+    int64_t osm_id;
+    int32_t lat_e7;
+    int32_t lon_e7;
+    unsigned char has_coordinates;
+} MapPolygonNode;
+
+typedef struct MapPolygonContext {
+    MapPolygonWayVector ways;
+    MapPolygonRelationVector relations;
+    MapRelationMemberVector relation_members;
+    I64Vector relation_way_ids;
+    I64Vector refs;
+    I64Vector needed_ids;
+    MapPolygonNode *nodes;
+    uint32_t node_count;
+    OpenRideOSMMapFeatureVisitor visitor;
+    void *userdata;
+    OpenRideOSMMapFeatureStats stats;
+} MapPolygonContext;
+
+typedef enum MapPolygonPass {
+    MAP_POLYGON_PASS_RELATIONS = 1,
+    MAP_POLYGON_PASS_WAYS = 2,
+    MAP_POLYGON_PASS_NODES = 3
+} MapPolygonPass;
+
+static bool map_polygon_way_push(MapPolygonWayVector *vector, MapPolygonWay way)
+{
+    if (!vector || vector->count == UINT32_MAX) return false;
+    if (vector->count == vector->capacity) {
+        uint32_t capacity = vector->capacity == 0U ? 1024U : vector->capacity * 2U;
+        if (capacity < vector->capacity) return false;
+        MapPolygonWay *items = realloc(vector->items,
+                                       (size_t)capacity * sizeof(*items));
+        if (!items) return false;
+        vector->items = items;
+        vector->capacity = capacity;
+    }
+    vector->items[vector->count++] = way;
+    return true;
+}
+
+static bool map_relation_member_push(MapRelationMemberVector *vector,
+                                     MapRelationMember member)
+{
+    if (!vector || vector->count == UINT32_MAX) return false;
+    if (vector->count == vector->capacity) {
+        uint32_t capacity = vector->capacity == 0U ? 256U : vector->capacity * 2U;
+        if (capacity < vector->capacity) return false;
+        MapRelationMember *items = realloc(vector->items,
+                                           (size_t)capacity * sizeof(*items));
+        if (!items) return false;
+        vector->items = items;
+        vector->capacity = capacity;
+    }
+    vector->items[vector->count++] = member;
+    return true;
+}
+
+static bool map_polygon_relation_push(MapPolygonRelationVector *vector,
+                                      MapPolygonRelation relation)
+{
+    if (!vector || vector->count == UINT32_MAX) return false;
+    if (vector->count == vector->capacity) {
+        uint32_t capacity = vector->capacity == 0U ? 128U : vector->capacity * 2U;
+        if (capacity < vector->capacity) return false;
+        MapPolygonRelation *items = realloc(vector->items,
+                                            (size_t)capacity * sizeof(*items));
+        if (!items) return false;
+        vector->items = items;
+        vector->capacity = capacity;
+    }
+    vector->items[vector->count++] = relation;
+    return true;
+}
+
+static void map_polygon_context_destroy(MapPolygonContext *context)
+{
+    if (!context) return;
+    free(context->ways.items);
+    free(context->relations.items);
+    free(context->relation_members.items);
+    i64_destroy(&context->relation_way_ids);
+    i64_destroy(&context->refs);
+    i64_destroy(&context->needed_ids);
+    free(context->nodes);
+    memset(context, 0, sizeof(*context));
+}
+
+static bool slice_nonempty(ProtoSlice slice)
+{
+    return slice.data != NULL && slice.size > 0U;
+}
+
+static OpenRideOSMMapFeatureKind classify_map_area_way(const OSMStringTable *table,
+                                                        const U32Vector *keys,
+                                                        const U32Vector *vals)
+{
+    const ProtoSlice natural = way_tag_value(table, keys, vals, "natural");
+    const ProtoSlice water = way_tag_value(table, keys, vals, "water");
+    const ProtoSlice landuse = way_tag_value(table, keys, vals, "landuse");
+    const ProtoSlice waterway = way_tag_value(table, keys, vals, "waterway");
+    const ProtoSlice leisure = way_tag_value(table, keys, vals, "leisure");
+    const ProtoSlice building = way_tag_value(table, keys, vals, "building");
+
+    if (tag_is(natural, "water")
+        || (slice_nonempty(water) && !tag_is(water, "no"))
+        || tag_is(landuse, "reservoir")
+        || tag_is(landuse, "basin")
+        || tag_is(waterway, "riverbank")) {
+        return OPENRIDE_OSM_MAP_FEATURE_WATER_AREA;
+    }
+    if (tag_is(natural, "wood")
+        || tag_is(landuse, "forest")
+        || tag_is(leisure, "nature_reserve")) {
+        return OPENRIDE_OSM_MAP_FEATURE_FOREST_AREA;
+    }
+    if (tag_is(landuse, "residential")
+        || tag_is(landuse, "commercial")
+        || tag_is(landuse, "industrial")
+        || tag_is(landuse, "retail")) {
+        return OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA;
+    }
+    if (slice_nonempty(building)
+        && !tag_is(building, "no")
+        && !tag_is(building, "0")) {
+        return OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA;
+    }
+    return 0;
+}
+
+static OpenRideOSMMapFeatureKind classify_map_waterway_way(const OSMStringTable *table,
+                                                            const U32Vector *keys,
+                                                            const U32Vector *vals)
+{
+    const ProtoSlice waterway = way_tag_value(table, keys, vals, "waterway");
+    if (tag_is(waterway, "river")) return OPENRIDE_OSM_MAP_FEATURE_WATERWAY_RIVER;
+    if (tag_is(waterway, "canal")) return OPENRIDE_OSM_MAP_FEATURE_WATERWAY_CANAL;
+    if (tag_is(waterway, "stream")) return OPENRIDE_OSM_MAP_FEATURE_WATERWAY_STREAM;
+    if (tag_is(waterway, "drain") || tag_is(waterway, "ditch")) {
+        return OPENRIDE_OSM_MAP_FEATURE_WATERWAY_DRAIN;
+    }
+    return 0;
+}
+
+static bool relation_way_id_needed(const MapPolygonContext *context, int64_t osm_id)
+{
+    if (!context || context->relation_way_ids.count == 0U) return false;
+    uint32_t low = 0U;
+    uint32_t high = context->relation_way_ids.count;
+    while (low < high) {
+        const uint32_t middle = low + (high - low) / 2U;
+        const int64_t candidate = context->relation_way_ids.items[middle];
+        if (candidate < osm_id) low = middle + 1U;
+        else high = middle;
+    }
+    return low < context->relation_way_ids.count
+        && context->relation_way_ids.items[low] == osm_id;
+}
+
+static void prepare_relation_way_ids(MapPolygonContext *context)
+{
+    if (!context || context->relation_way_ids.count == 0U) return;
+    qsort(context->relation_way_ids.items,
+          context->relation_way_ids.count,
+          sizeof(context->relation_way_ids.items[0]),
+          compare_i64);
+    uint32_t unique_count = 0U;
+    for (uint32_t i = 0U; i < context->relation_way_ids.count; ++i) {
+        if (unique_count == 0U
+            || context->relation_way_ids.items[i]
+                != context->relation_way_ids.items[unique_count - 1U]) {
+            context->relation_way_ids.items[unique_count++] =
+                context->relation_way_ids.items[i];
+        }
+    }
+    context->relation_way_ids.count = unique_count;
+}
+
+static bool parse_map_relation(ProtoSlice message,
+                               const OSMStringTable *table,
+                               MapPolygonContext *context,
+                               char *error,
+                               size_t error_size)
+{
+    U32Vector keys = {0};
+    U32Vector vals = {0};
+    U32Vector roles = {0};
+    U32Vector types = {0};
+    I64Vector memids = {0};
+    ProtoReader reader = {message.data, message.data + message.size};
+    bool ok = true;
+
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) {
+            ok = false;
+            break;
+        }
+        if ((field == 2U || field == 3U || field == 8U || field == 10U)
+            && wire == 2U) {
+            ProtoSlice packed = {0};
+            U32Vector *target = field == 2U ? &keys
+                : (field == 3U ? &vals : (field == 8U ? &roles : &types));
+            if (!proto_read_slice(&reader, &packed)
+                || !parse_packed_u32(packed, target)) {
+                ok = false;
+                break;
+            }
+        } else if (field == 9U && wire == 2U) {
+            ProtoSlice packed = {0};
+            if (!proto_read_slice(&reader, &packed)
+                || !parse_packed_sint64_deltas(packed, &memids)) {
+                ok = false;
+                break;
+            }
+        } else if (!proto_skip(&reader, wire)) {
+            ok = false;
+            break;
+        }
+    }
+
+    ++context->stats.osm_relation_count;
+    if (!ok || keys.count != vals.count
+        || roles.count != memids.count
+        || types.count != memids.count) {
+        set_error(error, error_size, "invalid OSM multipolygon relation");
+        u32_destroy(&keys);
+        u32_destroy(&vals);
+        u32_destroy(&roles);
+        u32_destroy(&types);
+        i64_destroy(&memids);
+        return false;
+    }
+
+    const ProtoSlice type = way_tag_value(table, &keys, &vals, "type");
+    const OpenRideOSMMapFeatureKind kind =
+        tag_is(type, "multipolygon")
+            ? classify_map_area_way(table, &keys, &vals)
+            : 0;
+    if (kind != 0) {
+        const uint64_t member_offset = context->relation_members.count;
+        uint32_t outer_count = 0U;
+        for (uint32_t i = 0U; i < memids.count; ++i) {
+            if (types.items[i] != 1U) continue; /* Relation.MemberType.WAY */
+            const ProtoSlice role = table_string(table, roles.items[i]);
+            if (tag_is(role, "inner")) {
+                ++context->stats.multipolygon_inner_members_ignored;
+                continue;
+            }
+            if (role.size != 0U && !tag_is(role, "outer")) continue;
+            if (!map_relation_member_push(&context->relation_members,
+                                          (MapRelationMember){memids.items[i]})
+                || !i64_push(&context->relation_way_ids, memids.items[i])) {
+                set_error(error, error_size, "out of memory collecting multipolygon members");
+                ok = false;
+                break;
+            }
+            ++outer_count;
+        }
+        if (ok && outer_count > 0U) {
+            MapPolygonRelation relation = {
+                .member_offset = member_offset,
+                .member_count = outer_count,
+                .kind = (uint8_t)kind
+            };
+            if (!map_polygon_relation_push(&context->relations, relation)) {
+                set_error(error, error_size, "out of memory collecting multipolygon relation");
+                ok = false;
+            } else {
+                ++context->stats.selected_relation_count;
+            }
+        }
+    }
+
+    u32_destroy(&keys);
+    u32_destroy(&vals);
+    u32_destroy(&roles);
+    u32_destroy(&types);
+    i64_destroy(&memids);
+    return ok;
+}
+
+static bool parse_map_polygon_way(ProtoSlice message,
+                                  const OSMStringTable *table,
+                                  WayScratch *scratch,
+                                  MapPolygonContext *context,
+                                  char *error,
+                                  size_t error_size)
+{
+    scratch->keys.count = 0U;
+    scratch->vals.count = 0U;
+    scratch->refs.count = 0U;
+    int64_t osm_id = 0;
+    bool has_id = false;
+
+    ProtoReader reader = {message.data, message.data + message.size};
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U;
+        uint32_t wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) {
+            set_error(error, error_size, "invalid map way protobuf key");
+            return false;
+        }
+        if (field == 1U && wire == 0U) {
+            uint64_t value = 0U;
+            if (!proto_read_varint(&reader, &value) || value > INT64_MAX) {
+                set_error(error, error_size, "invalid map way id");
+                return false;
+            }
+            osm_id = (int64_t)value;
+            has_id = true;
+        } else if ((field == 2U || field == 3U) && wire == 2U) {
+            ProtoSlice packed = {0};
+            if (!proto_read_slice(&reader, &packed)
+                || !parse_packed_u32(packed,
+                                     field == 2U ? &scratch->keys : &scratch->vals)) {
+                set_error(error, error_size, "invalid map way tags");
+                return false;
+            }
+        } else if ((field == 2U || field == 3U) && wire == 0U) {
+            uint64_t value = 0U;
+            if (!proto_read_varint(&reader, &value) || value > UINT32_MAX
+                || !u32_push(field == 2U ? &scratch->keys : &scratch->vals,
+                             (uint32_t)value)) {
+                set_error(error, error_size, "invalid map way tag index");
+                return false;
+            }
+        } else if (field == 8U && wire == 2U) {
+            ProtoSlice packed = {0};
+            if (!proto_read_slice(&reader, &packed)
+                || !parse_packed_sint64_deltas(packed, &scratch->refs)) {
+                set_error(error, error_size, "invalid map way node refs");
+                return false;
+            }
+        } else if (!proto_skip(&reader, wire)) {
+            set_error(error, error_size, "invalid map way field");
+            return false;
+        }
+    }
+
+    ++context->stats.osm_way_count;
+    if (!has_id || scratch->refs.count < 2U) return true;
+
+    const bool relation_member = relation_way_id_needed(context, osm_id);
+    const bool closed = scratch->refs.count >= 4U
+        && scratch->refs.items[0] == scratch->refs.items[scratch->refs.count - 1U];
+    OpenRideOSMMapFeatureKind kind = 0;
+    if (closed) {
+        kind = classify_map_area_way(table, &scratch->keys, &scratch->vals);
+    }
+    if (kind == 0) {
+        kind = classify_map_waterway_way(table, &scratch->keys, &scratch->vals);
+    }
+    if (kind == 0 && !relation_member) return true;
+
+    const ProtoSlice building = way_tag_value(table, &scratch->keys, &scratch->vals, "building");
+    const ProtoSlice landuse = way_tag_value(table, &scratch->keys, &scratch->vals, "landuse");
+    const bool individual_building = !relation_member
+        && kind == OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA
+        && closed
+        && slice_nonempty(building)
+        && !tag_is(building, "no")
+        && !tag_is(building, "0")
+        && !(tag_is(landuse, "residential")
+             || tag_is(landuse, "commercial")
+             || tag_is(landuse, "industrial")
+             || tag_is(landuse, "retail"));
+    const uint32_t stored_ref_count = individual_building ? 1U : scratch->refs.count;
+    if ((uint64_t)context->refs.count + stored_ref_count > UINT32_MAX) {
+        set_error(error, error_size, "too many OSM map polygon refs");
+        return false;
+    }
+
+    MapPolygonWay way = {
+        .osm_id = osm_id,
+        .ref_offset = context->refs.count,
+        .ref_count = stored_ref_count,
+        .kind = (uint8_t)kind
+    };
+    if (!i64_append(&context->refs, scratch->refs.items, stored_ref_count)
+        || !i64_append(&context->needed_ids, scratch->refs.items, stored_ref_count)
+        || !map_polygon_way_push(&context->ways, way)) {
+        set_error(error, error_size, "out of memory collecting map polygons");
+        return false;
+    }
+    if (kind != 0) ++context->stats.selected_way_count;
+    if (relation_member) ++context->stats.relation_member_way_count;
+    return true;
+}
+
+static int compare_map_polygon_way(const void *left_ptr, const void *right_ptr)
+{
+    const MapPolygonWay *left = left_ptr;
+    const MapPolygonWay *right = right_ptr;
+    return left->osm_id < right->osm_id ? -1 : (left->osm_id > right->osm_id ? 1 : 0);
+}
+
+static const MapPolygonWay *find_map_polygon_way(const MapPolygonContext *context,
+                                                  int64_t osm_id)
+{
+    uint32_t low = 0U;
+    uint32_t high = context ? context->ways.count : 0U;
+    while (low < high) {
+        const uint32_t middle = low + (high - low) / 2U;
+        const int64_t candidate = context->ways.items[middle].osm_id;
+        if (candidate < osm_id) low = middle + 1U;
+        else high = middle;
+    }
+    if (context && low < context->ways.count
+        && context->ways.items[low].osm_id == osm_id) {
+        return &context->ways.items[low];
+    }
+    return NULL;
+}
+
+static bool prepare_map_polygon_nodes(MapPolygonContext *context,
+                                      char *error,
+                                      size_t error_size)
+{
+    if (!context) return false;
+    if (context->ways.count > 1U) {
+        qsort(context->ways.items,
+              context->ways.count,
+              sizeof(context->ways.items[0]),
+              compare_map_polygon_way);
+    }
+    if (context->needed_ids.count == 0U) return true;
+    qsort(context->needed_ids.items,
+          context->needed_ids.count,
+          sizeof(context->needed_ids.items[0]),
+          compare_i64);
+    uint32_t unique_count = 0U;
+    for (uint32_t i = 0U; i < context->needed_ids.count; ++i) {
+        if (unique_count == 0U
+            || context->needed_ids.items[i] != context->needed_ids.items[unique_count - 1U]) {
+            context->needed_ids.items[unique_count++] = context->needed_ids.items[i];
+        }
+    }
+    context->needed_ids.count = unique_count;
+    context->nodes = calloc(unique_count, sizeof(*context->nodes));
+    if (!context->nodes && unique_count > 0U) {
+        set_error(error, error_size, "unable to allocate map polygon node index");
+        return false;
+    }
+    context->node_count = unique_count;
+    context->stats.referenced_node_count = unique_count;
+    for (uint32_t i = 0U; i < unique_count; ++i) {
+        context->nodes[i].osm_id = context->needed_ids.items[i];
+    }
+    return true;
+}
+
+static uint32_t find_map_polygon_node(const MapPolygonContext *context, int64_t osm_id)
+{
+    uint32_t low = 0U;
+    uint32_t high = context ? context->node_count : 0U;
+    while (low < high) {
+        const uint32_t middle = low + (high - low) / 2U;
+        const int64_t candidate = context->nodes[middle].osm_id;
+        if (candidate < osm_id) low = middle + 1U;
+        else high = middle;
+    }
+    if (context && low < context->node_count && context->nodes[low].osm_id == osm_id) {
+        return low;
+    }
+    return UINT32_MAX;
+}
+
+static void store_map_polygon_node(MapPolygonContext *context,
+                                   int64_t osm_id,
+                                   int64_t encoded_lat,
+                                   int64_t encoded_lon,
+                                   int64_t lat_offset,
+                                   int64_t lon_offset,
+                                   int32_t granularity)
+{
+    const uint32_t index = find_map_polygon_node(context, osm_id);
+    if (index == UINT32_MAX) return;
+    MapPolygonNode *node = &context->nodes[index];
+    if (!node->has_coordinates) ++context->stats.found_node_count;
+    node->lat_e7 = pbf_coordinate_e7(encoded_lat, lat_offset, granularity);
+    node->lon_e7 = pbf_coordinate_e7(encoded_lon, lon_offset, granularity);
+    node->has_coordinates = 1U;
+}
+
+static bool parse_dense_nodes_map(ProtoSlice message,
+                                  int64_t lat_offset,
+                                  int64_t lon_offset,
+                                  int32_t granularity,
+                                  MapPolygonContext *context,
+                                  char *error,
+                                  size_t error_size)
+{
+    ProtoSlice ids = {0};
+    ProtoSlice lats = {0};
+    ProtoSlice lons = {0};
+    ProtoReader reader = {message.data, message.data + message.size};
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U, wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) {
+            set_error(error, error_size, "invalid DenseNodes map key");
+            return false;
+        }
+        if ((field == 1U || field == 8U || field == 9U) && wire == 2U) {
+            ProtoSlice packed = {0};
+            if (!proto_read_slice(&reader, &packed)) return false;
+            if (field == 1U) ids = packed;
+            else if (field == 8U) lats = packed;
+            else lons = packed;
+        } else if (!proto_skip(&reader, wire)) {
+            return false;
+        }
+    }
+
+    ProtoReader id_reader = {ids.data, ids.data + ids.size};
+    ProtoReader lat_reader = {lats.data, lats.data + lats.size};
+    ProtoReader lon_reader = {lons.data, lons.data + lons.size};
+    int64_t id = 0, lat = 0, lon = 0;
+    while (id_reader.cursor < id_reader.end
+           && lat_reader.cursor < lat_reader.end
+           && lon_reader.cursor < lon_reader.end) {
+        uint64_t raw_id = 0U, raw_lat = 0U, raw_lon = 0U;
+        if (!proto_read_varint(&id_reader, &raw_id)
+            || !proto_read_varint(&lat_reader, &raw_lat)
+            || !proto_read_varint(&lon_reader, &raw_lon)) {
+            set_error(error, error_size, "invalid DenseNodes map arrays");
+            return false;
+        }
+        id += proto_zigzag64(raw_id);
+        lat += proto_zigzag64(raw_lat);
+        lon += proto_zigzag64(raw_lon);
+        store_map_polygon_node(context,
+                               id,
+                               lat,
+                               lon,
+                               lat_offset,
+                               lon_offset,
+                               granularity);
+    }
+    if (id_reader.cursor != id_reader.end
+        || lat_reader.cursor != lat_reader.end
+        || lon_reader.cursor != lon_reader.end) {
+        set_error(error, error_size, "DenseNodes map arrays have inconsistent lengths");
+        return false;
+    }
+    return true;
+}
+
+static bool parse_node_message_map(ProtoSlice message,
+                                   int64_t lat_offset,
+                                   int64_t lon_offset,
+                                   int32_t granularity,
+                                   MapPolygonContext *context,
+                                   char *error,
+                                   size_t error_size)
+{
+    ProtoReader reader = {message.data, message.data + message.size};
+    int64_t id = 0, lat = 0, lon = 0;
+    bool has_id = false, has_lat = false, has_lon = false;
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U, wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) return false;
+        if ((field == 1U || field == 8U || field == 9U) && wire == 0U) {
+            uint64_t raw = 0U;
+            if (!proto_read_varint(&reader, &raw)) return false;
+            if (field == 1U) { id = proto_zigzag64(raw); has_id = true; }
+            else if (field == 8U) { lat = proto_zigzag64(raw); has_lat = true; }
+            else { lon = proto_zigzag64(raw); has_lon = true; }
+        } else if (!proto_skip(&reader, wire)) {
+            return false;
+        }
+    }
+    if (has_id && has_lat && has_lon) {
+        store_map_polygon_node(context,
+                               id,
+                               lat,
+                               lon,
+                               lat_offset,
+                               lon_offset,
+                               granularity);
+    }
+    (void)error;
+    (void)error_size;
+    return true;
+}
+
+static bool parse_primitive_group_map(ProtoSlice message,
+                                      MapPolygonPass pass,
+                                      const OSMStringTable *table,
+                                      int64_t lat_offset,
+                                      int64_t lon_offset,
+                                      int32_t granularity,
+                                      MapPolygonContext *context,
+                                      WayScratch *scratch,
+                                      char *error,
+                                      size_t error_size)
+{
+    ProtoReader reader = {message.data, message.data + message.size};
+    while (reader.cursor < reader.end) {
+        uint32_t field = 0U, wire = 0U;
+        if (!proto_read_key(&reader, &field, &wire)) return false;
+        if (field == 4U && wire == 2U) {
+            ProtoSlice relation = {0};
+            if (!proto_read_slice(&reader, &relation)) return false;
+            if (pass == MAP_POLYGON_PASS_RELATIONS
+                && !parse_map_relation(relation,
+                                       table,
+                                       context,
+                                       error,
+                                       error_size)) {
+                return false;
+            }
+        } else if (field == 3U && wire == 2U) {
+            ProtoSlice child = {0};
+            if (!proto_read_slice(&reader, &child)) return false;
+            if (pass == MAP_POLYGON_PASS_WAYS
+                && !parse_map_polygon_way(child,
+                                          table,
+                                          scratch,
+                                          context,
+                                          error,
+                                          error_size)) {
+                return false;
+            }
+        } else if (field == 2U && wire == 2U) {
+            ProtoSlice dense = {0};
+            if (!proto_read_slice(&reader, &dense)) return false;
+            if (pass == MAP_POLYGON_PASS_NODES
+                && !parse_dense_nodes_map(dense,
+                                          lat_offset,
+                                          lon_offset,
+                                          granularity,
+                                          context,
+                                          error,
+                                          error_size)) {
+                return false;
+            }
+        } else if (field == 1U && wire == 2U) {
+            ProtoSlice node = {0};
+            if (!proto_read_slice(&reader, &node)) return false;
+            if (pass == MAP_POLYGON_PASS_NODES
+                && !parse_node_message_map(node,
+                                           lat_offset,
+                                           lon_offset,
+                                           granularity,
+                                           context,
+                                           error,
+                                           error_size)) {
+                return false;
+            }
+        } else if (!proto_skip(&reader, wire)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool parse_primitive_block_map(ProtoSlice block,
+                                      MapPolygonPass pass,
+                                      MapPolygonContext *context,
+                                      char *error,
+                                      size_t error_size)
+{
+    ProtoSlice string_table_message = {0};
+    int64_t lat_offset = 0, lon_offset = 0;
+    int32_t granularity = 100;
+    ProtoReader metadata_reader = {block.data, block.data + block.size};
+    while (metadata_reader.cursor < metadata_reader.end) {
+        uint32_t field = 0U, wire = 0U;
+        if (!proto_read_key(&metadata_reader, &field, &wire)) return false;
+        if (field == 1U && wire == 2U) {
+            if (!proto_read_slice(&metadata_reader, &string_table_message)) return false;
+        } else if (field == 17U && wire == 0U) {
+            uint64_t value = 0U;
+            if (!proto_read_varint(&metadata_reader, &value) || value > INT32_MAX) return false;
+            granularity = (int32_t)value;
+        } else if ((field == 19U || field == 20U) && wire == 0U) {
+            uint64_t value = 0U;
+            if (!proto_read_varint(&metadata_reader, &value)) return false;
+            if (field == 19U) lat_offset = (int64_t)value;
+            else lon_offset = (int64_t)value;
+        } else if (!proto_skip(&metadata_reader, wire)) {
+            return false;
+        }
+    }
+
+    OSMStringTable table = {0};
+    if (string_table_message.data
+        && !parse_string_table(string_table_message, &table, error, error_size)) {
+        string_table_destroy(&table);
+        return false;
+    }
+    WayScratch scratch = {0};
+    bool ok = true;
+    ProtoReader group_reader = {block.data, block.data + block.size};
+    while (group_reader.cursor < group_reader.end) {
+        uint32_t field = 0U, wire = 0U;
+        if (!proto_read_key(&group_reader, &field, &wire)) { ok = false; break; }
+        if (field == 2U && wire == 2U) {
+            ProtoSlice group = {0};
+            if (!proto_read_slice(&group_reader, &group)
+                || !parse_primitive_group_map(group,
+                                              pass,
+                                              &table,
+                                              lat_offset,
+                                              lon_offset,
+                                              granularity,
+                                              context,
+                                              &scratch,
+                                              error,
+                                              error_size)) {
+                ok = false;
+                break;
+            }
+        } else if (!proto_skip(&group_reader, wire)) {
+            ok = false;
+            break;
+        }
+    }
+    u32_destroy(&scratch.keys);
+    u32_destroy(&scratch.vals);
+    i64_destroy(&scratch.refs);
+    string_table_destroy(&table);
+    if (!ok && (!error || error[0] == '\0')) {
+        set_error(error, error_size, "invalid map PrimitiveBlock");
+    }
+    return ok;
+}
+
+static bool scan_pbf_map(const char *path,
+                         MapPolygonPass pass,
+                         MapPolygonContext *context,
+                         char *error,
+                         size_t error_size)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        set_errorf(error, error_size, "unable to open OSM PBF", strerror(errno));
+        return false;
+    }
+    bool ok = true;
+    for (;;) {
+        uint32_t header_size = 0U;
+        bool at_eof = false;
+        if (!read_u32_be(file, &header_size, &at_eof)) {
+            set_error(error, error_size, "unable to read map PBF header length");
+            ok = false;
+            break;
+        }
+        if (at_eof) break;
+        if (header_size == 0U || header_size > 65536U) { ok = false; break; }
+        unsigned char *header = malloc(header_size);
+        if (!header || fread(header, 1U, header_size, file) != header_size) {
+            free(header); ok = false; break;
+        }
+        char type[32];
+        uint32_t blob_size = 0U;
+        const bool header_ok = parse_blob_header(header,
+                                                 header_size,
+                                                 type,
+                                                 sizeof(type),
+                                                 &blob_size);
+        free(header);
+        if (!header_ok || blob_size == 0U || blob_size > 64U * 1024U * 1024U) {
+            ok = false; break;
+        }
+        unsigned char *blob = malloc(blob_size);
+        if (!blob || fread(blob, 1U, blob_size, file) != blob_size) {
+            free(blob); ok = false; break;
+        }
+        if (strcmp(type, "OSMData") == 0) {
+            unsigned char *owned = NULL;
+            ProtoSlice payload = {0};
+            if (!decode_blob(blob, blob_size, &owned, &payload, error, error_size)
+                || !parse_primitive_block_map(payload,
+                                              pass,
+                                              context,
+                                              error,
+                                              error_size)) {
+                free(owned); free(blob); ok = false; break;
+            }
+            free(owned);
+        }
+        free(blob);
+    }
+    fclose(file);
+    if (!ok && (!error || error[0] == '\0')) {
+        set_error(error, error_size, "unable to scan OSM map polygons");
+    }
+    return ok;
+}
+
+static bool map_feature_coordinates(const MapPolygonContext *context,
+                                    const int64_t *refs,
+                                    uint32_t ref_count,
+                                    double **latitudes,
+                                    double **longitudes,
+                                    uint32_t *capacity,
+                                    uint32_t *point_count,
+                                    char *error,
+                                    size_t error_size)
+{
+    *point_count = 0U;
+    if (ref_count > *capacity) {
+        double *new_latitudes = realloc(*latitudes,
+                                        (size_t)ref_count * sizeof(**latitudes));
+        if (!new_latitudes) {
+            set_error(error, error_size, "unable to allocate map polygon coordinates");
+            return false;
+        }
+        *latitudes = new_latitudes;
+        double *new_longitudes = realloc(*longitudes,
+                                         (size_t)ref_count * sizeof(**longitudes));
+        if (!new_longitudes) {
+            set_error(error, error_size, "unable to allocate map polygon coordinates");
+            return false;
+        }
+        *longitudes = new_longitudes;
+        *capacity = ref_count;
+    }
+
+    for (uint32_t i = 0U; i < ref_count; ++i) {
+        const uint32_t index = find_map_polygon_node(context, refs[i]);
+        if (index == UINT32_MAX || !context->nodes[index].has_coordinates) {
+            *point_count = 0U;
+            return true;
+        }
+        (*latitudes)[i] = e7_to_degree(context->nodes[index].lat_e7);
+        (*longitudes)[i] = e7_to_degree(context->nodes[index].lon_e7);
+    }
+    *point_count = ref_count;
+    return true;
+}
+
+static bool emit_standalone_map_ways(MapPolygonContext *context,
+                                     double **latitudes,
+                                     double **longitudes,
+                                     uint32_t *point_capacity,
+                                     char *error,
+                                     size_t error_size)
+{
+    for (uint32_t w = 0U; w < context->ways.count; ++w) {
+        const MapPolygonWay *way = &context->ways.items[w];
+        const OpenRideOSMMapFeatureKind feature_kind =
+            (OpenRideOSMMapFeatureKind)way->kind;
+        if (feature_kind == 0) continue;
+        uint32_t point_count = 0U;
+        if (!map_feature_coordinates(context,
+                                     context->refs.items + way->ref_offset,
+                                     way->ref_count,
+                                     latitudes,
+                                     longitudes,
+                                     point_capacity,
+                                     &point_count,
+                                     error,
+                                     error_size)) {
+            return false;
+        }
+        const bool linear_waterway =
+            feature_kind >= OPENRIDE_OSM_MAP_FEATURE_WATERWAY_RIVER;
+        if (!((linear_waterway && point_count >= 2U)
+              || (!linear_waterway && point_count >= 4U)
+              || (feature_kind == OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA
+                  && point_count == 1U))) {
+            continue;
+        }
+        if (!context->visitor(feature_kind,
+                              *latitudes,
+                              *longitudes,
+                              point_count,
+                              context->userdata)) {
+            set_error(error, error_size, "map feature visitor aborted import");
+            return false;
+        }
+        ++context->stats.emitted_feature_count;
+    }
+    return true;
+}
+
+static bool ring_refs_append_way(I64Vector *ring,
+                                 const MapPolygonContext *context,
+                                 const MapPolygonWay *way,
+                                 bool reverse)
+{
+    if (!ring || !context || !way || way->ref_count < 2U) return false;
+    if (!reverse) {
+        const uint32_t start = ring->count == 0U ? 0U : 1U;
+        return i64_append(ring,
+                          context->refs.items + way->ref_offset + start,
+                          way->ref_count - start);
+    }
+    const uint32_t start = ring->count == 0U ? 0U : 1U;
+    for (uint32_t i = start; i < way->ref_count; ++i) {
+        const uint32_t source = way->ref_count - 1U - i;
+        if (!i64_push(ring, context->refs.items[way->ref_offset + source])) return false;
+    }
+    return true;
+}
+
+static bool emit_multipolygon_relations(MapPolygonContext *context,
+                                        double **latitudes,
+                                        double **longitudes,
+                                        uint32_t *point_capacity,
+                                        char *error,
+                                        size_t error_size)
+{
+    for (uint32_t r = 0U; r < context->relations.count; ++r) {
+        const MapPolygonRelation *relation = &context->relations.items[r];
+        unsigned char *used = calloc(relation->member_count, 1U);
+        if (!used && relation->member_count > 0U) {
+            set_error(error, error_size, "out of memory assembling multipolygon");
+            return false;
+        }
+
+        bool relation_incomplete = false;
+        for (uint32_t start = 0U; start < relation->member_count; ++start) {
+            if (used[start]) continue;
+            const MapRelationMember *member =
+                &context->relation_members.items[relation->member_offset + start];
+            const MapPolygonWay *way = find_map_polygon_way(context, member->way_id);
+            if (!way || way->ref_count < 2U) {
+                used[start] = 1U;
+                relation_incomplete = true;
+                continue;
+            }
+
+            I64Vector ring = {0};
+            if (!ring_refs_append_way(&ring, context, way, false)) {
+                i64_destroy(&ring);
+                free(used);
+                set_error(error, error_size, "out of memory assembling multipolygon ring");
+                return false;
+            }
+            used[start] = 1U;
+
+            uint64_t guard = (uint64_t)relation->member_count + 1U;
+            while (ring.count >= 2U
+                   && ring.items[0] != ring.items[ring.count - 1U]
+                   && guard-- > 0U) {
+                const int64_t endpoint = ring.items[ring.count - 1U];
+                bool matched = false;
+                for (uint32_t i = 0U; i < relation->member_count; ++i) {
+                    if (used[i]) continue;
+                    const MapRelationMember *next_member =
+                        &context->relation_members.items[relation->member_offset + i];
+                    const MapPolygonWay *next =
+                        find_map_polygon_way(context, next_member->way_id);
+                    if (!next || next->ref_count < 2U) continue;
+                    const int64_t first = context->refs.items[next->ref_offset];
+                    const int64_t last =
+                        context->refs.items[next->ref_offset + next->ref_count - 1U];
+                    if (first == endpoint || last == endpoint) {
+                        if (!ring_refs_append_way(&ring,
+                                                  context,
+                                                  next,
+                                                  last == endpoint)) {
+                            i64_destroy(&ring);
+                            free(used);
+                            set_error(error,
+                                      error_size,
+                                      "out of memory assembling multipolygon ring");
+                            return false;
+                        }
+                        used[i] = 1U;
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    relation_incomplete = true;
+                    break;
+                }
+            }
+
+            if (ring.count >= 4U && ring.items[0] == ring.items[ring.count - 1U]) {
+                uint32_t point_count = 0U;
+                if (!map_feature_coordinates(context,
+                                             ring.items,
+                                             ring.count,
+                                             latitudes,
+                                             longitudes,
+                                             point_capacity,
+                                             &point_count,
+                                             error,
+                                             error_size)) {
+                    i64_destroy(&ring);
+                    free(used);
+                    return false;
+                }
+                if (point_count >= 4U) {
+                    if (!context->visitor((OpenRideOSMMapFeatureKind)relation->kind,
+                                          *latitudes,
+                                          *longitudes,
+                                          point_count,
+                                          context->userdata)) {
+                        i64_destroy(&ring);
+                        free(used);
+                        set_error(error,
+                                  error_size,
+                                  "map feature visitor aborted multipolygon import");
+                        return false;
+                    }
+                    ++context->stats.multipolygon_outer_ring_count;
+                    ++context->stats.emitted_feature_count;
+                } else {
+                    relation_incomplete = true;
+                }
+            } else {
+                relation_incomplete = true;
+            }
+            i64_destroy(&ring);
+        }
+
+        if (relation_incomplete) ++context->stats.incomplete_multipolygon_count;
+        free(used);
+    }
+    return true;
+}
+
+bool openride_osm_pbf_visit_map_features(
+    const char *pbf_path,
+    OpenRideOSMMapFeatureVisitor visitor,
+    void *userdata,
+    OpenRideOSMMapFeatureStats *stats,
+    char *error,
+    size_t error_size)
+{
+    if (!pbf_path || !visitor) {
+        set_error(error, error_size, "invalid map feature import arguments");
+        return false;
+    }
+
+    MapPolygonContext context;
+    memset(&context, 0, sizeof(context));
+    context.visitor = visitor;
+    context.userdata = userdata;
+
+    /*
+     * Three streaming passes keep mobile peak memory bounded:
+     *  1. collect only relevant multipolygon relation member way IDs;
+     *  2. collect standalone cartographic ways plus those relation members;
+     *  3. resolve only the referenced nodes.
+     * This avoids retaining millions of unrelated OSM ways on the phone.
+     */
+    bool ok = scan_pbf_map(pbf_path,
+                           MAP_POLYGON_PASS_RELATIONS,
+                           &context,
+                           error,
+                           error_size);
+    if (ok) prepare_relation_way_ids(&context);
+    if (ok) {
+        ok = scan_pbf_map(pbf_path,
+                          MAP_POLYGON_PASS_WAYS,
+                          &context,
+                          error,
+                          error_size);
+    }
+    if (ok) ok = prepare_map_polygon_nodes(&context, error, error_size);
+    if (ok && context.node_count > 0U) {
+        ok = scan_pbf_map(pbf_path,
+                          MAP_POLYGON_PASS_NODES,
+                          &context,
+                          error,
+                          error_size);
+    }
+
+    double *latitudes = NULL;
+    double *longitudes = NULL;
+    uint32_t point_capacity = 0U;
+    if (ok) {
+        ok = emit_standalone_map_ways(&context,
+                                      &latitudes,
+                                      &longitudes,
+                                      &point_capacity,
+                                      error,
+                                      error_size);
+    }
+    if (ok) {
+        ok = emit_multipolygon_relations(&context,
+                                         &latitudes,
+                                         &longitudes,
+                                         &point_capacity,
+                                         error,
+                                         error_size);
+    }
+
+    free(latitudes);
+    free(longitudes);
+    if (stats) *stats = context.stats;
+    map_polygon_context_destroy(&context);
+    if (ok) set_error(error, error_size, "");
+    return ok;
+}

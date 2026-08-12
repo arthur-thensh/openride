@@ -1,0 +1,36 @@
+include/openride/ormap.h
+include/openride/osm_import.h
+src/map/map_renderer.c
+src/map/map_renderer.h
+src/map/ormap_builder.c
+src/map/ormap_renderer.c
+src/map/ormap_renderer.h
+src/map/ormap.c
+src/map/vector_map_renderer.c
+src/map/vector_map_renderer.h
+src/osm/osm_import.c
+src/tools/ormap_import_main.c
+src/tools/osm_import_main.c
+tests/data/tiny_places.osm.pbf
+tests/data/tiny.osm.pbf
+tests/test_ormap.c
+tests/test_osm_import.c
+#!/bin/sh
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT_DIR"
+
+echo "Configuration..."
+./scripts/configure.sh
+
+echo
+echo "Compilation..."
+./scripts/build.sh
+
+echo
+echo "Tests..."
+./scripts/test.sh
+
+echo
+echo "Prêt. Lance OpenRide avec : ./scripts/run.sh"

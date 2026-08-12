@@ -28,7 +28,16 @@ int main(void)
                                       &status,
                                       error,
                                       sizeof(error)));
-    assert(strstr(status.map_path, "nord-pas-de-calais-shortbread.mbtiles") != NULL);
+    assert(strstr(status.ormap_path, "nord-pas-de-calais.ormap") != NULL);
+    assert(strstr(status.legacy_map_path, "nord-pas-de-calais-shortbread.mbtiles") != NULL);
+
+    if (status.ormap_installed) {
+        assert(strcmp(status.map_path, status.ormap_path) == 0);
+    } else if (status.legacy_map_installed) {
+        assert(strcmp(status.map_path, status.legacy_map_path) == 0);
+    } else {
+        assert(status.map_path[0] == '\0');
+    }
     assert(strstr(status.routing_path, "nord-pas-de-calais.orgraph") != NULL);
     assert(strstr(status.search_path, "nord-pas-de-calais.orplaces.sqlite") != NULL);
 

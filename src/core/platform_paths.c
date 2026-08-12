@@ -51,6 +51,7 @@ bool openride_platform_paths_init(OpenRidePlatformPaths *paths,
         || !openride_platform_path_join(paths->routing_dir, sizeof(paths->routing_dir), paths->data_dir, "routing")
         || !openride_platform_path_join(paths->search_dir, sizeof(paths->search_dir), paths->data_dir, "search")
         || !openride_platform_path_join(paths->gpx_dir, sizeof(paths->gpx_dir), paths->data_dir, "gpx")
+        || !openride_platform_path_join(paths->downloads_dir, sizeof(paths->downloads_dir), paths->data_dir, "downloads")
         || !openride_platform_path_join(paths->app_storage_path,
                                         sizeof(paths->app_storage_path),
                                         paths->data_dir,
@@ -93,7 +94,8 @@ bool openride_platform_paths_ensure_directories(const OpenRidePlatformPaths *pat
         paths->maps_dir,
         paths->routing_dir,
         paths->search_dir,
-        paths->gpx_dir
+        paths->gpx_dir,
+        paths->downloads_dir
     };
     const size_t count = sizeof(directories) / sizeof(directories[0]);
     for (size_t i = 0; i < count; ++i) {

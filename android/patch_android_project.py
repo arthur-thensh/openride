@@ -25,6 +25,7 @@ root = tree.getroot()
 
 permissions = {item.get(A + "name") for item in root.findall("uses-permission")}
 for permission in (
+    "android.permission.INTERNET",
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
 ):
@@ -72,7 +73,7 @@ else:
     if count != 1:
         raise SystemExit("Unable to locate defaultConfig in SDL build.gradle")
 
-text = re.sub(r'\bversionCode\s*(?:=\s*)?\d+', 'versionCode = 21', text, count=1)
+text = re.sub(r'\bversionCode\s*(?:=\s*)?\d+', 'versionCode = 23', text, count=1)
 text = re.sub(r'\bversionName\s*(?:=\s*)?["\'][^"\']+["\']',
-              'versionName = "0.21"', text, count=1)
+              'versionName = "0.22.1"', text, count=1)
 build_gradle.write_text(text)

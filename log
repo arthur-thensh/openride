@@ -1,0 +1,1408 @@
+--------- beginning of crash
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20069
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-17 18:20:47.610 20069 20126 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@4f8eafa, Dispatchers.IO]
+07-17 19:11:00.732   875   945 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-17 19:11:00.732   875   945 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 875
+07-17 19:11:00.732   875   945 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-17 19:11:00.732   875   945 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@e17a216, Dispatchers.IO]
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31719
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-17 20:51:45.939 31719 31759 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 12601
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-17 21:22:24.965 12601 12770 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20744
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-18 17:00:51.773 20744 20849 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@5b5df52, Dispatchers.IO]
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-6
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26239
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-18 23:12:46.256 26239 26336 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@67db8bd, Dispatchers.IO]
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-14
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13398
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-19 09:37:36.630 13398 13502 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-6
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26355
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-19 10:20:29.348 26355 26425 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 22972
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-19 13:18:03.246 22972 23027 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-19 14:21:19.293   683   749 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-19 14:21:19.293   683   749 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 683
+07-19 14:21:19.293   683   749 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-19 14:21:19.293   683   749 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-14
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 23971
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-19 16:52:43.326 23971 24056 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 3080
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-19 20:44:18.368  3080  3133 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 32315
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 00:20:06.809 32315 32451 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13654
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 08:36:41.004 13654 13750 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@4535de4, Dispatchers.IO]
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-7
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20288
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 08:47:43.002 20288 20396 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@72a24d, Dispatchers.IO]
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26035
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 09:21:05.885 26035 26110 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@8b1e376, Dispatchers.IO]
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 8043
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 10:01:28.978  8043  8124 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f62314c, Dispatchers.IO]
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 22075
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 10:20:04.766 22075 22127 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@facd84, Dispatchers.IO]
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 25002
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 10:27:21.906 25002 25075 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-8
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 24255
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 11:05:31.192 24255 24338 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 4759
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 15:25:58.241  4759  4830 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 10526
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 15:46:13.771 10526 10605 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@5c0d29b, Dispatchers.IO]
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-8
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 28048
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 20:20:20.321 28048 28153 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 14374
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-20 21:19:23.233 14374 14466 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: FATAL EXCEPTION: ExoPlayer:Playback
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: Process: app.revanced.android.youtube:mediaengine, PID: 30153
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: java.lang.ExceptionInInitializerError
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at app.revanced.extension.shared.settings.BaseSettings.<clinit>(BaseSettings.java:18)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at app.revanced.extension.shared.spoof.SpoofVideoStreamsPatch.<clinit>(SpoofVideoStreamsPatch.java:36)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at cmd.<init>(PG:6)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at cmc.a(PG:28)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at deu.d(PG:52)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at deu.<init>(PG:40)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at dex.z(PG:13)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at dex.k(PG:51)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at ddx.k(PG:13)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at cul.g(PG:6)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at cua.u(PG:307)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at cua.handleMessage(PG:1381)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at android.os.Handler.dispatchMessageImpl(Handler.java:138)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at android.os.Handler.dispatchMessage(Handler.java:125)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at android.os.Looper.loopOnce(Looper.java:269)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at android.os.Looper.loop(Looper.java:367)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at android.os.HandlerThread.run(HandlerThread.java:139)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: Caused by: java.lang.NullPointerException
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at java.util.Objects.throwNullPointerException(Objects.java:504)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at java.util.Objects.requireNonNull(Objects.java:222)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at app.revanced.extension.shared.settings.preference.SharedPrefCategory.<init>(SharedPrefCategory.java:30)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	at app.revanced.extension.shared.settings.Setting.<clinit>(Setting.java:156)
+07-20 23:16:51.514 30153 30201 E AndroidRuntime: 	... 17 more
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 24778
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-21 00:20:40.361 24778 24889 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-6
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 30918
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-21 00:50:31.525 30918 31001 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@2271638, Dispatchers.IO]
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 15997
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-21 10:48:20.812 15997 16219 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f7b07dd, Dispatchers.IO]
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-11
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 25666
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-21 11:20:48.850 25666 25756 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@3a3e2a1, Dispatchers.IO]
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 8178
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-21 13:10:42.414  8178  8310 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@288e03, Dispatchers.IO]
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 5934
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-22 00:22:05.523  5934  6026 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 16527
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-22 10:22:15.972 16527 16584 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@758125b, Dispatchers.IO]
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 28114
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-22 13:14:15.915 28114 28160 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@facd84, Dispatchers.IO]
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31613
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-22 20:13:29.038 31613 31699 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 11440
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-22 20:48:47.617 11440 11476 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b734b2d, Dispatchers.IO]
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 9471
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 07:26:03.818  9471  9551 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31539
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 08:35:33.771 31539 31620 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d7fe96d, Dispatchers.IO]
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 5350
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 08:45:15.539  5350  5421 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 11398
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 09:09:31.018 11398 11451 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@9b00320, Dispatchers.IO]
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 24695
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 10:08:14.215 24695 24769 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@92e9e9e, Dispatchers.IO]
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 9517
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at vd.r1.r(SourceFile:67)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.b3.invokeSuspend(SourceFile:1061)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.b3.invoke(SourceFile:289)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at xd.ad.b(SourceFile:18)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.e0.M(SourceFile:80)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at a3.l.invokeSuspend(SourceFile:1321)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at a3.l.invoke(SourceFile:171)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.h.invokeSuspend(SourceFile:721)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.h.invoke(SourceFile:43)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at xd.ad.b(SourceFile:18)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.e0.M(SourceFile:80)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at mf0.b.f(SourceFile:8)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.b3.invokeSuspend(SourceFile:798)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.b3.invoke(SourceFile:255)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at xd.ad.b(SourceFile:18)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.e0.M(SourceFile:80)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver$resolve$2$1.invokeSuspend(SourceFile:50)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver$resolve$2$1.invoke(SourceFile:1)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver$resolve$2$1.invoke(SourceFile:2)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.h.invokeSuspend(SourceFile:721)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at c2.h.invoke(SourceFile:43)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at xd.ad.b(SourceFile:18)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.e0.M(SourceFile:80)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at mf0.b.f(SourceFile:8)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver$resolve$2.invokeSuspend(SourceFile:218)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver$resolve$2.invoke(SourceFile:1)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver$resolve$2.invoke(SourceFile:2)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at xd.ad.b(SourceFile:18)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.e0.M(SourceFile:80)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.TargetTagsResolver.resolve(SourceFile:8)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at com.nordpass.android.autofill.common.tags.ScreenTagsResolver$resolve$2.invokeSuspend(SourceFile:100)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 11:29:57.131  9517  9635 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 14141
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 12:08:37.348 14141 14218 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 11784
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 20:11:25.666 11784 11853 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 8486
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 22:20:07.466  8486  8567 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 28644
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-23 23:19:52.904 28644 28710 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@cf068ab, Dispatchers.IO]
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-8
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 25048
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-24 07:54:24.405 25048 25120 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@2845ac, Dispatchers.IO]
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-11
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 17759
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-24 10:19:56.198 17759 17843 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 25159
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-24 10:56:23.961 25159 25230 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31144
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-24 11:20:15.660 31144 31204 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d7fe96d, Dispatchers.IO]
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13321
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-24 13:11:24.930 13321 13480 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-7
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 19460
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-24 14:16:11.739 19460 19550 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@676e797, Dispatchers.IO]
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 4119
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 07:40:32.623  4119  4190 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@7303fc2, Dispatchers.IO]
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20130
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 10:03:19.354 20130 20219 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@4f8eafa, Dispatchers.IO]
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 22299
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 15:27:13.589 22299 22445 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d7fe96d, Dispatchers.IO]
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 4428
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 15:58:59.233  4428  4545 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@3a3e2a1, Dispatchers.IO]
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 10475
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 16:21:42.284 10475 10546 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-15
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 28089
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 17:30:52.974 28089 28181 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-15
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 12383
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 18:13:13.699 12383 12491 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20354
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 18:30:25.295 20354 20440 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@92e9e9e, Dispatchers.IO]
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13818
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-25 22:08:03.701 13818 13921 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@cf068ab, Dispatchers.IO]
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26053
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 13:21:02.053 26053 26106 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@e17a216, Dispatchers.IO]
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 11753
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 16:13:26.695 11753 11893 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26698
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 17:28:32.640 26698 26766 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-11
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 18807
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 18:42:21.622 18807 13321 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b3c0814, Dispatchers.IO]
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 5796
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 19:57:59.572  5796  5903 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 11939
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 20:10:15.045 11939 12026 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 17264
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 20:25:08.957 17264 17357 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@182db08, Dispatchers.IO]
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 8294
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 21:50:21.285  8294  8405 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@facd84, Dispatchers.IO]
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13895
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-26 22:18:54.124 13895 13949 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@facd84, Dispatchers.IO]
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 7438
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 01:21:09.222  7438  7543 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d7fe96d, Dispatchers.IO]
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 23701
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 07:44:42.882 23701 23768 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 7334
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 17:11:13.004  7334  7385 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@a4ffd77, Dispatchers.IO]
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-7
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 12343
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 17:20:52.931 12343 12469 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@2271638, Dispatchers.IO]
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26547
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 17:43:49.564 26547 26641 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@fe3c9a2, Dispatchers.IO]
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 25164
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 19:11:09.322 25164 25239 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 29266
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 19:19:44.049 29266 29328 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 12408
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 20:19:57.139 12408 12443 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@2cce862, Dispatchers.IO]
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 17663
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 20:34:28.242 17663 17740 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@4f8eafa, Dispatchers.IO]
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 5985
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-27 23:20:47.206  5985  6055 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 8094
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 06:13:12.804  8094  8145 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 10240
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 07:45:24.116 10240 10449 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@80deb4e, Dispatchers.IO]
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13842
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 08:54:02.498 13842 13952 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-8
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 28574
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 10:09:09.134 28574 28656 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20874
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 17:09:41.064 20874 20954 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@fe3c9a2, Dispatchers.IO]
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 3874
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 17:53:26.123  3874  3971 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 3104
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-28 20:05:03.182  3104  3172 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 3468
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 06:29:08.592  3468  3543 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 12398
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 07:20:16.452 12398 12481 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 6838
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 13:23:02.710  6838  7008 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d6c491c, Dispatchers.IO]
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26218
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 14:42:30.027 26218 26309 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-6
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 5891
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 15:19:57.314  5891  5968 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@55abcc6, Dispatchers.IO]
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 9181
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 15:30:12.394  9181  9256 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-7
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 13797
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 15:45:25.614 13797 13871 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 17287
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 16:03:31.602 17287 17330 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@2cce862, Dispatchers.IO]
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-11
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 5675
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 17:13:02.064  5675  5749 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@d09d925, Dispatchers.IO]
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-9
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 17460
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 17:41:56.294 17460 17600 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 23797
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-29 17:57:34.658 23797 23914 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 32406
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 07:07:11.098 32406 32461 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@182db08, Dispatchers.IO]
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 17215
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 08:46:38.237 17215 17296 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-14
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 21177
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 09:11:18.545 21177 21261 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 25695
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 09:20:00.731 25695 25861 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@4f8eafa, Dispatchers.IO]
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-4
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31089
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 09:32:06.512 31089 31222 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b58ddee, Dispatchers.IO]
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-7
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 4427
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 09:43:20.895  4427  4514 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@f3eaf69, Dispatchers.IO]
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-13
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 16386
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 10:23:52.249 16386 16500 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c193df0, Dispatchers.IO]
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 20431
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-30 23:20:18.751 20431 20494 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@676e797, Dispatchers.IO]
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-3
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31131
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 07:19:49.039 31131 31294 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@ab9b611, Dispatchers.IO]
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-10
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 8906
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 11:05:05.829  8906  8991 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@288e03, Dispatchers.IO]
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 11573
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 14:26:07.689 11573 11635 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@55abcc6, Dispatchers.IO]
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-2
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 21150
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 17:05:59.895 21150 21195 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 10671
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 18:20:21.397 10671 10723 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@3a3e2a1, Dispatchers.IO]
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 12192
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	at rm0.d.a(SourceFile:74)
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	at rm0.a.invokeSuspend(SourceFile:11)
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 20:14:56.915 12192 12241 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@fe3c9a2, Dispatchers.IO]
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 22623
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 20:51:37.605 22623 22689 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@c89328f, Dispatchers.IO]
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-11
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 26579
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 21:02:59.905 26579 26662 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@4f8eafa, Dispatchers.IO]
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-12
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 31942
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+07-31 21:30:52.495 31942 32029 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@b86633, Dispatchers.IO]
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-5
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: Process: com.nordpass.android.app.password.manager, PID: 7708
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: com.nordpass.usecase.identity.NoIdentitiesException: No identity found: empty
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at rm0.d.b(SourceFile:96)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at rm0.b.invokeSuspend(SourceFile:12)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:13)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at az0.h2.m(SourceFile:26)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at az0.a.resumeWith(SourceFile:22)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at gy0.a.resumeWith(SourceFile:41)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at az0.m0.run(SourceFile:120)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	at hz0.a.run(SourceFile:117)
+08-01 06:04:31.135  7708  7779 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [y1{Cancelling}@ba544d9, Dispatchers.IO]

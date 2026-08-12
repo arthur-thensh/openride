@@ -4,7 +4,7 @@ OpenRide est une application de navigation moto hors ligne écrite principalemen
 
 Le projet vise Android et iOS, avec un développement quotidien réalisé sur macOS. Le cœur de l'application reste indépendant des plateformes autant que possible : carte, routage, navigation, recherche, GPX, génération de boucles et logique GPS sont implémentés en C. Les couches Android/iOS doivent rester fines et limitées aux services fournis par le système, comme le GPS ou le cycle de vie de l'application.
 
-Version actuelle : **v0.21**.
+Version actuelle : **v0.22**.
 
 ## Objectifs
 
@@ -21,7 +21,7 @@ OpenRide doit permettre à terme de :
 - conserver favoris, historique et préférences ;
 - fonctionner sur Android puis iOS avec le même cœur C.
 
-Pendant une randonnée, **aucun accès Internet n'est requis** si la région a été préparée et copiée au préalable.
+Pendant une randonnée, **aucun accès Internet n'est requis**. Depuis la v0.22, Android peut aussi télécharger directement un extrait `.osm.pbf` puis fabriquer localement toutes les données de la région : carte `.ormap`, routage `.orgraph` et recherche `.orplaces.sqlite`. L'ordinateur n'est plus nécessaire pour installer une région sur le téléphone.
 
 ---
 
@@ -29,7 +29,8 @@ Pendant une randonnée, **aucun accès Internet n'est requis** si la région a �
 
 Les briques suivantes sont déjà fonctionnelles :
 
-- carte vectorielle OSM/Shortbread en MBTiles ;
+- carte OpenRide `.ormap` générée directement depuis les données OSM ;
+- compatibilité temporaire avec les anciennes MBTiles Shortbread pour la transition ;
 - renderer cartographique en C ;
 - styles `Road`, `Trail` et `Topo` ;
 - graphe routier `.orgraph` construit à partir d'un `.osm.pbf` ;
@@ -66,15 +67,17 @@ Le générateur de boucles existe déjà mais n'est pas la priorité actuelle. I
 ```text
 OpenRide
 │
-├── Carte hors ligne
-│   ├── MBTiles
-│   ├── MVT / Shortbread
-│   └── renderer SDL3
-│
 ├── Données OpenStreetMap
-│   └── .osm.pbf
+│   └── .osm.pbf (source unique de la région)
+│       ├── carte .ormap
 │       ├── graphe routier .orgraph
 │       └── index de recherche .orplaces.sqlite
+│
+├── Carte hors ligne
+│   ├── routes moto par niveaux de zoom
+│   ├── zones bâties simplifiées (pas de bâtiments individuels)
+│   ├── eau / forêts / labels
+│   └── renderer SDL3
 │
 ├── Moteur de routage hors ligne
 │   ├── graphe dirigé
@@ -121,6 +124,7 @@ openride/
 ├── data/
 │   ├── maps/
 │   ├── osm/
+│   ├── downloads/
 │   ├── routing/
 │   ├── search/
 │   └── gpx/
@@ -252,80 +256,106 @@ Puis :
 
 # Préparer les vraies données hors ligne
 
-Le prototype actuel utilise le **Nord-Pas-de-Calais** comme région de référence.
+Le prototype utilise le **Nord-Pas-de-Calais** comme première région de référence.
 
-Trois fichiers principaux sont utilisés :
+Depuis la v0.22, OpenRide considère le fichier `.osm.pbf` comme **source unique** :
 
 ```text
-data/maps/nord-pas-de-calais-shortbread.mbtiles
-data/routing/nord-pas-de-calais.orgraph
-data/search/nord-pas-de-calais.orplaces.sqlite
+nord-pas-de-calais-latest.osm.pbf
+        │
+        ├──> nord-pas-de-calais.orgraph
+        │       routage + index spatiaux
+        │
+        ├──> nord-pas-de-calais.orplaces.sqlite
+        │       recherche hors ligne
+        │
+        └──> nord-pas-de-calais.ormap
+                carte OpenRide
 ```
 
-## 1. Télécharger la carte vectorielle
+Le format Shortbread/MBTiles n'est plus nécessaire pour une nouvelle installation. Le lecteur Shortbread reste temporairement présent uniquement pour permettre la migration des installations plus anciennes.
 
-```sh
-./scripts/download_real_map.sh
+## Pourquoi `.ormap` ?
+
+`.ormap` est un conteneur SQLite versionné conçu spécifiquement pour OpenRide. Il ne cherche pas à conserver toute la complexité cartographique d'OSM : il stocke ce qui est utile à une navigation moto.
+
+La première version contient notamment :
+
+- routes principales et secondaires ;
+- petites routes ;
+- `track` et `path` routables à moto ;
+- eau ;
+- forêts principales ;
+- labels de villes/villages ;
+- zones bâties simplifiées.
+
+**Les bâtiments individuels ne sont volontairement pas conservés.** Pendant l'import, les footprints de bâtiments deviennent des échantillons d'occupation puis sont regroupés avec les zones `landuse` en blocs bâtis grossiers. Cela réduit fortement la quantité de géométrie à stocker et à dessiner sur téléphone, tout en gardant l'information visuelle utile pour se repérer.
+
+## Méthode A — directement dans Android (méthode normale)
+
+Dans OpenRide :
+
+```text
+Menu
+  → Cartes / données
+  → Nord-Pas-de-Calais
+  → Télécharger OSM et préparer
 ```
 
-La carte MBTiles vient de BBBike et utilise le schéma vectoriel Shortbread.
+L'application :
 
-## 2. Télécharger les données OSM routières
+1. télécharge le `.osm.pbf` directement dans son stockage privé ;
+2. construit le graphe `.orgraph` ;
+3. construit l'index `.orplaces.sqlite` ;
+4. construit la carte `.ormap` ;
+5. vérifie/finalise les fichiers ;
+6. supprime le PBF source une fois la région prête afin d'économiser de l'espace.
+
+Le téléchargement demande Internet. **Toutes les étapes de transformation et toute l'utilisation de la région sont locales au téléphone.** Aucun serveur OpenRide n'effectue de routage, de recherche ou de génération de carte.
+
+La préparation est volontairement effectuée sur un thread de travail, car le traitement d'une région peut durer plusieurs minutes et solliciter fortement le CPU. Pour une grosse région, il est préférable de laisser le téléphone branché.
+
+Après une première préparation en v0.22, OpenRide demande encore un redémarrage de l'application pour activer le nouveau `.ormap`. Une activation à chaud pourra être ajoutée plus tard.
+
+## Méthode B — préparer la même région sur macOS (développement)
+
+Cette méthode reste utile pour les tests et benchmarks.
+
+Télécharger le PBF :
 
 ```sh
 ./scripts/download_routing_data.sh
 ```
 
-Cela télécharge :
+Puis construire les trois formats :
 
-```text
-data/osm/nord-pas-de-calais-latest.osm.pbf
+```sh
+./scripts/prepare_region.sh
 ```
 
-La source utilisée est Geofabrik.
-
-## 3. Construire le graphe routier
+Ce script enchaîne :
 
 ```sh
 ./scripts/prepare_routing_graph.sh
-```
-
-Cette étape est effectuée **hors ligne** une fois le `.osm.pbf` présent.
-
-Elle génère :
-
-```text
-data/routing/nord-pas-de-calais.orgraph
-```
-
-Le fichier contient notamment :
-
-- les nœuds routiers ;
-- les arêtes dirigées ;
-- l'index spatial des nœuds ;
-- l'index spatial des segments.
-
-## 4. Construire l'index de recherche
-
-```sh
 ./scripts/prepare_place_index.sh
+./scripts/prepare_ormap.sh
 ```
 
-Cela génère :
+Résultat :
 
 ```text
+data/maps/nord-pas-de-calais.ormap
+data/routing/nord-pas-de-calais.orgraph
 data/search/nord-pas-de-calais.orplaces.sqlite
 ```
 
-## 5. Lancer OpenRide avec toutes les données locales
+Pour lancer la version macOS :
 
 ```sh
 ./scripts/run.sh
 ```
 
-Une fois ces fichiers créés, la carte, le routage et la recherche fonctionnent sans Internet.
-
----
+`run.sh` préfère automatiquement `.ormap`. Une ancienne MBTiles Shortbread reste utilisée seulement si `.ormap` n'existe pas encore.
 
 # Benchmarks utiles
 
@@ -502,11 +532,17 @@ Le package Android est :
 com.arthurthion.openride
 ```
 
-## 8. Copier les données hors ligne sur Android
+## 8. Installer les données hors ligne sur Android
+
+La méthode normale depuis v0.22 est **directement dans l'application** : ouvrir `Cartes / données`, puis lancer le téléchargement/préparation de la région.
+
+Le script suivant reste disponible pour le développement si une région `.ormap` a déjà été préparée sur le Mac :
 
 ```sh
 ./scripts/android_push_data.sh
 ```
+
+Il copie désormais `.ormap`, `.orgraph` et `.orplaces.sqlite` ; il ne dépend plus de Shortbread.
 
 Le stockage Android utilisé est volontairement le **stockage interne privé de l'application**.
 
@@ -813,13 +849,14 @@ Quelques règles architecturales importantes :
 
 # Prochaines étapes
 
-Les priorités après v0.21 sont notamment :
+Après v0.22, les priorités sont notamment :
 
-- améliorer encore l'expérience mobile de préparation d'un trajet ;
-- transformer favoris/historique en véritables raccourcis de destination ;
-- mieux gérer les pertes GPS longues et les changements de fournisseur ;
-- améliorer la persistance d'une navigation interrompue ;
-- améliorer plus tard le générateur de boucles ;
-- préparer la gestion de plusieurs régions hors ligne ;
-- optimiser les performances mobiles ;
+- mesurer sur le téléphone réel le temps, la mémoire et la batterie nécessaires à la construction `.orgraph` / recherche / `.ormap` ;
+- améliorer le retour de progression pendant les longues phases d'import ;
+- ajouter plusieurs régions téléchargeables et leur sélection automatique ;
+- prendre en charge davantage de géométries OSM complexes (notamment certains multipolygones) dans `.ormap` ;
+- améliorer le format `.ormap`, son niveau de détail et le rendu des zones naturelles ;
+- enrichir les instructions avec noms/numéros de routes ;
+- fiabiliser encore la navigation longue durée et le GPS en arrière-plan ;
+- revenir plus tard sur le générateur de boucles ;
 - préparer ensuite le portage iOS.

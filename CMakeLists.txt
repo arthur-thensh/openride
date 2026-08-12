@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.21.0 LANGUAGES C)
+project(OpenRide VERSION 0.22.1 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -65,6 +65,7 @@ add_library(openride_core STATIC
     src/core/app_storage.c
     src/core/platform_paths.c
     src/core/region_manager.c
+    src/core/region_install.c
     src/core/touch_input.c
     src/core/location_provider.c
     src/core/app_toolbar.c
@@ -72,6 +73,8 @@ add_library(openride_core STATIC
     src/core/app_lifecycle.c
     src/osm/osm_import.c
     src/map/mbtiles.c
+    src/map/ormap.c
+    src/map/ormap_builder.c
     src/map/mvt.c
     src/map/map_style.c
 )
@@ -102,12 +105,14 @@ set(OPENRIDE_APP_SOURCES
     src/main.c
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
+    src/map/ormap_renderer.c
 )
 
 if(ANDROID)
     add_library(main SHARED
         ${OPENRIDE_APP_SOURCES}
         src/platform/android_location_provider.c
+        src/platform/android_region_download.c
     )
     set(OPENRIDE_APP_TARGET main)
 else()
@@ -170,6 +175,16 @@ else()
     target_compile_options(openride_place_search PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_executable(openride_ormap_import
+    src/tools/ormap_import_main.c
+)
+target_link_libraries(openride_ormap_import PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_ormap_import PRIVATE /W4)
+else()
+    target_compile_options(openride_ormap_import PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(openride_spatial_benchmark
     src/tools/spatial_benchmark_main.c
 )
@@ -225,6 +240,18 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_map_camera PRIVATE openride_core)
     add_test(NAME map_camera COMMAND test_map_camera)
+
+    add_executable(test_ormap
+        tests/test_ormap.c
+    )
+    target_link_libraries(test_ormap PRIVATE openride_core)
+    add_test(NAME ormap COMMAND test_ormap "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.osm.pbf")
+
+    add_executable(test_region_install
+        tests/test_region_install.c
+    )
+    target_link_libraries(test_region_install PRIVATE openride_core)
+    add_test(NAME region_install COMMAND test_region_install "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.osm.pbf")
 
     add_executable(test_mbtiles
         tests/test_mbtiles.c

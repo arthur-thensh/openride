@@ -10,7 +10,13 @@ if [ ! -x build/openride ]; then
     exit 1
 fi
 
-LOCAL_MAP="data/maps/nord-pas-de-calais-shortbread.mbtiles"
+LOCAL_ORMAP="data/maps/nord-pas-de-calais.ormap"
+LEGACY_MAP="data/maps/nord-pas-de-calais-shortbread.mbtiles"
+if [ -f "$LOCAL_ORMAP" ]; then
+    LOCAL_MAP="$LOCAL_ORMAP"
+else
+    LOCAL_MAP="$LEGACY_MAP"
+fi
 LOCAL_GRAPH="data/routing/nord-pas-de-calais.orgraph"
 
 # Import GPX pratique sans avoir à répéter les chemins carte/graphe :
@@ -28,7 +34,7 @@ if [ "${1:-}" = "--gpx" ]; then
 fi
 
 # Des chemins fournis explicitement restent prioritaires :
-#   ./scripts/run.sh carte.mbtiles [graphe.orgraph] [trace.gpx]
+#   ./scripts/run.sh carte.ormap [graphe.orgraph] [trace.gpx]
 if [ "$#" -gt 0 ]; then
     exec ./build/openride "$@"
 fi

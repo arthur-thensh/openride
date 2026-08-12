@@ -5,6 +5,27 @@
 #include <stdio.h>
 #include <string.h>
 
+typedef struct MapFeatureCheck {
+    uint32_t water_area_count;
+    uint32_t water_area_points;
+} MapFeatureCheck;
+
+static bool check_map_feature(OpenRideOSMMapFeatureKind kind,
+                              const double *latitudes,
+                              const double *longitudes,
+                              uint32_t point_count,
+                              void *userdata)
+{
+    MapFeatureCheck *check = userdata;
+    assert(latitudes != NULL);
+    assert(longitudes != NULL);
+    if (kind == OPENRIDE_OSM_MAP_FEATURE_WATER_AREA) {
+        ++check->water_area_count;
+        check->water_area_points = point_count;
+    }
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -18,7 +39,7 @@ int main(int argc, char **argv)
                                          error,
                                          sizeof(error)));
     assert(error[0] == '\0');
-    assert(stats.osm_way_count == 3U);
+    assert(stats.osm_way_count == 5U);
     assert(stats.routable_way_count == 2U);
     assert(stats.referenced_node_count == 4U);
     assert(stats.found_node_count == 4U);
@@ -43,6 +64,26 @@ int main(int argc, char **argv)
 
     openride_route_destroy(&route);
     openride_routing_graph_destroy(&graph);
+
+    MapFeatureCheck map_check = {0};
+    OpenRideOSMMapFeatureStats map_stats = {0};
+    assert(openride_osm_pbf_visit_map_features(argv[1],
+                                                check_map_feature,
+                                                &map_check,
+                                                &map_stats,
+                                                error,
+                                                sizeof(error)));
+    assert(error[0] == '\0');
+    assert(map_stats.osm_way_count == 5U);
+    assert(map_stats.osm_relation_count == 1U);
+    assert(map_stats.selected_relation_count == 1U);
+    assert(map_stats.relation_member_way_count == 2U);
+    assert(map_stats.multipolygon_outer_ring_count == 1U);
+    assert(map_stats.incomplete_multipolygon_count == 0U);
+    assert(map_stats.multipolygon_inner_members_ignored == 0U);
+    assert(map_check.water_area_count == 1U);
+    assert(map_check.water_area_points == 5U);
+
     puts("OSM import tests: OK");
     return 0;
 }
