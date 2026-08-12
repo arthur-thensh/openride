@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.17.0 LANGUAGES C)
+project(OpenRide VERSION 0.18.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -34,6 +34,11 @@ add_library(openride_core STATIC
     src/core/gpx.c
     src/core/place_search.c
     src/core/app_storage.c
+    src/core/platform_paths.c
+    src/core/region_manager.c
+    src/core/touch_input.c
+    src/core/location_provider.c
+    src/core/app_toolbar.c
     src/osm/osm_import.c
     src/map/mbtiles.c
     src/map/mvt.c
@@ -271,6 +276,30 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_app_storage PRIVATE openride_core)
     add_test(NAME app_storage COMMAND test_app_storage)
+
+    add_executable(test_platform_paths
+        tests/test_platform_paths.c
+    )
+    target_link_libraries(test_platform_paths PRIVATE openride_core)
+    add_test(NAME platform_paths COMMAND test_platform_paths)
+
+    add_executable(test_touch_input
+        tests/test_touch_input.c
+    )
+    target_link_libraries(test_touch_input PRIVATE openride_core)
+    add_test(NAME touch_input COMMAND test_touch_input)
+
+    add_executable(test_location_provider
+        tests/test_location_provider.c
+    )
+    target_link_libraries(test_location_provider PRIVATE openride_core)
+    add_test(NAME location_provider COMMAND test_location_provider)
+
+    add_executable(test_app_toolbar
+        tests/test_app_toolbar.c
+    )
+    target_link_libraries(test_app_toolbar PRIVATE openride_core)
+    add_test(NAME app_toolbar COMMAND test_app_toolbar)
 
     add_executable(test_osm_import
         tests/test_osm_import.c
