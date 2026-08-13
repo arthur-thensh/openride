@@ -22,6 +22,15 @@ typedef struct OpenRideRoutingWorldResult {
     double gateway_lon;
 } OpenRideRoutingWorldResult;
 
+typedef struct OpenRideRoutingWorldCache {
+    OpenRideRoutingGraph graph;
+    char region_id[64];
+    bool loaded;
+} OpenRideRoutingWorldCache;
+
+void openride_routing_world_cache_init(OpenRideRoutingWorldCache *cache);
+void openride_routing_world_cache_destroy(OpenRideRoutingWorldCache *cache);
+
 /*
  * First RoutingWorld primitive: route directly between two regional graphs.
  *
@@ -57,6 +66,22 @@ bool openride_routing_world_calculate_installed(
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
     const OpenRideRoutingGraph *active_graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size);
+
+bool openride_routing_world_calculate_installed_cached(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
     double start_lat,
     double start_lon,
     double destination_lat,

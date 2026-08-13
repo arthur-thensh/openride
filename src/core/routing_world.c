@@ -467,6 +467,56 @@ bool openride_routing_world_calculate_graph_pair(
     return false;
 }
 
+void openride_routing_world_cache_init(OpenRideRoutingWorldCache *cache)
+{
+    if (!cache) return;
+    memset(cache, 0, sizeof(*cache));
+}
+
+void openride_routing_world_cache_destroy(OpenRideRoutingWorldCache *cache)
+{
+    if (!cache) return;
+    if (cache->loaded) {
+        openride_routing_graph_destroy(&cache->graph);
+    }
+    memset(cache, 0, sizeof(*cache));
+}
+
+static bool cache_matches_region(const OpenRideRoutingWorldCache *cache,
+                                 const OpenRideRegionDefinition *region)
+{
+    return cache && cache->loaded && region
+        && strcmp(cache->region_id, region->id) == 0;
+}
+
+static bool cache_load_region(OpenRideRoutingWorldCache *cache,
+                              const OpenRideRegionDefinition *region,
+                              const char *routing_path,
+                              char *error,
+                              size_t error_size)
+{
+    if (!cache || !region || !routing_path) {
+        set_error(error, error_size, "invalid RoutingWorld cache request");
+        return false;
+    }
+
+    openride_routing_world_cache_destroy(cache);
+    if (!openride_routing_graph_load(&cache->graph,
+                                     routing_path,
+                                     error,
+                                     error_size)) {
+        return false;
+    }
+
+    snprintf(cache->region_id,
+             sizeof(cache->region_id),
+             "%s",
+             region->id);
+    cache->loaded = true;
+    return true;
+}
+
+
 typedef struct OpenRideRoutingWorldLoadedGraph {
     const OpenRideRoutingGraph *graph;
     OpenRideRoutingGraph owned;
@@ -635,6 +685,7 @@ static bool load_region_graph(const OpenRidePlatformPaths *paths,
                               const OpenRideRegionDefinition *region,
                               const OpenRideRegionDefinition *active_region,
                               const OpenRideRoutingGraph *active_graph,
+                              OpenRideRoutingWorldCache *cache,
                               OpenRideRoutingWorldLoadedGraph *loaded,
                               char *error,
                               size_t error_size)
@@ -660,6 +711,24 @@ static bool load_region_graph(const OpenRidePlatformPaths *paths,
         || !status.routing_installed) {
         set_error(error, error_size, "routing graph is not installed for region");
         return false;
+    }
+
+    if (cache_matches_region(cache, region)) {
+        loaded->graph = &cache->graph;
+        return true;
+    }
+
+    if (cache
+        && (!active_region || strcmp(region->id, active_region->id) != 0)) {
+        if (!cache_load_region(cache,
+                               region,
+                               status.routing_path,
+                               error,
+                               error_size)) {
+            return false;
+        }
+        loaded->graph = &cache->graph;
+        return true;
     }
 
     if (!openride_routing_graph_load(&loaded->owned,
@@ -730,10 +799,11 @@ static bool calculate_single_installed_region(
     return true;
 }
 
-bool openride_routing_world_calculate_installed(
+bool openride_routing_world_calculate_installed_cached(
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
     const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
     double start_lat,
     double start_lon,
     double destination_lat,
@@ -789,6 +859,7 @@ bool openride_routing_world_calculate_installed(
                            start_region,
                            active_region,
                            active_graph,
+                           cache,
                            &start_loaded,
                            error,
                            error_size)) {
@@ -812,6 +883,7 @@ bool openride_routing_world_calculate_installed(
                                destination_region,
                                active_region,
                                active_graph,
+                               cache,
                                &destination_loaded,
                                error,
                                error_size)) {
@@ -843,4 +915,36 @@ bool openride_routing_world_calculate_installed(
     loaded_graph_destroy(&start_loaded);
     if (result) *result = local_result;
     return ok;
+}
+
+bool openride_routing_world_calculate_installed(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    return openride_routing_world_calculate_installed_cached(
+        paths,
+        active_region,
+        active_graph,
+        NULL,
+        start_lat,
+        start_lon,
+        destination_lat,
+        destination_lon,
+        max_snap_distance_m,
+        profile,
+        route,
+        result,
+        error,
+        error_size);
 }

@@ -858,6 +858,7 @@ static bool recalculate_route(const OpenRideRoutingGraph *graph,
 typedef struct OpenRideRoutingWorldThreadContext {
     OpenRidePlatformPaths paths;
     const OpenRideRegionDefinition *active_region;
+    OpenRideRoutingWorldCache *cache;
     OpenRideMapSelection selection;
     OpenRideRoutingProfile profile;
     bool reroute;
@@ -874,10 +875,11 @@ static int SDLCALL routing_world_thread_main(void *userdata)
     OpenRideRoutingWorldThreadContext *context = userdata;
     if (!context) return 1;
 
-    const bool ok = openride_routing_world_calculate_installed(
+    const bool ok = openride_routing_world_calculate_installed_cached(
         &context->paths,
         context->active_region,
         NULL,
+        context->cache,
         context->selection.start.lat,
         context->selection.start.lon,
         context->selection.destination.lat,
@@ -898,6 +900,7 @@ static SDL_Thread *start_routing_world_thread(
     OpenRideRoutingWorldThreadContext *context,
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
+    OpenRideRoutingWorldCache *cache,
     const OpenRideMapSelection *selection,
     OpenRideRoutingProfile profile,
     bool reroute,
@@ -912,6 +915,7 @@ static SDL_Thread *start_routing_world_thread(
     memset(context, 0, sizeof(*context));
     context->paths = *paths;
     context->active_region = active_region;
+    context->cache = cache;
     context->selection = *selection;
     context->profile = profile;
     context->reroute = reroute;
@@ -3700,6 +3704,8 @@ int main(int argc, char **argv)
     OpenRideMapSelection selection;
     openride_map_selection_init(&selection);
     OpenRideRoute route = {0};
+    OpenRideRoutingWorldCache routing_world_cache;
+    openride_routing_world_cache_init(&routing_world_cache);
     OpenRideRoutingWorldThreadContext routing_world_context;
     memset(&routing_world_context, 0, sizeof(routing_world_context));
     SDL_Thread *routing_world_thread = NULL;
@@ -5148,6 +5154,37 @@ int main(int argc, char **argv)
                             break;
                         }
                     }
+
+                    /*
+                     * Android route-point editing mirrors the desktop mouse
+                     * interaction: touch a marker to edit it. A tap deletes
+                     * it; a drag moves it. Route calculation is restarted only
+                     * after the finger is released.
+                     */
+                    dragging_marker = drive_mode.active
+                        ? OPENRIDE_MARKER_NONE
+                        : marker_at_screen(&camera,
+                                           &selection,
+                                           x,
+                                           y,
+                                           width,
+                                           height);
+                    if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                        clear_navigation_session(&navigation,
+                                                 &gps_simulator,
+                                                 &navigation_state,
+                                                 &gps_sample,
+                                                 &gps_sample_valid);
+                        openride_route_destroy(&route);
+                        route_valid = false;
+                        route_dirty = false;
+                        loop_active = false;
+                        gpx_navigation_active = false;
+                        openride_navigation_session_reset(&navigation_session);
+                        openride_location_filter_reset(&location_filter);
+                        loop_waypoint_count = 0U;
+                    }
+
                     openride_touch_input_begin(&touch_input,
                                                (uint64_t)event.tfinger.fingerID,
                                                x,
@@ -5167,7 +5204,23 @@ int main(int argc, char **argv)
                         (uint64_t)event.tfinger.fingerID,
                         x,
                         y);
-                    if (action.type == OPENRIDE_TOUCH_ACTION_PAN) {
+                    if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                        if (action.type == OPENRIDE_TOUCH_ACTION_PAN) {
+                            double lat = 0.0;
+                            double lon = 0.0;
+                            openride_screen_to_geo(&camera,
+                                                   x,
+                                                   y,
+                                                   width,
+                                                   height,
+                                                   &lat,
+                                                   &lon);
+                            openride_map_selection_set(&selection,
+                                                       dragging_marker,
+                                                       lat,
+                                                       lon);
+                        }
+                    } else if (action.type == OPENRIDE_TOUCH_ACTION_PAN) {
                         openride_camera_pan(&camera, action.dx, action.dy);
                         if (drive_mode.active) {
                             follow_gps = false;
@@ -5192,7 +5245,58 @@ int main(int argc, char **argv)
                         (uint64_t)event.tfinger.fingerID,
                         x,
                         y);
-                    if (action.type == OPENRIDE_TOUCH_ACTION_TAP && !drive_mode.active) {
+
+                    if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                        const OpenRideSelectionMarker edited_marker = dragging_marker;
+                        dragging_marker = OPENRIDE_MARKER_NONE;
+
+                        if (action.type == OPENRIDE_TOUCH_ACTION_TAP) {
+                            openride_map_selection_remove(&selection, edited_marker);
+                            if (edited_marker == OPENRIDE_MARKER_START) {
+                                start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+                            } else {
+                                destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+                            }
+                            route_dirty = openride_map_selection_complete(&selection);
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "%s supprime - touche la carte pour le replacer",
+                                     edited_marker == OPENRIDE_MARKER_START
+                                         ? "Depart"
+                                         : "Destination");
+                        } else {
+                            double lat = 0.0;
+                            double lon = 0.0;
+                            openride_screen_to_geo(&camera,
+                                                   x,
+                                                   y,
+                                                   width,
+                                                   height,
+                                                   &lat,
+                                                   &lon);
+                            openride_map_selection_set(&selection,
+                                                       edited_marker,
+                                                       lat,
+                                                       lon);
+                            if (edited_marker == OPENRIDE_MARKER_START) {
+                                start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+                            } else {
+                                destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+                            }
+                            route_dirty = openride_map_selection_complete(&selection);
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "%s deplace%s",
+                                     edited_marker == OPENRIDE_MARKER_START
+                                         ? "Depart"
+                                         : "Destination",
+                                     route_dirty ? " - recalcul..." : "");
+                        }
+
+                        loop_active = false;
+                        loop_waypoint_count = 0U;
+                    } else if (action.type == OPENRIDE_TOUCH_ACTION_TAP
+                               && !drive_mode.active) {
                         add_selection_from_screen(&selection,
                                                   &camera,
                                                   action.x,
@@ -5209,10 +5313,18 @@ int main(int argc, char **argv)
                 }
 
                 case SDL_EVENT_FINGER_CANCELED:
+                    if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                        dragging_marker = OPENRIDE_MARKER_NONE;
+                        route_dirty = openride_map_selection_complete(&selection);
+                    }
                     openride_touch_input_cancel(&touch_input);
                     break;
 
                 case SDL_EVENT_PINCH_BEGIN:
+                    if (dragging_marker != OPENRIDE_MARKER_NONE) {
+                        dragging_marker = OPENRIDE_MARKER_NONE;
+                        route_dirty = openride_map_selection_complete(&selection);
+                    }
                     openride_touch_input_cancel(&touch_input);
                     break;
 
@@ -5812,6 +5924,7 @@ int main(int argc, char **argv)
                     &routing_world_context,
                     &platform_paths,
                     active_region,
+                    &routing_world_cache,
                     &selection,
                     routing_profile,
                     routing_world_pending_reroute,
@@ -6329,6 +6442,7 @@ int main(int argc, char **argv)
         routing_world_thread = NULL;
     }
     openride_route_destroy(&routing_world_context.route);
+    openride_routing_world_cache_destroy(&routing_world_cache);
 
     if (lifecycle_watch_installed) {
         SDL_RemoveEventWatch(openride_lifecycle_event_watch, &lifecycle_watch);
