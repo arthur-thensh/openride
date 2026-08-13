@@ -1,4 +1,5 @@
 #include "map/map_world.h"
+#include "map/ormap_renderer.h"
 
 #include "openride/ormap.h"
 #include "openride/region_manager.h"
@@ -40,6 +41,9 @@ typedef struct OpenRideMapWorldRegion {
     WorldLineArray boundary;
     WorldLineArray roads;
     WorldLineArray waterways;
+    OpenRideORMap *map;
+    OpenRideORMapRenderer *detail_renderer;
+    bool detail_visible;
 } OpenRideMapWorldRegion;
 
 struct OpenRideMapWorld {
@@ -324,6 +328,13 @@ static bool load_major_waterways(OpenRideORMap *map,
 static void world_region_destroy(OpenRideMapWorldRegion *region)
 {
     if (!region) return;
+    if (region->detail_renderer) {
+        openride_ormap_renderer_destroy(region->detail_renderer);
+        free(region->detail_renderer);
+    }
+    if (region->map) {
+        openride_ormap_close(region->map);
+    }
     line_array_destroy(&region->boundary);
     line_array_destroy(&region->roads);
     line_array_destroy(&region->waterways);
@@ -337,7 +348,8 @@ static void destroy_regions(OpenRideMapWorldRegion *regions, size_t count)
     free(regions);
 }
 
-static bool build_world_region(const OpenRideRegionDefinition *definition,
+static bool build_world_region(SDL_Renderer *renderer,
+                               const OpenRideRegionDefinition *definition,
                                const char *ormap_path,
                                const char *poly_path,
                                OpenRideMapWorldRegion *out,
@@ -346,20 +358,33 @@ static bool build_world_region(const OpenRideRegionDefinition *definition,
 {
     memset(out, 0, sizeof(*out));
     out->definition = definition;
-    OpenRideORMap *map = openride_ormap_open(ormap_path, error, error_size);
-    if (!map) return false;
-    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(map);
+    out->map = openride_ormap_open(ormap_path, error, error_size);
+    if (!out->map) return false;
+
+    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(out->map);
     if (!metadata) {
-        openride_ormap_close(map);
         set_error(error, error_size, "map-world region has no metadata");
+        world_region_destroy(out);
         return false;
     }
+
     out->metadata = *metadata;
-    const bool ok = load_major_roads(map, out, error, error_size)
-        && load_major_waterways(map, out, error, error_size)
+    const bool ok = load_major_roads(out->map, out, error, error_size)
+        && load_major_waterways(out->map, out, error, error_size)
         && load_poly_boundary(poly_path, &out->boundary, error, error_size);
-    openride_ormap_close(map);
     if (!ok) {
+        world_region_destroy(out);
+        return false;
+    }
+
+    out->detail_renderer = calloc(1U, sizeof(*out->detail_renderer));
+    if (!out->detail_renderer) {
+        set_error(error, error_size, "out of memory creating map-world detail renderer");
+        world_region_destroy(out);
+        return false;
+    }
+    if (!openride_ormap_renderer_init(out->detail_renderer, renderer, out->map)) {
+        set_error(error, error_size, "unable to initialize map-world detail renderer");
         world_region_destroy(out);
         return false;
     }
@@ -424,7 +449,8 @@ bool openride_map_world_refresh(OpenRideMapWorld *world,
         }
         if (!status.ormap_installed) continue;
         char region_error[256] = {0};
-        if (!build_world_region(definition,
+        if (!build_world_region(world->renderer,
+                                definition,
                                 status.ormap_path,
                                 status.poly_path,
                                 &next[next_count],
@@ -815,6 +841,105 @@ void openride_map_world_draw(OpenRideMapWorld *world,
     }
 }
 
+
+static bool detail_region_maybe_visible(const OpenRideMapWorldRegion *region,
+                                        const OpenRideMapCamera *camera,
+                                        int viewport_width,
+                                        int viewport_height)
+{
+    if (!region || !camera || !region->detail_renderer) return false;
+    if (!region->metadata.has_bounds) return true;
+
+    const double latitudes[4] = {
+        region->metadata.north,
+        region->metadata.north,
+        region->metadata.south,
+        region->metadata.south
+    };
+    const double longitudes[4] = {
+        region->metadata.west,
+        region->metadata.east,
+        region->metadata.west,
+        region->metadata.east
+    };
+
+    const double margin = 128.0;
+    bool all_left = true;
+    bool all_right = true;
+    bool all_above = true;
+    bool all_below = true;
+
+    for (int i = 0; i < 4; ++i) {
+        const OpenRidePointD point = openride_geo_to_screen(camera,
+                                                             latitudes[i],
+                                                             longitudes[i],
+                                                             viewport_width,
+                                                             viewport_height);
+        all_left = all_left && point.x < -margin;
+        all_right = all_right && point.x > (double)viewport_width + margin;
+        all_above = all_above && point.y < -margin;
+        all_below = all_below && point.y > (double)viewport_height + margin;
+    }
+
+    return !(all_left || all_right || all_above || all_below);
+}
+
+void openride_map_world_draw_detail(OpenRideMapWorld *world,
+                                    const OpenRideMapCamera *camera,
+                                    OpenRideMapStyle style,
+                                    int viewport_width,
+                                    int viewport_height)
+{
+    if (!world || !world->renderer || !camera
+        || viewport_width <= 0 || viewport_height <= 0
+        || camera->zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM) {
+        return;
+    }
+
+    const OpenRideMapPalette palette = openride_map_palette(style);
+    SDL_SetRenderDrawColor(world->renderer,
+                           palette.background.r,
+                           palette.background.g,
+                           palette.background.b,
+                           SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(world->renderer);
+
+    size_t visible_count = 0U;
+    for (size_t i = 0U; i < world->region_count; ++i) {
+        OpenRideMapWorldRegion *region = &world->regions[i];
+        region->detail_visible = detail_region_maybe_visible(region,
+                                                              camera,
+                                                              viewport_width,
+                                                              viewport_height);
+        if (!region->detail_visible) continue;
+
+        ++visible_count;
+        openride_ormap_renderer_set_style(region->detail_renderer, style);
+        openride_ormap_renderer_begin_frame(region->detail_renderer);
+    }
+
+    if (visible_count == 0U) return;
+
+    /*
+     * Render by cartographic layer across every visible .ormap instead of
+     * rendering one complete region at a time. This prevents a neighbouring
+     * region's fills from covering roads already drawn by another region.
+     */
+    for (int layer = OPENRIDE_ORMAP_RENDER_LAYER_MASKS;
+         layer <= OPENRIDE_ORMAP_RENDER_LAYER_LABELS;
+         ++layer) {
+        for (size_t i = 0U; i < world->region_count; ++i) {
+            OpenRideMapWorldRegion *region = &world->regions[i];
+            if (!region->detail_visible) continue;
+
+            openride_ormap_renderer_draw_layer(region->detail_renderer,
+                                               camera,
+                                               viewport_width,
+                                               viewport_height,
+                                               (OpenRideORMapRenderLayer)layer);
+        }
+    }
+}
 
 size_t openride_map_world_region_count(const OpenRideMapWorld *world)
 {

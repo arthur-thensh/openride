@@ -34,6 +34,11 @@ void openride_map_world_draw(OpenRideMapWorld *world,
                              const char *skip_region_id,
                              int viewport_width,
                              int viewport_height);
+void openride_map_world_draw_detail(OpenRideMapWorld *world,
+                                    const OpenRideMapCamera *camera,
+                                    OpenRideMapStyle style,
+                                    int viewport_width,
+                                    int viewport_height);
 
 size_t openride_map_world_region_count(const OpenRideMapWorld *world);
 

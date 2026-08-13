@@ -1013,19 +1013,60 @@ void openride_ormap_renderer_set_style(OpenRideORMapRenderer *renderer,
     if (renderer) renderer->style = style;
 }
 
+void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer)
+{
+    if (renderer) ++renderer->frame_counter;
+}
+
+void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
+                                        const OpenRideMapCamera *camera,
+                                        int viewport_width,
+                                        int viewport_height,
+                                        OpenRideORMapRenderLayer layer)
+{
+    if (!renderer || !camera || viewport_width <= 0 || viewport_height <= 0) return;
+
+    switch (layer) {
+        case OPENRIDE_ORMAP_RENDER_LAYER_MASKS:
+            draw_masks(renderer, camera, viewport_width, viewport_height);
+            break;
+        case OPENRIDE_ORMAP_RENDER_LAYER_AREAS:
+            draw_areas(renderer, camera, viewport_width, viewport_height);
+            break;
+        case OPENRIDE_ORMAP_RENDER_LAYER_WATERWAYS:
+            draw_waterways(renderer, camera, viewport_width, viewport_height);
+            break;
+        case OPENRIDE_ORMAP_RENDER_LAYER_ROADS:
+            draw_roads(renderer, camera, viewport_width, viewport_height);
+            break;
+        case OPENRIDE_ORMAP_RENDER_LAYER_LABELS:
+            draw_labels(renderer, camera, viewport_width, viewport_height);
+            break;
+        default:
+            break;
+    }
+}
+
 void openride_ormap_renderer_draw(OpenRideORMapRenderer *renderer,
                                   const OpenRideMapCamera *camera,
                                   int viewport_width,
                                   int viewport_height)
 {
     if (!renderer || !camera || viewport_width <= 0 || viewport_height <= 0) return;
-    ++renderer->frame_counter;
+
+    openride_ormap_renderer_begin_frame(renderer);
+
     const OpenRideMapPalette palette = openride_map_palette(renderer->style);
     set_color(renderer->renderer, palette.background);
     SDL_RenderClear(renderer->renderer);
-    draw_masks(renderer, camera, viewport_width, viewport_height);
-    draw_areas(renderer, camera, viewport_width, viewport_height);
-    draw_waterways(renderer, camera, viewport_width, viewport_height);
-    draw_roads(renderer, camera, viewport_width, viewport_height);
-    draw_labels(renderer, camera, viewport_width, viewport_height);
+
+    for (int layer = OPENRIDE_ORMAP_RENDER_LAYER_MASKS;
+         layer <= OPENRIDE_ORMAP_RENDER_LAYER_LABELS;
+         ++layer) {
+        openride_ormap_renderer_draw_layer(renderer,
+                                           camera,
+                                           viewport_width,
+                                           viewport_height,
+                                           (OpenRideORMapRenderLayer)layer);
+    }
 }

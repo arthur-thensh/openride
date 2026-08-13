@@ -5843,7 +5843,9 @@ int main(int argc, char **argv)
             break;
         }
 
-        const bool world_overview_only = map_world
+        const bool world_available = map_world
+            && openride_map_world_region_count(map_world) > 0U;
+        const bool world_overview_only = world_available
             && camera.zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM;
         if (world_overview_only) {
             const OpenRideMapPalette palette = openride_map_palette(map_style);
@@ -5859,17 +5861,27 @@ int main(int argc, char **argv)
                                     NULL,
                                     width,
                                     height);
-        } else {
-            if (ormap_map) {
+        } else if (ormap_map) {
+            if (world_available) {
+                openride_map_world_draw_detail(map_world,
+                                               &camera,
+                                               map_style,
+                                               width,
+                                               height);
+            } else {
                 openride_ormap_renderer_draw(&ormap_renderer, &camera, width, height);
-            } else if (vector_map) {
+            }
+        } else {
+            if (vector_map) {
                 openride_vector_map_renderer_draw(&vector_renderer, &camera, width, height);
             } else {
                 SDL_SetRenderDrawColor(renderer, 28, 32, 38, SDL_ALPHA_OPAQUE);
                 SDL_RenderClear(renderer);
                 if (map) openride_map_renderer_draw(&raster_renderer, &camera, width, height);
             }
-            if (map_world && camera.zoom <= OPENRIDE_MAP_WORLD_MAX_OVERVIEW_ZOOM) {
+
+            if (world_available
+                && camera.zoom <= OPENRIDE_MAP_WORLD_MAX_OVERVIEW_ZOOM) {
                 openride_map_world_draw(map_world,
                                         &camera,
                                         map_style,

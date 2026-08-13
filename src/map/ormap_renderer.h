@@ -15,6 +15,14 @@
 #define OPENRIDE_ORMAP_WATER_CACHE_CAPACITY 512
 #define OPENRIDE_ORMAP_AREA_CACHE_CAPACITY 512
 
+typedef enum OpenRideORMapRenderLayer {
+    OPENRIDE_ORMAP_RENDER_LAYER_MASKS = 0,
+    OPENRIDE_ORMAP_RENDER_LAYER_AREAS,
+    OPENRIDE_ORMAP_RENDER_LAYER_WATERWAYS,
+    OPENRIDE_ORMAP_RENDER_LAYER_ROADS,
+    OPENRIDE_ORMAP_RENDER_LAYER_LABELS
+} OpenRideORMapRenderLayer;
+
 typedef struct OpenRideORMapRoadCacheEntry {
     bool occupied;
     int zoom;
@@ -72,6 +80,12 @@ bool openride_ormap_renderer_init(OpenRideORMapRenderer *renderer,
 void openride_ormap_renderer_destroy(OpenRideORMapRenderer *renderer);
 void openride_ormap_renderer_set_style(OpenRideORMapRenderer *renderer,
                                        OpenRideMapStyle style);
+void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer);
+void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
+                                        const OpenRideMapCamera *camera,
+                                        int viewport_width,
+                                        int viewport_height,
+                                        OpenRideORMapRenderLayer layer);
 void openride_ormap_renderer_draw(OpenRideORMapRenderer *renderer,
                                   const OpenRideMapCamera *camera,
                                   int viewport_width,
