@@ -1,6 +1,8 @@
 #ifndef OPENRIDE_ROUTING_WORLD_H
 #define OPENRIDE_ROUTING_WORLD_H
 
+#include "openride/platform_paths.h"
+#include "openride/region_manager.h"
 #include "openride/routing_engine.h"
 #include "openride/routing_graph.h"
 
@@ -11,6 +13,9 @@
 #define OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES 8U
 
 typedef struct OpenRideRoutingWorldResult {
+    bool multi_region;
+    char start_region_id[64];
+    char destination_region_id[64];
     uint32_t shared_gateway_count;
     uint32_t attempted_gateways;
     double gateway_lat;
@@ -29,6 +34,29 @@ typedef struct OpenRideRoutingWorldResult {
 bool openride_routing_world_calculate_graph_pair(
     const OpenRideRoutingGraph *start_graph,
     const OpenRideRoutingGraph *destination_graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size);
+
+
+/*
+ * Resolve endpoints from installed .poly coverage, reuse the active graph when
+ * possible, and load only the additional .orgraph needed by the request.
+ *
+ * v0.23 supports a single installed region or a direct hand-off between two
+ * adjacent installed regions.
+ */
+bool openride_routing_world_calculate_installed(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
     double start_lat,
     double start_lon,
     double destination_lat,

@@ -7,7 +7,6 @@
 
 #define OPENRIDE_PI 3.14159265358979323846
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
-#define OPENRIDE_GATEWAY_EXACT_DISTANCE_M 0.25
 
 typedef struct OpenRideGatewayCandidate {
     OpenRideRoutingNodeId start_node;
@@ -111,6 +110,98 @@ static void insert_candidate(
     if (*count < OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES) ++(*count);
 }
 
+typedef struct OpenRideGatewayHashEntry {
+    int32_t lat_e7;
+    int32_t lon_e7;
+    OpenRideRoutingNodeId node_id;
+    bool occupied;
+} OpenRideGatewayHashEntry;
+
+static uint64_t gateway_coordinate_key(int32_t lat_e7, int32_t lon_e7)
+{
+    return ((uint64_t)(uint32_t)lat_e7 << 32U) | (uint64_t)(uint32_t)lon_e7;
+}
+
+static uint64_t gateway_hash_mix(uint64_t value)
+{
+    value ^= value >> 33U;
+    value *= UINT64_C(0xff51afd7ed558ccd);
+    value ^= value >> 33U;
+    value *= UINT64_C(0xc4ceb9fe1a85ec53);
+    value ^= value >> 33U;
+    return value;
+}
+
+static size_t gateway_hash_capacity(uint32_t node_count)
+{
+    size_t wanted = (size_t)node_count;
+    if (wanted > SIZE_MAX / 2U) return 0U;
+    wanted *= 2U;
+    if (wanted < 16U) wanted = 16U;
+
+    size_t capacity = 16U;
+    while (capacity < wanted) {
+        if (capacity > SIZE_MAX / 2U) return 0U;
+        capacity *= 2U;
+    }
+    return capacity;
+}
+
+static bool gateway_hash_insert(OpenRideGatewayHashEntry *table,
+                                size_t capacity,
+                                const OpenRideRoutingNode *node,
+                                OpenRideRoutingNodeId node_id)
+{
+    if (!table || capacity == 0U || !node) return false;
+
+    const size_t mask = capacity - 1U;
+    const uint64_t key = gateway_coordinate_key(node->lat_e7, node->lon_e7);
+    size_t slot = (size_t)(gateway_hash_mix(key) & (uint64_t)mask);
+
+    for (size_t probe = 0U; probe < capacity; ++probe) {
+        OpenRideGatewayHashEntry *entry = &table[slot];
+        if (!entry->occupied) {
+            entry->lat_e7 = node->lat_e7;
+            entry->lon_e7 = node->lon_e7;
+            entry->node_id = node_id;
+            entry->occupied = true;
+            return true;
+        }
+
+        if (entry->lat_e7 == node->lat_e7 && entry->lon_e7 == node->lon_e7) {
+            return true;
+        }
+
+        slot = (slot + 1U) & mask;
+    }
+
+    return false;
+}
+
+static OpenRideRoutingNodeId gateway_hash_find(
+    const OpenRideGatewayHashEntry *table,
+    size_t capacity,
+    int32_t lat_e7,
+    int32_t lon_e7)
+{
+    if (!table || capacity == 0U) return OPENRIDE_ROUTING_NODE_NONE;
+
+    const size_t mask = capacity - 1U;
+    const uint64_t key = gateway_coordinate_key(lat_e7, lon_e7);
+    size_t slot = (size_t)(gateway_hash_mix(key) & (uint64_t)mask);
+
+    for (size_t probe = 0U; probe < capacity; ++probe) {
+        const OpenRideGatewayHashEntry *entry = &table[slot];
+        if (!entry->occupied) return OPENRIDE_ROUTING_NODE_NONE;
+        if (entry->lat_e7 == lat_e7 && entry->lon_e7 == lon_e7) {
+            return entry->node_id;
+        }
+        slot = (slot + 1U) & mask;
+    }
+
+    return OPENRIDE_ROUTING_NODE_NONE;
+}
+
 static uint32_t find_gateways(
     const OpenRideRoutingGraph *start_graph,
     const OpenRideRoutingGraph *destination_graph,
@@ -123,30 +214,38 @@ static uint32_t find_gateways(
     const bool scan_start = start_graph->node_count <= destination_graph->node_count;
     const OpenRideRoutingGraph *scan_graph = scan_start ? start_graph : destination_graph;
     const OpenRideRoutingGraph *lookup_graph = scan_start ? destination_graph : start_graph;
-    uint32_t count = 0U;
 
+    const size_t capacity = gateway_hash_capacity(lookup_graph->node_count);
+    if (capacity == 0U
+        || capacity > SIZE_MAX / sizeof(OpenRideGatewayHashEntry)) {
+        return 0U;
+    }
+
+    OpenRideGatewayHashEntry *table =
+        calloc(capacity, sizeof(OpenRideGatewayHashEntry));
+    if (!table) return 0U;
+
+    for (uint32_t node_id = 0U; node_id < lookup_graph->node_count; ++node_id) {
+        const OpenRideRoutingNode *node = &lookup_graph->nodes[node_id];
+        if (node->edge_count == 0U) continue;
+        if (!gateway_hash_insert(table, capacity, node, node_id)) {
+            free(table);
+            return 0U;
+        }
+    }
+
+    uint32_t count = 0U;
     for (uint32_t scan_id = 0U; scan_id < scan_graph->node_count; ++scan_id) {
         const OpenRideRoutingNode *node = &scan_graph->nodes[scan_id];
         if (node->edge_count == 0U || !inside_index_grid(lookup_graph, node)) continue;
 
+        const OpenRideRoutingNodeId match_id =
+            gateway_hash_find(table, capacity, node->lat_e7, node->lon_e7);
+        if (match_id == OPENRIDE_ROUTING_NODE_NONE) continue;
+
         double lat = 0.0;
         double lon = 0.0;
         openride_routing_node_geo(node, &lat, &lon);
-
-        double match_distance = INFINITY;
-        const OpenRideRoutingNodeId match_id =
-            openride_routing_graph_nearest_node(lookup_graph, lat, lon, &match_distance);
-        if (match_id == OPENRIDE_ROUTING_NODE_NONE
-            || match_distance > OPENRIDE_GATEWAY_EXACT_DISTANCE_M) {
-            continue;
-        }
-
-        const OpenRideRoutingNode *match = &lookup_graph->nodes[match_id];
-        if (match->edge_count == 0U
-            || match->lat_e7 != node->lat_e7
-            || match->lon_e7 != node->lon_e7) {
-            continue;
-        }
 
         OpenRideGatewayCandidate candidate;
         memset(&candidate, 0, sizeof(candidate));
@@ -162,6 +261,8 @@ static uint32_t find_gateways(
                                                        candidate.destination_node));
         insert_candidate(candidates, &count, &candidate);
     }
+
+    free(table);
     return count;
 }
 
@@ -364,4 +465,382 @@ bool openride_routing_world_calculate_graph_pair(
 
     set_error(error, error_size, "shared gateways exist but none is routable");
     return false;
+}
+
+typedef struct OpenRideRoutingWorldLoadedGraph {
+    const OpenRideRoutingGraph *graph;
+    OpenRideRoutingGraph owned;
+    bool owns_graph;
+} OpenRideRoutingWorldLoadedGraph;
+
+static void loaded_graph_destroy(OpenRideRoutingWorldLoadedGraph *loaded)
+{
+    if (!loaded) return;
+    if (loaded->owns_graph) openride_routing_graph_destroy(&loaded->owned);
+    memset(loaded, 0, sizeof(*loaded));
+}
+
+static bool region_point_in_poly(const char *path,
+                                 double lat,
+                                 double lon,
+                                 bool *inside,
+                                 char *error,
+                                 size_t error_size)
+{
+    if (inside) *inside = false;
+    if (!path || !inside) {
+        set_error(error, error_size, "invalid region polygon lookup");
+        return false;
+    }
+
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        set_error(error, error_size, "unable to open region polygon");
+        return false;
+    }
+
+    char line[512];
+    bool first_line = true;
+    bool ring_open = false;
+    bool have_point = false;
+    double first_lon = 0.0;
+    double first_lat = 0.0;
+    double previous_lon = 0.0;
+    double previous_lat = 0.0;
+    bool result = false;
+
+    while (fgets(line, sizeof(line), file)) {
+        char *cursor = line;
+        while (*cursor == ' ' || *cursor == '\t'
+               || *cursor == '\r' || *cursor == '\n') {
+            ++cursor;
+        }
+
+        if (first_line) {
+            first_line = false;
+            continue;
+        }
+        if (*cursor == '\0') continue;
+
+        if (strncmp(cursor, "END", 3U) == 0) {
+            if (ring_open && have_point) {
+                if ((previous_lat > lat) != (first_lat > lat)) {
+                    const double crossing_lon =
+                        previous_lon
+                        + (first_lon - previous_lon)
+                        * (lat - previous_lat)
+                        / (first_lat - previous_lat);
+                    if (lon < crossing_lon) result = !result;
+                }
+                ring_open = false;
+                have_point = false;
+            } else {
+                break;
+            }
+            continue;
+        }
+
+        double point_lon = 0.0;
+        double point_lat = 0.0;
+        if (sscanf(cursor, "%lf %lf", &point_lon, &point_lat) == 2) {
+            if (!ring_open) {
+                ring_open = true;
+                have_point = true;
+                first_lon = point_lon;
+                first_lat = point_lat;
+                previous_lon = point_lon;
+                previous_lat = point_lat;
+            } else {
+                if ((previous_lat > lat) != (point_lat > lat)) {
+                    const double crossing_lon =
+                        previous_lon
+                        + (point_lon - previous_lon)
+                        * (lat - previous_lat)
+                        / (point_lat - previous_lat);
+                    if (lon < crossing_lon) result = !result;
+                }
+                previous_lon = point_lon;
+                previous_lat = point_lat;
+            }
+            continue;
+        }
+
+        ring_open = false;
+        have_point = false;
+    }
+
+    fclose(file);
+    *inside = result;
+    set_error(error, error_size, "");
+    return true;
+}
+
+static bool region_contains_point(const OpenRidePlatformPaths *paths,
+                                  const OpenRideRegionDefinition *region,
+                                  double lat,
+                                  double lon,
+                                  bool *inside)
+{
+    if (inside) *inside = false;
+    if (!paths || !region || !inside) return false;
+
+    OpenRideRegionStatus status;
+    char local_error[128] = {0};
+    if (!openride_region_get_status(paths,
+                                    region,
+                                    &status,
+                                    local_error,
+                                    sizeof(local_error))
+        || !status.routing_installed
+        || !status.poly_present) {
+        return false;
+    }
+
+    return region_point_in_poly(status.poly_path,
+                                lat,
+                                lon,
+                                inside,
+                                local_error,
+                                sizeof(local_error));
+}
+
+static const OpenRideRegionDefinition *region_for_point(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *preferred_region,
+    double lat,
+    double lon)
+{
+    if (preferred_region) {
+        bool inside = false;
+        if (region_contains_point(paths, preferred_region, lat, lon, &inside)
+            && inside) {
+            return preferred_region;
+        }
+    }
+
+    for (size_t i = 0U; i < openride_region_count(); ++i) {
+        const OpenRideRegionDefinition *region = openride_region_at(i);
+        if (!region || region == preferred_region) continue;
+
+        bool inside = false;
+        if (region_contains_point(paths, region, lat, lon, &inside)
+            && inside) {
+            return region;
+        }
+    }
+    return NULL;
+}
+
+static bool load_region_graph(const OpenRidePlatformPaths *paths,
+                              const OpenRideRegionDefinition *region,
+                              const OpenRideRegionDefinition *active_region,
+                              const OpenRideRoutingGraph *active_graph,
+                              OpenRideRoutingWorldLoadedGraph *loaded,
+                              char *error,
+                              size_t error_size)
+{
+    if (!paths || !region || !loaded) {
+        set_error(error, error_size, "invalid installed region graph request");
+        return false;
+    }
+
+    memset(loaded, 0, sizeof(*loaded));
+    if (active_region && active_graph
+        && strcmp(region->id, active_region->id) == 0) {
+        loaded->graph = active_graph;
+        return true;
+    }
+
+    OpenRideRegionStatus status;
+    if (!openride_region_get_status(paths,
+                                    region,
+                                    &status,
+                                    error,
+                                    error_size)
+        || !status.routing_installed) {
+        set_error(error, error_size, "routing graph is not installed for region");
+        return false;
+    }
+
+    if (!openride_routing_graph_load(&loaded->owned,
+                                     status.routing_path,
+                                     error,
+                                     error_size)) {
+        return false;
+    }
+
+    loaded->graph = &loaded->owned;
+    loaded->owns_graph = true;
+    return true;
+}
+
+static void detach_route_nodes(OpenRideRoute *route)
+{
+    if (!route) return;
+    free(route->nodes);
+    route->nodes = NULL;
+    route->node_count = 0U;
+}
+
+static bool calculate_single_installed_region(
+    const OpenRideRoutingGraph *graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    char *error,
+    size_t error_size)
+{
+    OpenRideRoutingSnap start_snap = {0};
+    OpenRideRoutingSnap destination_snap = {0};
+    start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+
+    if (!openride_routing_graph_snap_to_segment(graph,
+                                                start_lat,
+                                                start_lon,
+                                                max_snap_distance_m,
+                                                &start_snap)
+        || !openride_routing_graph_snap_to_segment(graph,
+                                                   destination_lat,
+                                                   destination_lon,
+                                                   max_snap_distance_m,
+                                                   &destination_snap)) {
+        set_error(error, error_size, "installed-region endpoint is too far from a road");
+        return false;
+    }
+
+    OpenRideSnappedRoutingRequest request = openride_snapped_routing_request_default();
+    request.start = start_snap;
+    request.destination = destination_snap;
+    request.profile = profile;
+
+    if (!openride_routing_engine_calculate_snapped(graph,
+                                                   &request,
+                                                   route,
+                                                   error,
+                                                   error_size)) {
+        return false;
+    }
+
+    detach_route_nodes(route);
+    return true;
+}
+
+bool openride_routing_world_calculate_installed(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    if (result) memset(result, 0, sizeof(*result));
+    if (!paths || !route
+        || !isfinite(start_lat) || !isfinite(start_lon)
+        || !isfinite(destination_lat) || !isfinite(destination_lon)) {
+        set_error(error, error_size, "invalid installed routing-world request");
+        return false;
+    }
+
+    const OpenRideRegionDefinition *start_region =
+        region_for_point(paths, active_region, start_lat, start_lon);
+    const OpenRideRegionDefinition *destination_region =
+        region_for_point(paths, active_region, destination_lat, destination_lon);
+
+    if (!start_region) {
+        set_error(error, error_size, "start is outside installed routing coverage");
+        return false;
+    }
+    if (!destination_region) {
+        set_error(error, error_size, "destination is outside installed routing coverage");
+        return false;
+    }
+
+    OpenRideRoutingWorldResult local_result;
+    memset(&local_result, 0, sizeof(local_result));
+    snprintf(local_result.start_region_id,
+             sizeof(local_result.start_region_id),
+             "%s",
+             start_region->id);
+    snprintf(local_result.destination_region_id,
+             sizeof(local_result.destination_region_id),
+             "%s",
+             destination_region->id);
+    local_result.multi_region =
+        strcmp(start_region->id, destination_region->id) != 0;
+
+    OpenRideRoutingWorldLoadedGraph start_loaded;
+    OpenRideRoutingWorldLoadedGraph destination_loaded;
+    memset(&start_loaded, 0, sizeof(start_loaded));
+    memset(&destination_loaded, 0, sizeof(destination_loaded));
+
+    if (!load_region_graph(paths,
+                           start_region,
+                           active_region,
+                           active_graph,
+                           &start_loaded,
+                           error,
+                           error_size)) {
+        return false;
+    }
+
+    bool ok = false;
+    if (!local_result.multi_region) {
+        ok = calculate_single_installed_region(start_loaded.graph,
+                                               start_lat,
+                                               start_lon,
+                                               destination_lat,
+                                               destination_lon,
+                                               max_snap_distance_m,
+                                               profile,
+                                               route,
+                                               error,
+                                               error_size);
+    } else {
+        if (!load_region_graph(paths,
+                               destination_region,
+                               active_region,
+                               active_graph,
+                               &destination_loaded,
+                               error,
+                               error_size)) {
+            loaded_graph_destroy(&start_loaded);
+            return false;
+        }
+
+        OpenRideRoutingWorldResult gateway_result;
+        memset(&gateway_result, 0, sizeof(gateway_result));
+        ok = openride_routing_world_calculate_graph_pair(start_loaded.graph,
+                                                         destination_loaded.graph,
+                                                         start_lat,
+                                                         start_lon,
+                                                         destination_lat,
+                                                         destination_lon,
+                                                         max_snap_distance_m,
+                                                         profile,
+                                                         route,
+                                                         &gateway_result,
+                                                         error,
+                                                         error_size);
+        local_result.shared_gateway_count = gateway_result.shared_gateway_count;
+        local_result.attempted_gateways = gateway_result.attempted_gateways;
+        local_result.gateway_lat = gateway_result.gateway_lat;
+        local_result.gateway_lon = gateway_result.gateway_lon;
+    }
+
+    loaded_graph_destroy(&destination_loaded);
+    loaded_graph_destroy(&start_loaded);
+    if (result) *result = local_result;
+    return ok;
 }
