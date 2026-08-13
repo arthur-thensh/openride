@@ -13,6 +13,8 @@ typedef struct OpenRideRegionDefinition {
     const char *legacy_map_filename;
     const char *routing_filename;
     const char *search_filename;
+    const char *poly_filename;
+    const char *poly_url;
     const char *pbf_filename;
     const char *pbf_url;
 } OpenRideRegionDefinition;
@@ -23,10 +25,12 @@ typedef struct OpenRideRegionStatus {
     bool legacy_map_installed;
     bool routing_installed;
     bool search_installed;
+    bool poly_present;
     bool source_pbf_present;
     double map_size_mb;
     double routing_size_mb;
     double search_size_mb;
+    double poly_size_mb;
     double source_pbf_size_mb;
     double total_size_mb;
     char map_path[512];
@@ -34,6 +38,7 @@ typedef struct OpenRideRegionStatus {
     char legacy_map_path[512];
     char routing_path[512];
     char search_path[512];
+    char poly_path[512];
     char source_pbf_path[512];
 } OpenRideRegionStatus;
 

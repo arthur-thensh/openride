@@ -27,6 +27,7 @@ int main(void)
     assert(picardie != NULL);
     assert(strcmp(picardie->name, "Picardie") == 0);
     assert(strstr(picardie->pbf_url, "picardie-latest.osm.pbf") != NULL);
+    assert(strstr(picardie->poly_url, "picardie.poly") != NULL);
     assert(openride_region_at(openride_region_count()) == NULL);
 
     OpenRideRegionStatus status;
@@ -47,6 +48,7 @@ int main(void)
     }
     assert(strstr(status.routing_path, "nord-pas-de-calais.orgraph") != NULL);
     assert(strstr(status.search_path, "nord-pas-de-calais.orplaces.sqlite") != NULL);
+    assert(strstr(status.poly_path, "nord-pas-de-calais.poly") != NULL);
     assert(openride_region_status_ready(&status)
            == (status.ormap_installed && status.routing_installed && status.search_installed));
 

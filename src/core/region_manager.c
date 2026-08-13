@@ -10,6 +10,8 @@
     .legacy_map_filename = slug "-shortbread.mbtiles", \
     .routing_filename = slug ".orgraph", \
     .search_filename = slug ".orplaces.sqlite", \
+    .poly_filename = slug ".poly", \
+    .poly_url = "https://download.geofabrik.de/europe/france/" slug ".poly", \
     .pbf_filename = slug "-latest.osm.pbf", \
     .pbf_url = "https://download.geofabrik.de/europe/france/" slug "-latest.osm.pbf" \
 }
@@ -121,6 +123,20 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
         return false;
     }
 
+    /* MapWorld's Geofabrik .poly is optional metadata.
+     * It must never block region preparation or custom/synthetic regions. */
+    if (region->poly_filename && region->poly_filename[0] != '\0') {
+        if (!openride_platform_path_join(status->poly_path,
+                                         sizeof(status->poly_path),
+                                         paths->maps_dir,
+                                         region->poly_filename)) {
+            set_error(error, error_size, "region poly path is too long");
+            return false;
+        }
+    } else {
+        status->poly_path[0] = '\0';
+    }
+
     const double ormap_size = openride_platform_file_size_mb(status->ormap_path);
     const double legacy_size = openride_platform_file_size_mb(status->legacy_map_path);
     status->ormap_installed = ormap_size >= 0.0;
@@ -136,13 +152,18 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
 
     status->routing_size_mb = openride_platform_file_size_mb(status->routing_path);
     status->search_size_mb = openride_platform_file_size_mb(status->search_path);
+    status->poly_size_mb = status->poly_path[0] != '\0'
+        ? openride_platform_file_size_mb(status->poly_path)
+        : -1.0;
     status->source_pbf_size_mb = openride_platform_file_size_mb(status->source_pbf_path);
     status->routing_installed = status->routing_size_mb >= 0.0;
     status->search_installed = status->search_size_mb >= 0.0;
+    status->poly_present = status->poly_size_mb >= 0.0;
     status->source_pbf_present = status->source_pbf_size_mb >= 0.0;
     status->total_size_mb = (status->map_installed ? status->map_size_mb : 0.0)
         + (status->routing_installed ? status->routing_size_mb : 0.0)
         + (status->search_installed ? status->search_size_mb : 0.0)
+        + (status->poly_present ? status->poly_size_mb : 0.0)
         + (status->source_pbf_present ? status->source_pbf_size_mb : 0.0);
     set_error(error, error_size, "");
     return true;
@@ -159,6 +180,7 @@ bool openride_region_remove_generated(const OpenRidePlatformPaths *paths,
         status.ormap_path,
         status.routing_path,
         status.search_path,
+        status.poly_path,
         status.source_pbf_path
     };
     for (size_t i = 0U; i < sizeof(files) / sizeof(files[0]); ++i) {

@@ -107,9 +107,21 @@ static void test_area_tile_decode(long pid)
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(map);
     assert(metadata != NULL);
     assert(metadata->format_version == 3);
-    assert(metadata->area_coarse_zoom == OPENRIDE_ORMAP_AREA_COARSE_ZOOM);
-    assert(metadata->area_detail_zoom == OPENRIDE_ORMAP_AREA_DETAIL_ZOOM);
-
+    assert(metadata->area_coarse_zoom == OPENRIDE_ORMAP_AREA_COARSE_ZOOM);    assert(metadata->area_detail_zoom == OPENRIDE_ORMAP_AREA_DETAIL_ZOOM);
+    OpenRideORMapTileCoord *coords = NULL;
+    uint32_t coord_count = 0U;
+    assert(openride_ormap_list_tiles(map,
+                                      OPENRIDE_ORMAP_TILE_LAYER_AREA,
+                                      OPENRIDE_ORMAP_AREA_DETAIL_ZOOM,
+                                      &coords,
+                                      &coord_count,
+                                      error,
+                                      sizeof(error)));
+    assert(coord_count == 1U);
+    assert(coords != NULL);
+    assert(coords[0].x == 123);
+    assert(coords[0].y == 456);
+    openride_ormap_tile_coords_destroy(coords);
     OpenRideORMapAreaTile tile = {0};
     assert(openride_ormap_load_area_tile(map,
                                          OPENRIDE_ORMAP_AREA_DETAIL_ZOOM,

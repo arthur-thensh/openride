@@ -128,6 +128,18 @@ typedef struct OpenRideORMapLabel {
     char name[96];
 } OpenRideORMapLabel;
 
+typedef struct OpenRideORMapTileCoord {
+    int x;
+    int y;
+} OpenRideORMapTileCoord;
+
+typedef enum OpenRideORMapTileLayer {
+    OPENRIDE_ORMAP_TILE_LAYER_ROAD = 0,
+    OPENRIDE_ORMAP_TILE_LAYER_WATER,
+    OPENRIDE_ORMAP_TILE_LAYER_AREA,
+    OPENRIDE_ORMAP_TILE_LAYER_MASK
+} OpenRideORMapTileLayer;
+
 typedef struct OpenRideORMapBuildStats {
     uint64_t routing_segments_seen;
     uint64_t road_records_written;
@@ -157,7 +169,14 @@ OpenRideORMap *openride_ormap_open(const char *path,
                                    size_t error_size);
 void openride_ormap_close(OpenRideORMap *map);
 const OpenRideORMapMetadata *openride_ormap_metadata(const OpenRideORMap *map);
-
+bool openride_ormap_list_tiles(OpenRideORMap *map,
+                               OpenRideORMapTileLayer layer,
+                               int zoom,
+                               OpenRideORMapTileCoord **coords,
+                               uint32_t *count,
+                               char *error,
+                               size_t error_size);
+void openride_ormap_tile_coords_destroy(OpenRideORMapTileCoord *coords);
 bool openride_ormap_load_road_tile(OpenRideORMap *map,
                                    int zoom,
                                    int x,

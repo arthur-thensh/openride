@@ -157,7 +157,7 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
                 connection.setConnectTimeout(20000);
                 connection.setReadTimeout(30000);
                 connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("User-Agent", "OpenRide/0.22 Android");
+                connection.setRequestProperty("User-Agent", "OpenRide/0.23 Android");
                 connection.connect();
                 int code = connection.getResponseCode();
                 if (code < 200 || code >= 300) {
@@ -184,7 +184,7 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
                     return;
                 }
                 if (destination.exists() && !destination.delete()) {
-                    throw new Exception("Impossible de remplacer le PBF existant");
+                    throw new Exception("Impossible de remplacer le fichier existant");
                 }
                 if (!part.renameTo(destination)) {
                     throw new Exception("Impossible de finaliser le telechargement");

@@ -310,6 +310,101 @@ const OpenRideORMapMetadata *openride_ormap_metadata(const OpenRideORMap *map)
     return map ? &map->metadata : NULL;
 }
 
+bool openride_ormap_list_tiles(OpenRideORMap *map,
+                               OpenRideORMapTileLayer layer,
+                               int zoom,
+                               OpenRideORMapTileCoord **coords,
+                               uint32_t *count,
+                               char *error,
+                               size_t error_size)
+{
+    if (coords) *coords = NULL;
+    if (count) *count = 0U;
+    if (!map || !coords || !count) {
+        set_error(error, error_size, "invalid .ormap tile list arguments");
+        return false;
+    }
+    const char *sql = NULL;
+    switch (layer) {
+        case OPENRIDE_ORMAP_TILE_LAYER_ROAD:
+            sql = "SELECT tile_column,tile_row FROM road_tiles "
+                  "WHERE zoom_level=?1 ORDER BY tile_row,tile_column";
+            break;
+        case OPENRIDE_ORMAP_TILE_LAYER_WATER:
+            if (map->metadata.format_version < 2) {
+                set_error(error, error_size, "");
+                return true;
+            }
+            sql = "SELECT tile_column,tile_row FROM water_tiles "
+                  "WHERE zoom_level=?1 ORDER BY tile_row,tile_column";
+            break;
+        case OPENRIDE_ORMAP_TILE_LAYER_AREA:
+            if (map->metadata.format_version < 3) {
+                set_error(error, error_size, "");
+                return true;
+            }
+            sql = "SELECT tile_column,tile_row FROM area_tiles "
+                  "WHERE zoom_level=?1 ORDER BY tile_row,tile_column";
+            break;
+        case OPENRIDE_ORMAP_TILE_LAYER_MASK:
+            sql = "SELECT tile_column,tile_row FROM mask_tiles "
+                  "WHERE zoom_level=?1 ORDER BY tile_row,tile_column";
+            break;
+        default:
+            set_error(error, error_size, "invalid .ormap tile layer");
+            return false;
+    }
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(map->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        set_error(error, error_size, sqlite3_errmsg(map->db));
+        return false;
+    }
+    sqlite3_bind_int(stmt, 1, zoom);
+    uint32_t used = 0U;
+    uint32_t capacity = 0U;
+    OpenRideORMapTileCoord *items = NULL;
+    int rc = SQLITE_ROW;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        if (used == capacity) {
+            uint32_t next = capacity == 0U ? 128U : capacity * 2U;
+            if (next < capacity) {
+                rc = SQLITE_NOMEM;
+                break;
+            }
+            OpenRideORMapTileCoord *grown = realloc(items,
+                                                     (size_t)next * sizeof(*grown));
+            if (!grown) {
+                rc = SQLITE_NOMEM;
+                break;
+            }
+            items = grown;
+            capacity = next;
+        }
+        items[used].x = sqlite3_column_int(stmt, 0);
+        items[used].y = sqlite3_column_int(stmt, 1);
+        ++used;
+    }
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        free(items);
+        set_error(error,
+                  error_size,
+                  rc == SQLITE_NOMEM ? "out of memory listing .ormap tiles"
+                                     : sqlite3_errmsg(map->db));
+        return false;
+    }
+    *coords = items;
+    *count = used;
+    set_error(error, error_size, "");
+    return true;
+}
+
+void openride_ormap_tile_coords_destroy(OpenRideORMapTileCoord *coords)
+{
+    free(coords);
+}
+
+
 static bool load_blob(sqlite3 *db,
                       sqlite3_stmt *stmt,
                       int zoom,
