@@ -41,6 +41,15 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        /*
+         * OpenRide renders its own search UI in SDL. Do not let Android
+         * resize or pan the SDL surface when the soft keyboard appears:
+         * the keyboard should simply overlay the lower part of the screen.
+         */
+        getWindow().setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+
         locationManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
     }
 

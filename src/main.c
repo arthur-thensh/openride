@@ -22,6 +22,7 @@
 #include <SDL3/SDL_system.h>
 #endif
 #include "openride/place_search.h"
+#include "openride/place_world.h"
 #include "openride/app_storage.h"
 #include "openride/platform_paths.h"
 #include "openride/region_manager.h"
@@ -1485,7 +1486,7 @@ static void utf8_backspace(char *text)
     text[length] = '\0';
 }
 
-static bool refresh_place_search(OpenRidePlaceIndex *index,
+static bool refresh_place_search(OpenRidePlaceWorld *world,
                                  const char *query,
                                  OpenRidePlaceSearchResult *results,
                                  uint32_t *result_count,
@@ -1495,7 +1496,7 @@ static bool refresh_place_search(OpenRidePlaceIndex *index,
 {
     char error[192] = {0};
     uint32_t count = 0U;
-    const bool ok = openride_place_index_search(index,
+    const bool ok = openride_place_world_search(world,
                                                  query,
                                                  results,
                                                  OPENRIDE_SEARCH_MAX_RESULTS,
@@ -1516,6 +1517,98 @@ static bool refresh_place_search(OpenRidePlaceIndex *index,
     return true;
 }
 
+#ifdef __ANDROID__
+typedef struct OpenRideMobilePlaceSearchLayout {
+    SDL_FRect panel;
+    SDL_FRect query;
+    SDL_FRect rows[OPENRIDE_SEARCH_MAX_RESULTS];
+    uint32_t row_count;
+    float ui_scale;
+    float title_scale;
+    float text_scale;
+    float secondary_scale;
+} OpenRideMobilePlaceSearchLayout;
+
+static OpenRideMobilePlaceSearchLayout mobile_place_search_layout(
+    SDL_Renderer *renderer,
+    int viewport_width,
+    int viewport_height,
+    uint32_t result_count)
+{
+    OpenRideMobilePlaceSearchLayout layout;
+    memset(&layout, 0, sizeof(layout));
+
+    const SDL_Rect safe = openride_render_safe_area(renderer,
+                                                     viewport_width,
+                                                     viewport_height);
+    const float ui_scale = openride_ui_scale(renderer);
+    const float margin = 8.0f * ui_scale;
+    const float gap = 6.0f * ui_scale;
+    const float title_h = 38.0f * ui_scale;
+    const float query_h = 50.0f * ui_scale;
+    const float footer_h = 12.0f * ui_scale;
+    const float desired_row_h = 54.0f * ui_scale;
+    const float min_row_h = 31.0f * ui_scale;
+
+    layout.ui_scale = ui_scale;
+    layout.title_scale = ui_scale > 2.15f ? 2.15f : ui_scale;
+    layout.text_scale = ui_scale > 1.85f ? 1.85f : ui_scale;
+    layout.secondary_scale = ui_scale > 1.45f ? 1.45f : ui_scale;
+
+    layout.panel.x = (float)safe.x + margin;
+    layout.panel.y = (float)safe.y + margin;
+    layout.panel.w = (float)safe.w - margin * 2.0f;
+
+    /*
+     * Android IMEs often cover the lower part of portrait rendering without
+     * changing SDL's output size. Keep results in the upper 57% so they remain
+     * visible and touchable while the keyboard is open.
+     */
+    const float max_panel_h = (float)safe.h * 0.57f;
+    const uint32_t visible_rows = result_count > 0U ? result_count : 1U;
+    const float desired_h =
+        title_h + gap + query_h + gap
+        + desired_row_h * (float)visible_rows
+        + footer_h + margin;
+
+    layout.panel.h = desired_h < max_panel_h ? desired_h : max_panel_h;
+    if (layout.panel.h < 190.0f * ui_scale) {
+        layout.panel.h = 190.0f * ui_scale;
+    }
+    if (layout.panel.h > (float)safe.h - margin * 2.0f) {
+        layout.panel.h = (float)safe.h - margin * 2.0f;
+    }
+
+    layout.query.x = layout.panel.x + margin;
+    layout.query.y = layout.panel.y + title_h + gap;
+    layout.query.w = layout.panel.w - margin * 2.0f;
+    layout.query.h = query_h;
+
+    if (result_count > OPENRIDE_SEARCH_MAX_RESULTS) {
+        result_count = OPENRIDE_SEARCH_MAX_RESULTS;
+    }
+    layout.row_count = result_count;
+
+    const float rows_top = layout.query.y + layout.query.h + gap;
+    const float rows_bottom =
+        layout.panel.y + layout.panel.h - footer_h - margin;
+    float row_h = result_count > 0U
+        ? (rows_bottom - rows_top) / (float)result_count
+        : desired_row_h;
+    if (row_h > desired_row_h) row_h = desired_row_h;
+    if (row_h < min_row_h) row_h = min_row_h;
+
+    for (uint32_t i = 0U; i < result_count; ++i) {
+        layout.rows[i].x = layout.panel.x + margin;
+        layout.rows[i].y = rows_top + row_h * (float)i;
+        layout.rows[i].w = layout.panel.w - margin * 2.0f;
+        layout.rows[i].h = row_h - 2.0f * ui_scale;
+    }
+
+    return layout;
+}
+#endif
+
 static void draw_place_search_overlay(SDL_Renderer *renderer,
                                       bool active,
                                       bool available,
@@ -1527,6 +1620,110 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
 {
     if (!active) return;
 
+#ifdef __ANDROID__
+    int viewport_height = 0;
+    int queried_width = viewport_width;
+    SDL_GetCurrentRenderOutputSize(renderer, &queried_width, &viewport_height);
+    if (queried_width > 0) viewport_width = queried_width;
+    if (viewport_height <= 0) return;
+
+    const OpenRideMobilePlaceSearchLayout layout =
+        mobile_place_search_layout(renderer,
+                                   viewport_width,
+                                   viewport_height,
+                                   result_count);
+
+    SDL_FRect screen = {0.0f, 0.0f, (float)viewport_width, (float)viewport_height};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 72);
+    SDL_RenderFillRect(renderer, &screen);
+
+    SDL_SetRenderDrawColor(renderer, 17, 21, 25, 250);
+    SDL_RenderFillRect(renderer, &layout.panel);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 55);
+    SDL_RenderRect(renderer, &layout.panel);
+
+    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
+    draw_scaled_text(renderer,
+                     layout.panel.x + 12.0f * layout.ui_scale,
+                     layout.panel.y + 10.0f * layout.ui_scale,
+                     layout.title_scale,
+                     "RECHERCHER UN LIEU");
+
+    SDL_SetRenderDrawColor(renderer, 39, 46, 53, 255);
+    SDL_RenderFillRect(renderer, &layout.query);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
+    SDL_RenderRect(renderer, &layout.query);
+
+    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
+    char query_text[96];
+    snprintf(query_text,
+             sizeof(query_text),
+             "%s%s",
+             query && query[0] ? query : "Tapez un lieu",
+             query && query[0] ? "_" : "");
+    draw_scaled_text(renderer,
+                     layout.query.x + 12.0f * layout.ui_scale,
+                     layout.query.y + 14.0f * layout.ui_scale,
+                     layout.text_scale,
+                     query_text);
+
+    if (!available) {
+        SDL_SetRenderDrawColor(renderer, 226, 158, 74, 255);
+        draw_scaled_text(renderer,
+                         layout.query.x,
+                         layout.query.y + layout.query.h + 16.0f * layout.ui_scale,
+                         layout.secondary_scale,
+                         "Aucun index de recherche regional installe");
+        return;
+    }
+
+    if (result_count == 0U) {
+        SDL_SetRenderDrawColor(renderer, 163, 173, 181, 255);
+        draw_scaled_text(
+            renderer,
+            layout.query.x,
+            layout.query.y + layout.query.h + 16.0f * layout.ui_scale,
+            layout.secondary_scale,
+            (query && strlen(query) >= 2U)
+                ? "Aucun resultat"
+                : "Saisissez au moins 2 caracteres");
+        return;
+    }
+
+    for (uint32_t i = 0U; i < layout.row_count; ++i) {
+        const SDL_FRect *row = &layout.rows[i];
+
+        SDL_SetRenderDrawColor(renderer,
+                               i == selected_result ? 45 : 29,
+                               i == selected_result ? 83 : 35,
+                               i == selected_result ? 112 : 41,
+                               248);
+        SDL_RenderFillRect(renderer, row);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 38);
+        SDL_RenderRect(renderer, row);
+
+        char name[64];
+        snprintf(name, sizeof(name), "%.44s", results[i].name);
+        SDL_SetRenderDrawColor(renderer, 242, 245, 247, 255);
+        draw_scaled_text(renderer,
+                         row->x + 12.0f * layout.ui_scale,
+                         row->y + 7.0f * layout.ui_scale,
+                         layout.text_scale,
+                         name);
+
+        char kind[64];
+        snprintf(kind,
+                 sizeof(kind),
+                 "%s",
+                 openride_place_kind_name(results[i].kind));
+        SDL_SetRenderDrawColor(renderer, 166, 177, 186, 255);
+        draw_scaled_text(renderer,
+                         row->x + 12.0f * layout.ui_scale,
+                         row->y + row->h - 14.0f * layout.ui_scale,
+                         layout.secondary_scale,
+                         kind);
+    }
+#else
     const float w = 620.0f;
     const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
     const float actual_w = viewport_width > (int)w ? w : (float)viewport_width - 16.0f;
@@ -1561,7 +1758,7 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
         SDL_RenderDebugText(renderer,
                             x + 14.0f,
                             y + 78.0f,
-                            "Index absent: ./scripts/prepare_place_index.sh");
+                            "Aucun index de recherche regional installe");
         return;
     }
 
@@ -1592,15 +1789,38 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
                                   results[i].name,
                                   openride_place_kind_name(results[i].kind));
     }
+#endif
 }
 
 
-static int place_search_result_at(double x,
+static int place_search_result_at(SDL_Renderer *renderer,
+                                  double x,
                                   double y,
                                   int viewport_width,
+                                  int viewport_height,
                                   uint32_t result_count)
 {
     if (result_count == 0U) return -1;
+
+#ifdef __ANDROID__
+    const OpenRideMobilePlaceSearchLayout layout =
+        mobile_place_search_layout(renderer,
+                                   viewport_width,
+                                   viewport_height,
+                                   result_count);
+    for (uint32_t i = 0U; i < layout.row_count; ++i) {
+        const SDL_FRect *row = &layout.rows[i];
+        if (x >= (double)row->x
+            && x < (double)(row->x + row->w)
+            && y >= (double)row->y
+            && y < (double)(row->y + row->h)) {
+            return (int)i;
+        }
+    }
+    return -1;
+#else
+    (void)renderer;
+    (void)viewport_height;
     const double panel_width = viewport_width > 620 ? 620.0 : (double)viewport_width - 16.0;
     const double panel_x = viewport_width > 620 ? ((double)viewport_width - panel_width) * 0.5 : 8.0;
     const double row_top = 87.0;
@@ -1608,11 +1828,19 @@ static int place_search_result_at(double x,
     if (x < panel_x + 10.0 || x > panel_x + panel_width - 10.0 || y < row_top) return -1;
     const int index = (int)((y - row_top) / row_height);
     return index >= 0 && (uint32_t)index < result_count ? index : -1;
+#endif
 }
+
+typedef enum OpenRidePlaceSearchPurpose {
+    OPENRIDE_PLACE_SEARCH_BROWSE = 0,
+    OPENRIDE_PLACE_SEARCH_ROUTE_START,
+    OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION
+} OpenRidePlaceSearchPurpose;
 
 typedef enum OpenRideAppPanel {
     OPENRIDE_APP_PANEL_NONE = 0,
     OPENRIDE_APP_PANEL_MAIN,
+    OPENRIDE_APP_PANEL_ROUTE,
     OPENRIDE_APP_PANEL_FAVORITES,
     OPENRIDE_APP_PANEL_HISTORY,
     OPENRIDE_APP_PANEL_REGIONS,
@@ -1723,7 +1951,7 @@ static void refresh_stored_places(OpenRideAppStorage *storage,
 }
 
 static void open_place_search(SDL_Window *window,
-                              OpenRidePlaceIndex *place_index,
+                              OpenRidePlaceWorld *place_world,
                               bool *active,
                               char *query,
                               uint32_t *result_count,
@@ -1732,9 +1960,9 @@ static void open_place_search(SDL_Window *window,
                               size_t status_size)
 {
     if (!active || !query || !result_count || !selected) return;
-    if (!place_index) {
+    if (!place_world || openride_place_world_region_count(place_world) == 0U) {
         snprintf(status, status_size,
-                 "index recherche absent: ./scripts/prepare_place_index.sh");
+                 "aucun index de recherche regional installe");
         return;
     }
     *active = true;
@@ -1751,6 +1979,10 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_CLOSE,
     OPENRIDE_MOBILE_PANEL_BACK,
     OPENRIDE_MOBILE_PANEL_SEARCH,
+    OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START,
+    OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START,
+    OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
+    OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE,
     OPENRIDE_MOBILE_PANEL_FAVORITES,
     OPENRIDE_MOBILE_PANEL_HISTORY,
     OPENRIDE_MOBILE_PANEL_REGIONS,
@@ -1945,6 +2177,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
@@ -1991,6 +2224,14 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
                 OPENRIDE_MOBILE_PANEL_SETTINGS
             };
             hit.action = actions[i];
+        } else if (panel == OPENRIDE_APP_PANEL_ROUTE) {
+            static const OpenRideMobilePanelAction actions[4] = {
+                OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START,
+                OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START,
+                OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
+                OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE
+            };
+            hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
             static const OpenRideMobilePanelAction actions[4] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
@@ -2025,6 +2266,9 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                                   bool region_busy,
                                   double region_progress,
                                   const char *region_work_status,
+                                  const OpenRideMapSelection *selection,
+                                  bool gps_valid,
+                                  double gps_accuracy_m,
                                   int viewport_width)
 {
     int width = viewport_width;
@@ -2034,6 +2278,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
@@ -2065,6 +2310,69 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
             mobile_draw_button(renderer, &layout.rows[i], labels[i], layout.text_scale, false, false);
         }
         mobile_draw_button(renderer, &layout.back, "Fermer", layout.text_scale, false, false);
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_ROUTE) {
+        char subtitle[128];
+        snprintf(subtitle,
+                 sizeof(subtitle),
+                 "Depart %s  |  Arrivee %s",
+                 selection && selection->has_start ? "OK" : "a choisir",
+                 selection && selection->has_destination ? "OK" : "a choisir");
+        mobile_draw_panel_title(renderer,
+                                &layout,
+                                "ITINERAIRE",
+                                subtitle);
+
+        char gps_label[96];
+        if (gps_valid) {
+            snprintf(gps_label,
+                     sizeof(gps_label),
+                     "Depart : ma position GPS (%.0f m)",
+                     gps_accuracy_m);
+        } else {
+            snprintf(gps_label,
+                     sizeof(gps_label),
+                     "Depart : utiliser ma position GPS");
+        }
+
+        const char *labels[4] = {
+            gps_label,
+            "Depart : rechercher un lieu",
+            "Arrivee : rechercher un lieu",
+            selection && selection->has_start && selection->has_destination
+                ? "CALCULER L'ITINERAIRE"
+                : "Calculer - depart et arrivee requis"
+        };
+
+        for (uint32_t i = 0U; i < 4U; ++i) {
+            mobile_draw_button(renderer,
+                               &layout.rows[i],
+                               labels[i],
+                               layout.text_scale,
+                               i == 3U
+                                   && selection
+                                   && selection->has_start
+                                   && selection->has_destination,
+                               false);
+        }
+
+        const float hint_scale =
+            layout.text_scale > 1.55f ? 1.55f : layout.text_scale;
+        SDL_SetRenderDrawColor(renderer, 163, 173, 181, 255);
+        draw_scaled_text(renderer,
+                         layout.panel.x + 14.0f * layout.ui_scale,
+                         layout.back.y - 24.0f * layout.ui_scale,
+                         hint_scale,
+                         "Tu peux aussi fermer et choisir les points sur la carte");
+
+        mobile_draw_button(renderer,
+                           &layout.back,
+                           "Retour",
+                           layout.text_scale,
+                           false,
+                           false);
         return;
     }
 
@@ -2221,6 +2529,9 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            bool region_busy,
                            double region_progress,
                            const char *region_work_status,
+                           const OpenRideMapSelection *selection,
+                           bool gps_valid,
+                           double gps_accuracy_m,
                            int viewport_width)
 {
     if (panel == OPENRIDE_APP_PANEL_NONE) return;
@@ -2242,6 +2553,9 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           region_busy,
                           region_progress,
                           region_work_status,
+                          selection,
+                          gps_valid,
+                          gps_accuracy_m,
                           viewport_width);
     return;
 #endif
@@ -2265,6 +2579,42 @@ static void draw_app_panel(SDL_Renderer *renderer,
         SDL_RenderDebugText(renderer, x + 18, y + 164, "P  Parametres");
         SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
         SDL_RenderDebugText(renderer, x + 18, y + 322, "Tab/Esc: fermer | V: ajouter la position en favori");
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_ROUTE) {
+        SDL_RenderDebugText(renderer, x + 18, y + 16, "ITINERAIRE");
+        SDL_RenderDebugTextFormat(renderer,
+                                  x + 18,
+                                  y + 58,
+                                  "Depart : %s",
+                                  selection && selection->has_start
+                                      ? "selectionne"
+                                      : "a choisir");
+        SDL_RenderDebugTextFormat(renderer,
+                                  x + 18,
+                                  y + 88,
+                                  "Arrivee : %s",
+                                  selection && selection->has_destination
+                                      ? "selectionnee"
+                                      : "a choisir");
+        SDL_RenderDebugText(renderer,
+                            x + 18,
+                            y + 132,
+                            "D : rechercher le depart");
+        SDL_RenderDebugText(renderer,
+                            x + 18,
+                            y + 160,
+                            "A : rechercher l'arrivee");
+        SDL_RenderDebugText(renderer,
+                            x + 18,
+                            y + 188,
+                            "Entree : calculer");
+        SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
+        SDL_RenderDebugText(renderer,
+                            x + 18,
+                            y + 322,
+                            "Esc: retour | placement sur carte toujours disponible");
         return;
     }
 
@@ -3730,6 +4080,7 @@ int main(int argc, char **argv)
     openride_android_location_provider_init(&location_provider, &android_location_context);
     bool real_gps_active = false;
     bool real_gps_requested = false;
+    bool route_start_gps_pending = false;
     double real_gps_sample_age_s = INFINITY;
     double real_gps_accuracy_m = 0.0;
 #endif
@@ -3776,7 +4127,10 @@ int main(int argc, char **argv)
              graph_loaded ? "pret" : "graphe non installe");
 
     OpenRidePlaceIndex *place_index = NULL;
+    OpenRidePlaceWorld *place_world = NULL;
     bool place_search_active = false;
+    OpenRidePlaceSearchPurpose place_search_purpose =
+        OPENRIDE_PLACE_SEARCH_BROWSE;
     char place_search_query[128] = {0};
     OpenRidePlaceSearchResult place_search_results[OPENRIDE_SEARCH_MAX_RESULTS];
     uint32_t place_search_result_count = 0U;
@@ -3899,6 +4253,18 @@ int main(int argc, char **argv)
                 "Offline search not installed. Run ./scripts/prepare_place_index.sh\n");
     }
 
+    place_world = openride_place_world_create(&platform_paths,
+                                                        error,
+                                                        sizeof(error));
+    if (place_world) {
+        SDL_Log("PlaceWorld: %zu regional search index(es)",
+                openride_place_world_region_count(place_world));
+    } else {
+        SDL_Log("PlaceWorld unavailable: %s",
+                error[0] ? error : "unknown error");
+        error[0] = '\0';
+    }
+
     app_storage = openride_app_storage_open(platform_paths.app_storage_path,
                                                error,
                                                sizeof(error));
@@ -3993,7 +4359,7 @@ int main(int argc, char **argv)
                             if (event.key.key == SDLK_R) {
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
                                 open_place_search(window,
-                                                  place_index,
+                                                  place_world,
                                                   &place_search_active,
                                                   place_search_query,
                                                   &place_search_result_count,
@@ -4012,6 +4378,37 @@ int main(int argc, char **argv)
                                 app_panel = OPENRIDE_APP_PANEL_REGIONS;
                             } else if (event.key.key == SDLK_P) {
                                 app_panel = OPENRIDE_APP_PANEL_SETTINGS;
+                            }
+                        } else if (app_panel == OPENRIDE_APP_PANEL_ROUTE) {
+                            if (event.key.key == SDLK_D) {
+                                place_search_purpose =
+                                    OPENRIDE_PLACE_SEARCH_ROUTE_START;
+                                app_panel = OPENRIDE_APP_PANEL_NONE;
+                                open_place_search(window,
+                                                  place_world,
+                                                  &place_search_active,
+                                                  place_search_query,
+                                                  &place_search_result_count,
+                                                  &place_search_selected,
+                                                  route_status,
+                                                  sizeof(route_status));
+                            } else if (event.key.key == SDLK_A) {
+                                place_search_purpose =
+                                    OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION;
+                                app_panel = OPENRIDE_APP_PANEL_NONE;
+                                open_place_search(window,
+                                                  place_world,
+                                                  &place_search_active,
+                                                  place_search_query,
+                                                  &place_search_result_count,
+                                                  &place_search_selected,
+                                                  route_status,
+                                                  sizeof(route_status));
+                            } else if ((event.key.key == SDLK_RETURN
+                                        || event.key.key == SDLK_KP_ENTER)
+                                       && openride_map_selection_complete(&selection)) {
+                                app_panel = OPENRIDE_APP_PANEL_NONE;
+                                route_dirty = true;
                             }
                         } else if (app_panel == OPENRIDE_APP_PANEL_FAVORITES
                                    || app_panel == OPENRIDE_APP_PANEL_HISTORY) {
@@ -4132,10 +4529,16 @@ int main(int argc, char **argv)
                     if (place_search_active) {
                         if (event.key.key == SDLK_ESCAPE) {
                             place_search_active = false;
+                            if (place_search_purpose
+                                != OPENRIDE_PLACE_SEARCH_BROWSE) {
+                                app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                            }
+                            place_search_purpose =
+                                OPENRIDE_PLACE_SEARCH_BROWSE;
                             SDL_StopTextInput(window);
                         } else if (event.key.key == SDLK_BACKSPACE) {
                             utf8_backspace(place_search_query);
-                            refresh_place_search(place_index,
+                            refresh_place_search(place_world,
                                                  place_search_query,
                                                  place_search_results,
                                                  &place_search_result_count,
@@ -4165,16 +4568,63 @@ int main(int argc, char **argv)
                             camera.center_lat = chosen->lat;
                             camera.center_lon = chosen->lon;
                             if (camera.zoom < 14.0) camera.zoom = 14.0;
-                            snprintf(route_status,
-                                     sizeof(route_status),
-                                     "recherche: %.120s (%s)",
-                                     chosen->name,
-                                     openride_place_kind_name(chosen->kind));
+
+                            if (place_search_purpose
+                                == OPENRIDE_PLACE_SEARCH_ROUTE_START) {
+                                openride_map_selection_set(&selection,
+                                                           OPENRIDE_MARKER_START,
+                                                           chosen->lat,
+                                                           chosen->lon);
+                                start_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                                openride_route_destroy(&route);
+                                route_valid = false;
+                                route_dirty = false;
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "depart: %.120s",
+                                         chosen->name);
+                                app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                            } else if (place_search_purpose
+                                       == OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION) {
+                                openride_map_selection_set(&selection,
+                                                           OPENRIDE_MARKER_DESTINATION,
+                                                           chosen->lat,
+                                                           chosen->lon);
+                                destination_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                                openride_route_destroy(&route);
+                                route_valid = false;
+                                route_dirty = false;
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "arrivee: %.120s",
+                                         chosen->name);
+                                app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                            } else {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "recherche: %.120s (%s)",
+                                         chosen->name,
+                                         openride_place_kind_name(chosen->kind));
+                            }
+
                             if (app_storage) {
-                                openride_app_storage_add_history(app_storage, chosen->name, chosen->lat, chosen->lon, (int)chosen->kind, error, sizeof(error));
-                                refresh_stored_places(app_storage, false, history_places, &history_count);
+                                openride_app_storage_add_history(app_storage,
+                                                                 chosen->name,
+                                                                 chosen->lat,
+                                                                 chosen->lon,
+                                                                 (int)chosen->kind,
+                                                                 error,
+                                                                 sizeof(error));
+                                refresh_stored_places(app_storage,
+                                                      false,
+                                                      history_places,
+                                                      &history_count);
                             }
                             place_search_active = false;
+                            place_search_purpose =
+                                OPENRIDE_PLACE_SEARCH_BROWSE;
                             SDL_StopTextInput(window);
                         }
                         break;
@@ -4188,7 +4638,9 @@ int main(int argc, char **argv)
                                || (event.key.key == SDLK_SEMICOLON && (event.key.mod & SDL_KMOD_SHIFT) != 0)
                                || (event.key.key == SDLK_F
                                    && (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0)) {
-                        open_place_search(window, place_index, &place_search_active,
+                        place_search_purpose =
+                            OPENRIDE_PLACE_SEARCH_BROWSE;
+                        open_place_search(window, place_world, &place_search_active,
                                           place_search_query, &place_search_result_count,
                                           &place_search_selected, route_status, sizeof(route_status));
                     } else if (event.key.key == SDLK_V) {
@@ -4594,14 +5046,14 @@ int main(int argc, char **argv)
                     break;
 
                 case SDL_EVENT_TEXT_INPUT:
-                    if (place_search_active && place_index) {
+                    if (place_search_active && place_world) {
                         const size_t current = strlen(place_search_query);
                         const size_t incoming = strlen(event.text.text);
                         if (current + incoming < sizeof(place_search_query)) {
                             memcpy(place_search_query + current,
                                    event.text.text,
                                    incoming + 1U);
-                            refresh_place_search(place_index,
+                            refresh_place_search(place_world,
                                                  place_search_query,
                                                  place_search_results,
                                                  &place_search_result_count,
@@ -4810,14 +5262,90 @@ int main(int argc, char **argv)
                             app_panel_selected = 0U;
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SEARCH) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
+                            place_search_purpose =
+                                OPENRIDE_PLACE_SEARCH_BROWSE;
                             open_place_search(window,
-                                              place_index,
+                                              place_world,
                                               &place_search_active,
                                               place_search_query,
                                               &place_search_result_count,
                                               &place_search_selected,
                                               route_status,
                                               sizeof(route_status));
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START) {
+#ifdef __ANDROID__
+                            if (gps_sample_valid) {
+                                openride_map_selection_set(&selection,
+                                                           OPENRIDE_MARKER_START,
+                                                           gps_sample.lat,
+                                                           gps_sample.lon);
+                                start_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                                openride_route_destroy(&route);
+                                route_valid = false;
+                                route_dirty = false;
+                                route_start_gps_pending = false;
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "depart: position GPS actuelle");
+                            } else {
+                                real_gps_requested = true;
+                                route_start_gps_pending = true;
+                                if (!real_gps_active) {
+                                    real_gps_active =
+                                        openride_location_provider_start(
+                                            &location_provider);
+                                    real_gps_sample_age_s = INFINITY;
+                                }
+                                if (real_gps_active) {
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "recherche de la position GPS...");
+                                } else {
+                                    route_start_gps_pending = false;
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "GPS indisponible: autorise la localisation");
+                                }
+                            }
+#endif
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START) {
+                            place_search_purpose =
+                                OPENRIDE_PLACE_SEARCH_ROUTE_START;
+                            app_panel = OPENRIDE_APP_PANEL_NONE;
+                            open_place_search(window,
+                                              place_world,
+                                              &place_search_active,
+                                              place_search_query,
+                                              &place_search_result_count,
+                                              &place_search_selected,
+                                              route_status,
+                                              sizeof(route_status));
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION) {
+                            place_search_purpose =
+                                OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION;
+                            app_panel = OPENRIDE_APP_PANEL_NONE;
+                            open_place_search(window,
+                                              place_world,
+                                              &place_search_active,
+                                              place_search_query,
+                                              &place_search_result_count,
+                                              &place_search_selected,
+                                              route_status,
+                                              sizeof(route_status));
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE) {
+                            if (openride_map_selection_complete(&selection)) {
+                                app_panel = OPENRIDE_APP_PANEL_NONE;
+                                route_dirty = true;
+                            } else {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "choisis un depart et une arrivee");
+                            }
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_FAVORITES) {
                             refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                             app_panel = OPENRIDE_APP_PANEL_FAVORITES;
@@ -4999,9 +5527,11 @@ int main(int argc, char **argv)
 #endif
 
                     if (place_search_active) {
-                        const int result = place_search_result_at(x,
+                        const int result = place_search_result_at(renderer,
+                                                                 x,
                                                                  y,
                                                                  width,
+                                                                 height,
                                                                  place_search_result_count);
                         if (result >= 0) {
                             place_search_selected = (uint32_t)result;
@@ -5019,16 +5549,52 @@ int main(int argc, char **argv)
                                                                  sizeof(error));
                                 refresh_stored_places(app_storage, false, history_places, &history_count);
                             }
-                            set_destination_from_place(&selection,
-                                                       &gps_sample,
-                                                       gps_sample_valid,
-                                                       chosen->lat,
-                                                       chosen->lon,
-                                                       chosen->name,
-                                                       &route_dirty,
-                                                       route_status,
-                                                       sizeof(route_status));
+                            if (place_search_purpose
+                                == OPENRIDE_PLACE_SEARCH_ROUTE_START) {
+                                openride_map_selection_set(&selection,
+                                                           OPENRIDE_MARKER_START,
+                                                           chosen->lat,
+                                                           chosen->lon);
+                                start_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                                openride_route_destroy(&route);
+                                route_valid = false;
+                                route_dirty = false;
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "depart: %.120s",
+                                         chosen->name);
+                                app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                            } else if (place_search_purpose
+                                       == OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION) {
+                                openride_map_selection_set(&selection,
+                                                           OPENRIDE_MARKER_DESTINATION,
+                                                           chosen->lat,
+                                                           chosen->lon);
+                                destination_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                                openride_route_destroy(&route);
+                                route_valid = false;
+                                route_dirty = false;
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "arrivee: %.120s",
+                                         chosen->name);
+                                app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                            } else {
+                                set_destination_from_place(&selection,
+                                                           &gps_sample,
+                                                           gps_sample_valid,
+                                                           chosen->lat,
+                                                           chosen->lon,
+                                                           chosen->name,
+                                                           &route_dirty,
+                                                           route_status,
+                                                           sizeof(route_status));
+                            }
                             place_search_active = false;
+                            place_search_purpose =
+                                OPENRIDE_PLACE_SEARCH_BROWSE;
                             SDL_StopTextInput(window);
                         }
                         break;
@@ -5038,7 +5604,7 @@ int main(int argc, char **argv)
                         if (app_panel_main_search_at(x, y, width)) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             open_place_search(window,
-                                              place_index,
+                                              place_world,
                                               &place_search_active,
                                               place_search_query,
                                               &place_search_result_count,
@@ -5467,8 +6033,10 @@ int main(int argc, char **argv)
                 app_panel = OPENRIDE_APP_PANEL_MAIN;
                 app_panel_selected = 0U;
             } else if (action == OPENRIDE_TOOLBAR_SEARCH) {
+                place_search_purpose =
+                    OPENRIDE_PLACE_SEARCH_BROWSE;
                 open_place_search(window,
-                                  place_index,
+                                  place_world,
                                   &place_search_active,
                                   place_search_query,
                                   &place_search_result_count,
@@ -5492,17 +6060,13 @@ int main(int argc, char **argv)
                         snprintf(route_status, sizeof(route_status),
                                  "autorise la localisation Android puis retouche Demarrer");
                     }
-                } else if (openride_map_selection_complete(&selection)) {
-                    route_dirty = true;
                 } else {
-                    snprintf(route_status, sizeof(route_status), "touche la carte: depart puis destination");
+                    app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                    app_panel_selected = 0U;
                 }
 #else
-                if (openride_map_selection_complete(&selection)) {
-                    route_dirty = true;
-                } else {
-                    snprintf(route_status, sizeof(route_status), "touche la carte: depart puis destination");
-                }
+                app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                app_panel_selected = 0U;
 #endif
             } else if (action == OPENRIDE_TOOLBAR_LOOP) {
                 if (!selection.has_start) {
@@ -5763,6 +6327,11 @@ int main(int argc, char **argv)
                                                sizeof(error))) {
                 active_region = region;
                 refresh_map_world_overview(map_world, &platform_paths);
+                if (place_world) {
+                    openride_place_world_refresh(place_world,
+                                                 error,
+                                                 sizeof(error));
+                }
                 if (app_storage) {
                     openride_app_storage_set_text(app_storage,
                                                   "active_region_id",
@@ -6071,6 +6640,23 @@ int main(int argc, char **argv)
                 gps_sample.lon = real_sample.lon;
                 gps_sample.speed_mps = real_sample.speed_mps;
                 gps_sample.heading_deg = real_sample.heading_deg;
+
+                if (route_start_gps_pending && gps_sample_valid) {
+                    openride_map_selection_set(&selection,
+                                               OPENRIDE_MARKER_START,
+                                               gps_sample.lat,
+                                               gps_sample.lon);
+                    start_snap.segment_id =
+                        OPENRIDE_ROUTING_SEGMENT_NONE;
+                    openride_route_destroy(&route);
+                    route_valid = false;
+                    route_dirty = false;
+                    route_start_gps_pending = false;
+                    snprintf(route_status,
+                             sizeof(route_status),
+                             "depart GPS acquis (precision %.0f m)",
+                             real_gps_accuracy_m);
+                }
 
                 if (openride_location_filter_update(&location_filter,
                                                     gps_sample.lat,
@@ -6465,10 +7051,18 @@ int main(int argc, char **argv)
                        region_busy,
                        region_progress,
                        region_work_status,
+                       &selection,
+                       gps_sample_valid,
+#ifdef __ANDROID__
+                       real_gps_accuracy_m,
+#else
+                       gps_sample_valid ? 5.0 : 0.0,
+#endif
                        width);
         draw_place_search_overlay(renderer,
                                   place_search_active,
-                                  place_index != NULL,
+                                  place_world
+                                      && openride_place_world_region_count(place_world) > 0U,
                                   place_search_query,
                                   place_search_results,
                                   place_search_result_count,
@@ -6529,6 +7123,7 @@ int main(int argc, char **argv)
     openride_routing_graph_destroy(&routing_graph);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+    openride_place_world_destroy(place_world);
     openride_place_index_close(place_index);
     openride_app_storage_close(app_storage);
     openride_mbtiles_close(map);

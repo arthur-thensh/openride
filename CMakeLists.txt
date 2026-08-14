@@ -64,6 +64,7 @@ add_library(openride_core STATIC
     src/core/gps_simulator.c
     src/core/gpx.c
     src/core/place_search.c
+    src/core/place_world.c
     src/core/app_storage.c
     src/core/platform_paths.c
     src/core/region_manager.c
@@ -363,6 +364,15 @@ if(OPENRIDE_BUILD_TESTS)
     add_test(
         NAME place_search
         COMMAND test_place_search "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny_places.osm.pbf"
+    )
+
+    add_executable(test_place_world
+        tests/test_place_world.c
+    )
+    target_link_libraries(test_place_world PRIVATE openride_core)
+    add_test(
+        NAME place_world
+        COMMAND test_place_world "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny_places.osm.pbf"
     )
 
     add_executable(test_app_storage
