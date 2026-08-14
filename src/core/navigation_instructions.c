@@ -141,6 +141,43 @@ static uint8_t roundabout_exit_number(const OpenRideRoutingGraph *graph,
     return exits > 0U ? (uint8_t)exits : 0U;
 }
 
+static bool route_has_navigation_context(const OpenRideRoute *route)
+{
+    return route
+        && route->navigation_context
+        && route->navigation_context_count == route->geometry_count;
+}
+
+static uint8_t roundabout_exit_number_from_context(
+    const OpenRideRoute *route,
+    uint32_t entry_geometry_index)
+{
+    if (!route_has_navigation_context(route)
+        || entry_geometry_index + 1U >= route->geometry_count) {
+        return 0U;
+    }
+
+    uint32_t exits = 0U;
+    for (uint32_t i = entry_geometry_index + 1U;
+         i + 1U < route->geometry_count;
+         ++i) {
+        const uint8_t flags = route->navigation_context[i].flags;
+        if ((flags & OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT) == 0U) break;
+
+        if ((flags & OPENRIDE_ROUTE_NAV_OUTGOING_ROUNDABOUT) == 0U) {
+            if (exits < 255U) ++exits;
+            return (uint8_t)exits;
+        }
+
+        if ((flags & OPENRIDE_ROUTE_NAV_HAS_ROUNDABOUT_EXIT) != 0U
+            && exits < 255U) {
+            ++exits;
+        }
+    }
+
+    return exits > 0U ? (uint8_t)exits : 0U;
+}
+
 static OpenRideManeuverType classify_turn(double angle_deg)
 {
     const double magnitude = fabs(angle_deg);
@@ -253,8 +290,19 @@ bool openride_navigation_instructions_build(
         bool roundabout_entry = false;
         uint8_t exit_number = 0U;
 
-        if (graph && route_node_index >= 0
-            && (uint32_t)route_node_index < route->node_count) {
+        if (route_has_navigation_context(route)) {
+            const uint8_t flags = route->navigation_context[i].flags;
+            has_alternative =
+                (flags & OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE) != 0U;
+            roundabout_entry =
+                (flags & OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT) == 0U
+                && (flags & OPENRIDE_ROUTE_NAV_OUTGOING_ROUNDABOUT) != 0U;
+            if (roundabout_entry) {
+                exit_number =
+                    roundabout_exit_number_from_context(route, i);
+            }
+        } else if (graph && route_node_index >= 0
+                   && (uint32_t)route_node_index < route->node_count) {
             const uint32_t ni = (uint32_t)route_node_index;
             const OpenRideRoutingNodeId current = route->nodes[ni];
             const OpenRideRoutingNodeId previous = ni > 0U

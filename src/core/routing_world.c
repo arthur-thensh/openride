@@ -384,20 +384,37 @@ static bool calculate_nodes(const OpenRideRoutingGraph *graph,
                                              sizeof(error));
 }
 
+static uint8_t route_navigation_flags(const OpenRideRoute *route,
+                                      uint32_t geometry_index)
+{
+    if (!route || !route->navigation_context
+        || route->navigation_context_count != route->geometry_count
+        || geometry_index >= route->geometry_count) {
+        return 0U;
+    }
+    return route->navigation_context[geometry_index].flags;
+}
+
 static bool append_point(OpenRideRoutePoint *geometry,
+                         OpenRideRouteNavigationContext *navigation_context,
                          uint32_t capacity,
                          uint32_t *count,
                          double lat,
-                         double lon)
+                         double lon,
+                         uint8_t navigation_flags)
 {
-    if (!geometry || !count || *count >= capacity) return false;
+    if (!geometry || !navigation_context || !count || *count >= capacity) {
+        return false;
+    }
     if (*count > 0U) {
         const OpenRideRoutePoint *last = &geometry[*count - 1U];
         if (fabs(last->lat - lat) < 1e-10 && fabs(last->lon - lon) < 1e-10) {
+            navigation_context[*count - 1U].flags |= navigation_flags;
             return true;
         }
     }
     geometry[*count] = (OpenRideRoutePoint){lat, lon};
+    navigation_context[*count].flags = navigation_flags;
     ++(*count);
     return true;
 }
@@ -423,19 +440,28 @@ static bool combine_routes(const OpenRideRoute *first,
     const uint32_t capacity = (uint32_t)capacity64;
     OpenRideRoutePoint *geometry = calloc(capacity, sizeof(*geometry));
     if (!geometry) return false;
+    OpenRideRouteNavigationContext *navigation_context =
+        calloc(capacity, sizeof(*navigation_context));
+    if (!navigation_context) {
+        free(geometry);
+        return false;
+    }
 
     uint32_t count = 0U;
-    if (!append_point(geometry, capacity, &count, start_lat, start_lon)) goto fail;
+    if (!append_point(geometry, navigation_context, capacity, &count,
+                      start_lat, start_lon, 0U)) goto fail;
     for (uint32_t i = 0U; i < first->geometry_count; ++i) {
-        if (!append_point(geometry, capacity, &count,
-                          first->geometry[i].lat, first->geometry[i].lon)) goto fail;
+        if (!append_point(geometry, navigation_context, capacity, &count,
+                          first->geometry[i].lat, first->geometry[i].lon,
+                          route_navigation_flags(first, i))) goto fail;
     }
     for (uint32_t i = 0U; i < second->geometry_count; ++i) {
-        if (!append_point(geometry, capacity, &count,
-                          second->geometry[i].lat, second->geometry[i].lon)) goto fail;
+        if (!append_point(geometry, navigation_context, capacity, &count,
+                          second->geometry[i].lat, second->geometry[i].lon,
+                          route_navigation_flags(second, i))) goto fail;
     }
-    if (!append_point(geometry, capacity, &count,
-                      destination_lat, destination_lon)) goto fail;
+    if (!append_point(geometry, navigation_context, capacity, &count,
+                      destination_lat, destination_lon, 0U)) goto fail;
 
     const double start_link_m = geo_distance_m(start_lat,
                                                 start_lon,
@@ -450,6 +476,8 @@ static bool combine_routes(const OpenRideRoute *first,
     openride_route_destroy(route);
     route->geometry = geometry;
     route->geometry_count = count;
+    route->navigation_context = navigation_context;
+    route->navigation_context_count = count;
     route->nodes = NULL;
     route->node_count = 0U;
     route->distance_m = first->distance_m + second->distance_m
@@ -462,6 +490,7 @@ static bool combine_routes(const OpenRideRoute *first,
 
 fail:
     free(geometry);
+    free(navigation_context);
     return false;
 }
 
@@ -1130,18 +1159,22 @@ static uint32_t multi_hop_boundary_candidates(
     return count;
 }
 
-static bool dynamic_geometry_append(OpenRideRoutePoint **geometry,
-                                    uint32_t *count,
-                                    uint32_t *capacity,
-                                    double lat,
-                                    double lon)
+static bool dynamic_geometry_append(
+    OpenRideRoutePoint **geometry,
+    OpenRideRouteNavigationContext **navigation_context,
+    uint32_t *count,
+    uint32_t *capacity,
+    double lat,
+    double lon,
+    uint8_t navigation_flags)
 {
-    if (!geometry || !count || !capacity) return false;
+    if (!geometry || !navigation_context || !count || !capacity) return false;
 
     if (*count > 0U) {
         const OpenRideRoutePoint *last = &(*geometry)[*count - 1U];
         if (fabs(last->lat - lat) < 1e-10
             && fabs(last->lon - lon) < 1e-10) {
+            (*navigation_context)[*count - 1U].flags |= navigation_flags;
             return true;
         }
     }
@@ -1149,14 +1182,22 @@ static bool dynamic_geometry_append(OpenRideRoutePoint **geometry,
     if (*count == *capacity) {
         uint32_t new_capacity = *capacity == 0U ? 256U : *capacity * 2U;
         if (new_capacity < *capacity) return false;
+
         OpenRideRoutePoint *new_geometry =
             realloc(*geometry, (size_t)new_capacity * sizeof(**geometry));
         if (!new_geometry) return false;
         *geometry = new_geometry;
+
+        OpenRideRouteNavigationContext *new_context =
+            realloc(*navigation_context,
+                    (size_t)new_capacity * sizeof(**navigation_context));
+        if (!new_context) return false;
+        *navigation_context = new_context;
         *capacity = new_capacity;
     }
 
     (*geometry)[*count] = (OpenRideRoutePoint){lat, lon};
+    (*navigation_context)[*count].flags = navigation_flags;
     ++(*count);
     return true;
 }
@@ -1183,6 +1224,7 @@ static bool assemble_multi_hop_route(
     }
 
     OpenRideRoutePoint *geometry = NULL;
+    OpenRideRouteNavigationContext *navigation_context = NULL;
     uint32_t geometry_count = 0U;
     uint32_t geometry_capacity = 0U;
     double distance_m = 0.0;
@@ -1190,10 +1232,12 @@ static bool assemble_multi_hop_route(
     double weighted_cost_s = 0.0;
 
     if (!dynamic_geometry_append(&geometry,
+                                 &navigation_context,
                                  &geometry_count,
                                  &geometry_capacity,
                                  start_lat,
-                                 start_lon)) {
+                                 start_lon,
+                                 0U)) {
         set_error(error, error_size, "unable to allocate multi-hop geometry");
         return false;
     }
@@ -1202,6 +1246,7 @@ static bool assemble_multi_hop_route(
         &boundaries[0].segments[chosen[0]];
     if (!first_segment->geometry || first_segment->geometry_count == 0U) {
         free(geometry);
+        free(navigation_context);
         set_error(error, error_size, "multi-hop first segment has no geometry");
         return false;
     }
@@ -1219,17 +1264,21 @@ static bool assemble_multi_hop_route(
             &boundaries[boundary_index].segments[chosen[boundary_index]];
         if (!segment->geometry || segment->geometry_count == 0U) {
             free(geometry);
+        free(navigation_context);
             set_error(error, error_size, "multi-hop selected segment is empty");
             return false;
         }
 
         for (uint32_t i = 0U; i < segment->geometry_count; ++i) {
             if (!dynamic_geometry_append(&geometry,
+                                         &navigation_context,
                                          &geometry_count,
                                          &geometry_capacity,
                                          segment->geometry[i].lat,
-                                         segment->geometry[i].lon)) {
+                                         segment->geometry[i].lon,
+                                         route_navigation_flags(segment, i))) {
                 free(geometry);
+        free(navigation_context);
                 set_error(error, error_size,
                           "unable to grow multi-hop route geometry");
                 return false;
@@ -1243,11 +1292,14 @@ static bool assemble_multi_hop_route(
 
     for (uint32_t i = 0U; i < final_segment->geometry_count; ++i) {
         if (!dynamic_geometry_append(&geometry,
+                                     &navigation_context,
                                      &geometry_count,
                                      &geometry_capacity,
                                      final_segment->geometry[i].lat,
-                                     final_segment->geometry[i].lon)) {
+                                     final_segment->geometry[i].lon,
+                                     route_navigation_flags(final_segment, i))) {
             free(geometry);
+        free(navigation_context);
             set_error(error, error_size,
                       "unable to append final multi-hop segment");
             return false;
@@ -1263,11 +1315,14 @@ static bool assemble_multi_hop_route(
                        destination_lon);
 
     if (!dynamic_geometry_append(&geometry,
+                                 &navigation_context,
                                  &geometry_count,
                                  &geometry_capacity,
                                  destination_lat,
-                                 destination_lon)) {
+                                 destination_lon,
+                                 0U)) {
         free(geometry);
+        free(navigation_context);
         set_error(error, error_size, "unable to finalize multi-hop geometry");
         return false;
     }
@@ -1284,6 +1339,8 @@ static bool assemble_multi_hop_route(
     route->node_count = 0U;
     route->geometry = geometry;
     route->geometry_count = geometry_count;
+    route->navigation_context = navigation_context;
+    route->navigation_context_count = geometry_count;
     route->distance_m = distance_m + start_link_m + destination_link_m;
     route->estimated_time_s = estimated_time_s + endpoint_time_s;
     route->weighted_cost_s = weighted_cost_s + endpoint_time_s;

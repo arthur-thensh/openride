@@ -1,5 +1,6 @@
 #include "openride/routing_world.h"
 #include "openride/routing_gateway_index.h"
+#include "openride/navigation_instructions.h"
 
 #include <assert.h>
 #include <math.h>
@@ -469,11 +470,140 @@ static void test_region_hints_without_local_poly(void)
     snprintf(command, sizeof(command), "rm -rf '%s'", root);
     (void)system(command);
 }
+
+static OpenRideRoutingGraph build_navigation_context_left(void)
+{
+    OpenRideRoutingGraph graph = {0};
+    OpenRideRoutingGraphBuilder *builder =
+        openride_routing_graph_builder_create();
+    assert(builder != NULL);
+
+    const OpenRideRoutingNodeId start =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 2.9990);
+    const OpenRideRoutingNodeId gateway =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0000);
+
+    OpenRideRoutingEdgeAttributes road =
+        openride_routing_edge_attributes_default();
+    road.length_m = 100.0;
+    road.road_class = OPENRIDE_ROAD_PRIMARY;
+    road.surface = OPENRIDE_SURFACE_ASPHALT;
+    road.max_speed_kph = 50U;
+
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, start, gateway, &road));
+
+    char error[256] = {0};
+    assert(openride_routing_graph_builder_build(
+        builder, &graph, error, sizeof(error)));
+    openride_routing_graph_builder_destroy(builder);
+    return graph;
+}
+
+static OpenRideRoutingGraph build_navigation_context_right(void)
+{
+    OpenRideRoutingGraph graph = {0};
+    OpenRideRoutingGraphBuilder *builder =
+        openride_routing_graph_builder_create();
+    assert(builder != NULL);
+
+    const OpenRideRoutingNodeId gateway =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0000);
+    const OpenRideRoutingNodeId entry =
+        openride_routing_graph_builder_add_node(builder, 50.0010, 3.0000);
+    const OpenRideRoutingNodeId roundabout_a =
+        openride_routing_graph_builder_add_node(builder, 50.0015, 3.0005);
+    const OpenRideRoutingNodeId roundabout_b =
+        openride_routing_graph_builder_add_node(builder, 50.0010, 3.0010);
+    const OpenRideRoutingNodeId destination =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0010);
+    const OpenRideRoutingNodeId first_exit =
+        openride_routing_graph_builder_add_node(builder, 50.0022, 3.0005);
+
+    OpenRideRoutingEdgeAttributes normal =
+        openride_routing_edge_attributes_default();
+    normal.length_m = 100.0;
+    normal.road_class = OPENRIDE_ROAD_PRIMARY;
+    normal.surface = OPENRIDE_SURFACE_ASPHALT;
+    normal.max_speed_kph = 50U;
+
+    OpenRideRoutingEdgeAttributes roundabout = normal;
+    roundabout.flags |= OPENRIDE_EDGE_FLAG_ROUNDABOUT;
+
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, gateway, entry, &normal));
+    assert(openride_routing_graph_builder_add_directed_edge(
+        builder, entry, roundabout_a, &roundabout));
+    assert(openride_routing_graph_builder_add_directed_edge(
+        builder, roundabout_a, roundabout_b, &roundabout));
+    assert(openride_routing_graph_builder_add_directed_edge(
+        builder, roundabout_a, first_exit, &normal));
+    assert(openride_routing_graph_builder_add_directed_edge(
+        builder, roundabout_b, destination, &normal));
+
+    char error[256] = {0};
+    assert(openride_routing_graph_builder_build(
+        builder, &graph, error, sizeof(error)));
+    openride_routing_graph_builder_destroy(builder);
+    return graph;
+}
+
+static void test_multi_region_navigation_context(void)
+{
+    OpenRideRoutingGraph left = build_navigation_context_left();
+    OpenRideRoutingGraph right = build_navigation_context_right();
+    OpenRideRoute route = {0};
+    OpenRideRoutingWorldResult result = {0};
+    char error[256] = {0};
+
+    assert(openride_routing_world_calculate_graph_pair(
+        &left,
+        &right,
+        50.0000,
+        2.9990,
+        50.0000,
+        3.0010,
+        50.0,
+        OPENRIDE_ROUTING_PROFILE_FASTEST,
+        &route,
+        &result,
+        error,
+        sizeof(error)));
+
+    assert(route.nodes == NULL);
+    assert(route.node_count == 0U);
+    assert(route.navigation_context != NULL);
+    assert(route.navigation_context_count == route.geometry_count);
+
+    OpenRideNavigationInstructionList instructions = {0};
+    assert(openride_navigation_instructions_build(
+        NULL,
+        &route,
+        &instructions,
+        error,
+        sizeof(error)));
+
+    bool found_roundabout = false;
+    for (uint32_t i = 0U; i < instructions.count; ++i) {
+        if (instructions.items[i].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT) {
+            found_roundabout = true;
+            assert(instructions.items[i].roundabout_exit_number == 2U);
+        }
+    }
+    assert(found_roundabout);
+
+    openride_navigation_instructions_destroy(&instructions);
+    openride_route_destroy(&route);
+    openride_routing_graph_destroy(&left);
+    openride_routing_graph_destroy(&right);
+}
+
 int main(void)
 {
     test_region_planning();
     test_region_hints_without_local_poly();
     test_installed_multi_hop();
+    test_multi_region_navigation_context();
 
     OpenRideRoutingGraph left = build_left();
     OpenRideRoutingGraph right = build_right();

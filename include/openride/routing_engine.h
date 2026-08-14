@@ -26,11 +26,31 @@ typedef struct OpenRideRoutePoint {
     double lon;
 } OpenRideRoutePoint;
 
+/*
+ * Lightweight navigation metadata aligned one-to-one with route geometry.
+ *
+ * Regional node ids cannot survive RoutingWorld assembly because each graph has
+ * its own id space. These flags preserve only the graph context required by
+ * navigation instructions while the regional graph is still available.
+ */
+enum {
+    OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE       = 1U << 0,
+    OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT   = 1U << 1,
+    OPENRIDE_ROUTE_NAV_OUTGOING_ROUNDABOUT   = 1U << 2,
+    OPENRIDE_ROUTE_NAV_HAS_ROUNDABOUT_EXIT   = 1U << 3
+};
+
+typedef struct OpenRideRouteNavigationContext {
+    uint8_t flags;
+} OpenRideRouteNavigationContext;
+
 typedef struct OpenRideRoute {
     OpenRideRoutingNodeId *nodes;
     uint32_t node_count;
     OpenRideRoutePoint *geometry;
     uint32_t geometry_count;
+    OpenRideRouteNavigationContext *navigation_context;
+    uint32_t navigation_context_count;
     double distance_m;
     double estimated_time_s;
     double weighted_cost_s;

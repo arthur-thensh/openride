@@ -178,6 +178,106 @@ static const OpenRideRoutingEdge *find_edge(const OpenRideRoutingGraph *graph,
     return NULL;
 }
 
+static bool route_build_navigation_context_from_nodes(
+    const OpenRideRoutingGraph *graph,
+    OpenRideRoute *route)
+{
+    if (!route) return false;
+
+    free(route->navigation_context);
+    route->navigation_context = NULL;
+    route->navigation_context_count = 0U;
+
+    if (!graph || !route->geometry || route->geometry_count == 0U
+        || !route->nodes || route->node_count == 0U) {
+        return true;
+    }
+
+    uint32_t geometry_offset = 0U;
+    if (route->geometry_count == route->node_count) {
+        geometry_offset = 0U;
+    } else if (route->geometry_count == route->node_count + 2U) {
+        geometry_offset = 1U;
+    } else {
+        return true;
+    }
+
+    OpenRideRouteNavigationContext *context =
+        calloc(route->geometry_count, sizeof(*context));
+    if (!context) return false;
+
+    for (uint32_t node_index = 0U;
+         node_index < route->node_count;
+         ++node_index) {
+        const OpenRideRoutingNodeId current = route->nodes[node_index];
+        if (current >= graph->node_count) {
+            free(context);
+            return false;
+        }
+
+        uint8_t flags = 0U;
+        OpenRideRoutingNodeId previous = OPENRIDE_ROUTING_NODE_NONE;
+        OpenRideRoutingNodeId next = OPENRIDE_ROUTING_NODE_NONE;
+        const OpenRideRoutingEdge *incoming = NULL;
+        const OpenRideRoutingEdge *outgoing = NULL;
+
+        if (node_index > 0U) {
+            previous = route->nodes[node_index - 1U];
+            incoming = find_edge(graph, previous, current);
+            if (incoming
+                && (incoming->flags & OPENRIDE_EDGE_FLAG_ROUNDABOUT) != 0U) {
+                flags |= OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT;
+            }
+        }
+
+        if (node_index + 1U < route->node_count) {
+            next = route->nodes[node_index + 1U];
+            outgoing = find_edge(graph, current, next);
+            if (outgoing
+                && (outgoing->flags & OPENRIDE_EDGE_FLAG_ROUNDABOUT) != 0U) {
+                flags |= OPENRIDE_ROUTE_NAV_OUTGOING_ROUNDABOUT;
+            }
+        }
+
+        const OpenRideRoutingNode *node = &graph->nodes[current];
+
+        if (previous != OPENRIDE_ROUTING_NODE_NONE
+            && next != OPENRIDE_ROUTING_NODE_NONE) {
+            for (uint32_t edge_index = 0U;
+                 edge_index < node->edge_count;
+                 ++edge_index) {
+                const OpenRideRoutingEdge *edge =
+                    &graph->edges[node->first_edge + edge_index];
+                if (edge->target != previous && edge->target != next) {
+                    flags |= OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
+                    break;
+                }
+            }
+        }
+
+        if ((flags & OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT) != 0U
+            && previous != OPENRIDE_ROUTING_NODE_NONE) {
+            for (uint32_t edge_index = 0U;
+                 edge_index < node->edge_count;
+                 ++edge_index) {
+                const OpenRideRoutingEdge *edge =
+                    &graph->edges[node->first_edge + edge_index];
+                if (edge->target == previous) continue;
+                if ((edge->flags & OPENRIDE_EDGE_FLAG_ROUNDABOUT) == 0U) {
+                    flags |= OPENRIDE_ROUTE_NAV_HAS_ROUNDABOUT_EXIT;
+                    break;
+                }
+            }
+        }
+
+        context[node_index + geometry_offset].flags = flags;
+    }
+
+    route->navigation_context = context;
+    route->navigation_context_count = route->geometry_count;
+    return true;
+}
+
 OpenRideRoutingRequest openride_routing_request_default(void)
 {
     OpenRideRoutingRequest request;
@@ -195,6 +295,9 @@ static bool route_build_geometry_from_nodes(const OpenRideRoutingGraph *graph,
     free(route->geometry);
     route->geometry = NULL;
     route->geometry_count = 0U;
+    free(route->navigation_context);
+    route->navigation_context = NULL;
+    route->navigation_context_count = 0U;
     if (route->node_count == 0U) return true;
 
     route->geometry = calloc(route->node_count, sizeof(*route->geometry));
@@ -207,7 +310,7 @@ static bool route_build_geometry_from_nodes(const OpenRideRoutingGraph *graph,
                                   &route->geometry[i].lat,
                                   &route->geometry[i].lon);
     }
-    return true;
+    return route_build_navigation_context_from_nodes(graph, route);
 }
 
 void openride_route_destroy(OpenRideRoute *route)
@@ -215,6 +318,7 @@ void openride_route_destroy(OpenRideRoute *route)
     if (!route) return;
     free(route->nodes);
     free(route->geometry);
+    free(route->navigation_context);
     memset(route, 0, sizeof(*route));
 }
 
@@ -573,7 +677,7 @@ static bool build_snapped_geometry(const OpenRideRoutingGraph *graph,
     free(route->geometry);
     route->geometry = geometry;
     route->geometry_count = count;
-    return true;
+    return route_build_navigation_context_from_nodes(graph, route);
 }
 
 static bool direct_same_segment_route(const OpenRideRoutingGraph *graph,
