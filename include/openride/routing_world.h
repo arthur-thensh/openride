@@ -1,6 +1,7 @@
 #ifndef OPENRIDE_ROUTING_WORLD_H
 #define OPENRIDE_ROUTING_WORLD_H
 
+#include "openride/map_selection.h"
 #include "openride/platform_paths.h"
 #include "openride/region_manager.h"
 #include "openride/region_network.h"
@@ -136,6 +137,19 @@ bool openride_routing_world_calculate_installed(
     double start_lon,
     double destination_lat,
     double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size);
+
+bool openride_routing_world_calculate_selection_cached(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    const OpenRideMapSelection *selection,
     double max_snap_distance_m,
     OpenRideRoutingProfile profile,
     OpenRideRoute *route,

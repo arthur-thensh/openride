@@ -1637,11 +1637,13 @@ static bool calculate_multi_hop_installed(
     return true;
 }
 
-bool openride_routing_world_calculate_installed_cached(
+static bool calculate_installed_cached_internal(
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
     const OpenRideRoutingGraph *active_graph,
     OpenRideRoutingWorldCache *cache,
+    const OpenRideRegionDefinition *start_region_hint,
+    const OpenRideRegionDefinition *destination_region_hint,
     double start_lat,
     double start_lon,
     double destination_lat,
@@ -1667,9 +1669,16 @@ bool openride_routing_world_calculate_installed_cached(
      * has not been generated yet. Graph availability is checked separately.
      */
     const OpenRideRegionDefinition *start_region =
-        region_for_point(paths, active_region, start_lat, start_lon);
+        start_region_hint
+            ? start_region_hint
+            : region_for_point(paths, active_region, start_lat, start_lon);
     const OpenRideRegionDefinition *destination_region =
-        region_for_point(paths, active_region, destination_lat, destination_lon);
+        destination_region_hint
+            ? destination_region_hint
+            : region_for_point(paths,
+                               active_region,
+                               destination_lat,
+                               destination_lon);
 
     if (!start_region) {
         set_error(error, error_size, "start is outside known regional coverage");
@@ -2031,6 +2040,101 @@ bool openride_routing_world_calculate_installed_alternative_cached(
     loaded_graph_destroy(&start_loaded);
     if (result) *result = local_result;
     return ok;
+}
+
+bool openride_routing_world_calculate_installed_cached(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    return calculate_installed_cached_internal(
+        paths,
+        active_region,
+        active_graph,
+        cache,
+        NULL,
+        NULL,
+        start_lat,
+        start_lon,
+        destination_lat,
+        destination_lon,
+        max_snap_distance_m,
+        profile,
+        route,
+        result,
+        error,
+        error_size);
+}
+
+bool openride_routing_world_calculate_selection_cached(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    const OpenRideMapSelection *selection,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    if (!selection || !openride_map_selection_complete(selection)) {
+        if (result) memset(result, 0, sizeof(*result));
+        set_error(error, error_size, "incomplete RoutingWorld selection");
+        return false;
+    }
+
+    const char *start_hint_id =
+        openride_map_selection_region_hint(selection, OPENRIDE_MARKER_START);
+    const char *destination_hint_id =
+        openride_map_selection_region_hint(selection,
+                                           OPENRIDE_MARKER_DESTINATION);
+
+    const OpenRideRegionDefinition *start_hint =
+        start_hint_id ? openride_region_find(start_hint_id) : NULL;
+    const OpenRideRegionDefinition *destination_hint =
+        destination_hint_id ? openride_region_find(destination_hint_id) : NULL;
+
+    if (start_hint_id && !start_hint) {
+        if (result) memset(result, 0, sizeof(*result));
+        set_error(error, error_size, "unknown start region hint");
+        return false;
+    }
+    if (destination_hint_id && !destination_hint) {
+        if (result) memset(result, 0, sizeof(*result));
+        set_error(error, error_size, "unknown destination region hint");
+        return false;
+    }
+
+    return calculate_installed_cached_internal(
+        paths,
+        active_region,
+        active_graph,
+        cache,
+        start_hint,
+        destination_hint,
+        selection->start.lat,
+        selection->start.lon,
+        selection->destination.lat,
+        selection->destination.lon,
+        max_snap_distance_m,
+        profile,
+        route,
+        result,
+        error,
+        error_size);
 }
 
 bool openride_routing_world_calculate_installed(

@@ -383,9 +383,96 @@ static void test_installed_multi_hop(void)
     (void)system(command);
 }
 
+
+static void test_region_hints_without_local_poly(void)
+{
+    const OpenRideRegionDefinition *npdc =
+        openride_region_find("nord-pas-de-calais");
+    const OpenRideRegionDefinition *aquitaine =
+        openride_region_find("aquitaine");
+    assert(npdc && aquitaine);
+
+    char root[256];
+    snprintf(root,
+             sizeof(root),
+             "/tmp/openride-routing-world-hints-%ld",
+             (long)getpid());
+    char command[320];
+    snprintf(command, sizeof(command), "rm -rf '%s'", root);
+    (void)system(command);
+    assert(mkdir(root, 0700) == 0);
+
+    OpenRidePlatformPaths paths;
+    char error[512] = {0};
+    assert(openride_platform_paths_init(&paths,
+                                        OPENRIDE_PLATFORM_DESKTOP,
+                                        root,
+                                        error,
+                                        sizeof(error)));
+    assert(openride_platform_paths_ensure_directories(
+        &paths, error, sizeof(error)));
+
+    /*
+     * Deliberately install no .poly and no regional package. Endpoint identity
+     * comes exclusively from trusted PlaceWorld-style region hints.
+     */
+    OpenRideMapSelection selection;
+    openride_map_selection_init(&selection);
+    openride_map_selection_set(&selection,
+                               OPENRIDE_MARKER_START,
+                               50.3708,
+                               3.0802);
+    openride_map_selection_set_region_hint(&selection,
+                                           OPENRIDE_MARKER_START,
+                                           npdc->id);
+    openride_map_selection_set(&selection,
+                               OPENRIDE_MARKER_DESTINATION,
+                               44.8378,
+                               -0.5792);
+    openride_map_selection_set_region_hint(&selection,
+                                           OPENRIDE_MARKER_DESTINATION,
+                                           aquitaine->id);
+
+    OpenRideRoutingWorldCache cache;
+    openride_routing_world_cache_init(&cache);
+    OpenRideRoute route = {0};
+    OpenRideRoutingWorldResult result = {0};
+
+    const bool ok = openride_routing_world_calculate_selection_cached(
+        &paths,
+        npdc,
+        NULL,
+        &cache,
+        &selection,
+        2000.0,
+        OPENRIDE_ROUTING_PROFILE_TOURING,
+        &route,
+        &result,
+        error,
+        sizeof(error));
+
+    assert(!ok);
+    assert(result.corridor_planned);
+    assert(result.download_required);
+    assert(result.missing_region_count > 0U);
+    assert(strcmp(result.start_region_id, npdc->id) == 0);
+    assert(strcmp(result.destination_region_id, aquitaine->id) == 0);
+    assert(result.recommended_corridor.count >= 2U);
+    assert(strcmp(result.recommended_corridor.region_ids[0],
+                  npdc->id) == 0);
+    assert(strcmp(result.recommended_corridor.region_ids[
+                      result.recommended_corridor.count - 1U],
+                  aquitaine->id) == 0);
+
+    openride_route_destroy(&route);
+    openride_routing_world_cache_destroy(&cache);
+    snprintf(command, sizeof(command), "rm -rf '%s'", root);
+    (void)system(command);
+}
 int main(void)
 {
     test_region_planning();
+    test_region_hints_without_local_poly();
     test_installed_multi_hop();
 
     OpenRideRoutingGraph left = build_left();

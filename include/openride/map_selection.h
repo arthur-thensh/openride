@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#define OPENRIDE_MAP_SELECTION_REGION_ID_SIZE 64U
+
 typedef struct OpenRideGeoPosition {
     double lat;
     double lon;
@@ -19,6 +21,8 @@ typedef struct OpenRideMapSelection {
     bool has_destination;
     OpenRideGeoPosition start;
     OpenRideGeoPosition destination;
+    char start_region_id[OPENRIDE_MAP_SELECTION_REGION_ID_SIZE];
+    char destination_region_id[OPENRIDE_MAP_SELECTION_REGION_ID_SIZE];
 } OpenRideMapSelection;
 
 void openride_map_selection_init(OpenRideMapSelection *selection);
@@ -40,6 +44,19 @@ void openride_map_selection_set(OpenRideMapSelection *selection,
 
 void openride_map_selection_remove(OpenRideMapSelection *selection,
                                    OpenRideSelectionMarker marker);
+
+/*
+ * Trusted optional region metadata for endpoints selected via PlaceWorld.
+ * NULL/empty clears the hint. Direct coordinate edits clear the corresponding
+ * hint automatically so map/GPS changes cannot keep stale metadata.
+ */
+void openride_map_selection_set_region_hint(OpenRideMapSelection *selection,
+                                            OpenRideSelectionMarker marker,
+                                            const char *region_id);
+
+const char *openride_map_selection_region_hint(
+    const OpenRideMapSelection *selection,
+    OpenRideSelectionMarker marker);
 
 bool openride_map_selection_complete(const OpenRideMapSelection *selection);
 

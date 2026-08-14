@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static void test_selection_flow(void)
 {
@@ -22,12 +23,38 @@ static void test_selection_flow(void)
            == OPENRIDE_MARKER_DESTINATION);
     assert(openride_map_selection_complete(&selection));
 
+    openride_map_selection_set_region_hint(
+        &selection,
+        OPENRIDE_MARKER_START,
+        "nord-pas-de-calais");
+    openride_map_selection_set_region_hint(
+        &selection,
+        OPENRIDE_MARKER_DESTINATION,
+        "picardie");
+    assert(strcmp(openride_map_selection_region_hint(
+                      &selection, OPENRIDE_MARKER_START),
+                  "nord-pas-de-calais") == 0);
+    assert(strcmp(openride_map_selection_region_hint(
+                      &selection, OPENRIDE_MARKER_DESTINATION),
+                  "picardie") == 0);
+
+    openride_map_selection_set(&selection,
+                               OPENRIDE_MARKER_DESTINATION,
+                               50.291,
+                               2.781);
+    assert(openride_map_selection_region_hint(
+               &selection, OPENRIDE_MARKER_DESTINATION) == NULL);
+    assert(openride_map_selection_region_hint(
+               &selection, OPENRIDE_MARKER_START) != NULL);
+
     assert(openride_map_selection_add(&selection, 0.0, 0.0)
            == OPENRIDE_MARKER_NONE);
 
     openride_map_selection_remove(&selection, OPENRIDE_MARKER_DESTINATION);
     assert(selection.has_start);
     assert(!selection.has_destination);
+    assert(openride_map_selection_region_hint(
+               &selection, OPENRIDE_MARKER_DESTINATION) == NULL);
 
     assert(openride_map_selection_add(&selection, 50.30, 2.79)
            == OPENRIDE_MARKER_DESTINATION);

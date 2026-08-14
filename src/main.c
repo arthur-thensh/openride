@@ -894,15 +894,12 @@ static int SDLCALL routing_world_thread_main(void *userdata)
               &context->result,
               context->error,
               sizeof(context->error))
-        : openride_routing_world_calculate_installed_cached(
+        : openride_routing_world_calculate_selection_cached(
               &context->paths,
               context->active_region,
               context->active_graph,
               context->cache,
-              context->selection.start.lat,
-              context->selection.start.lon,
-              context->selection.destination.lat,
-              context->selection.destination.lon,
+              &context->selection,
               OPENRIDE_MAX_SNAP_DISTANCE_M,
               context->profile,
               &context->route,
@@ -1007,6 +1004,12 @@ static bool routing_world_request_matches(
     if (context->active_region != active_region || context->profile != profile) return false;
     if (context->selection.has_start != selection->has_start
         || context->selection.has_destination != selection->has_destination) {
+        return false;
+    }
+    if (strcmp(context->selection.start_region_id,
+               selection->start_region_id) != 0
+        || strcmp(context->selection.destination_region_id,
+                  selection->destination_region_id) != 0) {
         return false;
     }
     if (selection->has_start
@@ -4798,6 +4801,10 @@ int main(int argc, char **argv)
                                                            OPENRIDE_MARKER_START,
                                                            chosen->lat,
                                                            chosen->lon);
+                                openride_map_selection_set_region_hint(
+                                    &selection,
+                                    OPENRIDE_MARKER_START,
+                                    chosen->region_id);
                                 start_snap.segment_id =
                                     OPENRIDE_ROUTING_SEGMENT_NONE;
                                 openride_route_destroy(&route);
@@ -4814,6 +4821,10 @@ int main(int argc, char **argv)
                                                            OPENRIDE_MARKER_DESTINATION,
                                                            chosen->lat,
                                                            chosen->lon);
+                                openride_map_selection_set_region_hint(
+                                    &selection,
+                                    OPENRIDE_MARKER_DESTINATION,
+                                    chosen->region_id);
                                 destination_snap.segment_id =
                                     OPENRIDE_ROUTING_SEGMENT_NONE;
                                 openride_route_destroy(&route);
@@ -5864,6 +5875,10 @@ int main(int argc, char **argv)
                                                            OPENRIDE_MARKER_START,
                                                            chosen->lat,
                                                            chosen->lon);
+                                openride_map_selection_set_region_hint(
+                                    &selection,
+                                    OPENRIDE_MARKER_START,
+                                    chosen->region_id);
                                 start_snap.segment_id =
                                     OPENRIDE_ROUTING_SEGMENT_NONE;
                                 openride_route_destroy(&route);
@@ -5880,6 +5895,10 @@ int main(int argc, char **argv)
                                                            OPENRIDE_MARKER_DESTINATION,
                                                            chosen->lat,
                                                            chosen->lon);
+                                openride_map_selection_set_region_hint(
+                                    &selection,
+                                    OPENRIDE_MARKER_DESTINATION,
+                                    chosen->region_id);
                                 destination_snap.segment_id =
                                     OPENRIDE_ROUTING_SEGMENT_NONE;
                                 openride_route_destroy(&route);
