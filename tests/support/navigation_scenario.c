@@ -36,17 +36,20 @@ static double heading_deg(double lat_a, double lon_a, double lat_b, double lon_b
     return heading;
 }
 
-static bool record_sample(OpenRideNavigationEngine *navigation,
-                          OpenRideNavigationSession *session,
-                          double lat,
-                          double lon,
-                          double speed_mps,
-                          double heading,
-                          double delta_s,
-                          bool verbose,
-                          OpenRideNavigationStatus *previous_status,
-                          bool *has_previous_status,
-                          OpenRideNavigationScenarioResult *result)
+static bool record_sample(
+    OpenRideNavigationEngine *navigation,
+    OpenRideNavigationSession *session,
+    const OpenRideNavigationInstructionList *instructions,
+    double lat,
+    double lon,
+    double speed_mps,
+    double heading,
+    double delta_s,
+    bool verbose,
+    OpenRideNavigationStatus *previous_status,
+    bool *has_previous_status,
+    const OpenRideNavigationInstruction **previous_instruction,
+    OpenRideNavigationScenarioResult *result)
 {
     OpenRideNavigationState state = {0};
     if (!openride_navigation_engine_update(navigation,
@@ -72,6 +75,47 @@ static bool record_sample(OpenRideNavigationEngine *navigation,
     }
     result->final_progress_ratio = state.progress_ratio;
     result->final_remaining_m = state.remaining_m;
+
+    double distance_to_instruction_m = 0.0;
+    const OpenRideNavigationInstruction *next_instruction =
+        openride_navigation_instructions_next(
+            instructions,
+            state.traveled_m,
+            &distance_to_instruction_m);
+
+    if (next_instruction && next_instruction != *previous_instruction) {
+        if (result->instruction_event_count
+            < OPENRIDE_NAVIGATION_SCENARIO_MAX_INSTRUCTION_EVENTS) {
+            OpenRideNavigationScenarioInstructionEvent *event =
+                &result->instruction_events[result->instruction_event_count++];
+            event->maneuver = next_instruction->maneuver;
+            event->geometry_index = next_instruction->geometry_index;
+            event->roundabout_exit_number =
+                next_instruction->roundabout_exit_number;
+            event->first_seen_traveled_m = state.traveled_m;
+            event->first_seen_distance_m = distance_to_instruction_m;
+        } else {
+            result->instruction_event_overflow = true;
+        }
+
+        if (verbose) {
+            if (next_instruction->maneuver == OPENRIDE_MANEUVER_ROUNDABOUT
+                && next_instruction->roundabout_exit_number > 0U) {
+                printf("  t=%6.1fs  >>> instruction: %s, sortie %u (dans %.1f m)\n",
+                       result->elapsed_s,
+                       openride_maneuver_name(next_instruction->maneuver),
+                       (unsigned)next_instruction->roundabout_exit_number,
+                       distance_to_instruction_m);
+            } else {
+                printf("  t=%6.1fs  >>> instruction: %s (dans %.1f m)\n",
+                       result->elapsed_s,
+                       openride_maneuver_name(next_instruction->maneuver),
+                       distance_to_instruction_m);
+            }
+        }
+
+        *previous_instruction = next_instruction;
+    }
 
     if (state.status == OPENRIDE_NAVIGATION_ON_ROUTE) {
         result->on_route_sample_count++;
@@ -147,8 +191,25 @@ bool openride_test_navigation_scenario_run(
 
     OpenRideNavigationEngine navigation;
     OpenRideNavigationSession session;
+    OpenRideNavigationInstructionList instructions = {0};
     openride_navigation_engine_init(&navigation);
     openride_navigation_session_init(&session);
+
+    char instruction_error[160] = {0};
+    if (!openride_navigation_instructions_build(
+            NULL,
+            route,
+            &instructions,
+            instruction_error,
+            sizeof(instruction_error))) {
+        openride_navigation_engine_destroy(&navigation);
+        set_error(error,
+                  error_size,
+                  instruction_error[0]
+                      ? instruction_error
+                      : "unable to build scenario navigation instructions");
+        return false;
+    }
 
     char navigation_error[160] = {0};
     if (!openride_navigation_engine_set_route(&navigation,
@@ -156,6 +217,7 @@ bool openride_test_navigation_scenario_run(
                                               navigation_error,
                                               sizeof(navigation_error))) {
         openride_navigation_engine_destroy(&navigation);
+        openride_navigation_instructions_destroy(&instructions);
         set_error(error, error_size,
                   navigation_error[0] ? navigation_error
                                       : "unable to initialize navigation engine");
@@ -166,6 +228,7 @@ bool openride_test_navigation_scenario_run(
 
     OpenRideNavigationStatus previous_status = OPENRIDE_NAVIGATION_INACTIVE;
     bool has_previous_status = false;
+    const OpenRideNavigationInstruction *previous_instruction = NULL;
 
     double initial_speed_kph = waypoints[0].speed_kph;
     if (!isfinite(initial_speed_kph) || initial_speed_kph <= 0.0) initial_speed_kph = 50.0;
@@ -173,10 +236,19 @@ bool openride_test_navigation_scenario_run(
     const double initial_heading = heading_deg(waypoints[0].lat, waypoints[0].lon,
                                                waypoints[1].lat, waypoints[1].lon);
 
-    bool ok = record_sample(&navigation, &session,
-                            waypoints[0].lat, waypoints[0].lon,
-                            initial_speed_mps, initial_heading, 0.0,
-                            verbose, &previous_status, &has_previous_status, result);
+    bool ok = record_sample(&navigation,
+                            &session,
+                            &instructions,
+                            waypoints[0].lat,
+                            waypoints[0].lon,
+                            initial_speed_mps,
+                            initial_heading,
+                            0.0,
+                            verbose,
+                            &previous_status,
+                            &has_previous_status,
+                            &previous_instruction,
+                            result);
 
     for (uint32_t leg = 0U; ok && leg + 1U < waypoint_count; ++leg) {
         const OpenRideNavigationScenarioWaypoint *a = &waypoints[leg];
@@ -206,9 +278,19 @@ bool openride_test_navigation_scenario_run(
             const double fraction = (double)step / (double)steps;
             const double lat = a->lat + (b->lat - a->lat) * fraction;
             const double lon = a->lon + (b->lon - a->lon) * fraction;
-            if (!record_sample(&navigation, &session,
-                               lat, lon, speed_mps, heading, delta_s,
-                               verbose, &previous_status, &has_previous_status, result)) {
+            if (!record_sample(&navigation,
+                               &session,
+                               &instructions,
+                               lat,
+                               lon,
+                               speed_mps,
+                               heading,
+                               delta_s,
+                               verbose,
+                               &previous_status,
+                               &has_previous_status,
+                               &previous_instruction,
+                               result)) {
                 ok = false;
                 break;
             }
@@ -217,15 +299,17 @@ bool openride_test_navigation_scenario_run(
 
     if (verbose && ok) {
         printf("  -> %u echantillons | %.1f s | ecart max %.1f m | "
-               "progression %.2f %% | recalcul %s\n",
+               "progression %.2f %% | recalcul %s | instructions %u\n",
                result->sample_count,
                result->elapsed_s,
                result->max_distance_from_route_m,
                result->final_progress_ratio * 100.0,
-               result->reroute_requested ? "OUI" : "NON");
+               result->reroute_requested ? "OUI" : "NON",
+               result->instruction_event_count);
     }
 
     openride_navigation_engine_destroy(&navigation);
+    openride_navigation_instructions_destroy(&instructions);
 
     if (!ok) {
         set_error(error, error_size, "navigation scenario update failed");

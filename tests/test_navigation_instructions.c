@@ -125,14 +125,11 @@ static void test_roundabout_exit_number(void)
                                                    error,
                                                    sizeof(error)));
 
-    bool found = false;
-    for (uint32_t i = 0U; i < list.count; ++i) {
-        if (list.items[i].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT) {
-            found = true;
-            assert(list.items[i].roundabout_exit_number == 2U);
-        }
-    }
-    assert(found);
+    assert(list.count == 3U);
+    assert(list.items[0].maneuver == OPENRIDE_MANEUVER_DEPART);
+    assert(list.items[1].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT);
+    assert(list.items[1].roundabout_exit_number == 2U);
+    assert(list.items[2].maneuver == OPENRIDE_MANEUVER_ARRIVE);
 
     openride_navigation_instructions_destroy(&list);
     openride_route_destroy(&route);

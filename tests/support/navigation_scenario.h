@@ -2,6 +2,7 @@
 #define OPENRIDE_TEST_NAVIGATION_SCENARIO_H
 
 #include "openride/navigation_engine.h"
+#include "openride/navigation_instructions.h"
 #include "openride/navigation_session.h"
 
 #include <stdbool.h>
@@ -15,12 +16,28 @@ typedef struct OpenRideNavigationScenarioWaypoint {
     double speed_kph;
 } OpenRideNavigationScenarioWaypoint;
 
+#define OPENRIDE_NAVIGATION_SCENARIO_MAX_INSTRUCTION_EVENTS 32U
+
+typedef struct OpenRideNavigationScenarioInstructionEvent {
+    OpenRideManeuverType maneuver;
+    uint32_t geometry_index;
+    uint8_t roundabout_exit_number;
+    double first_seen_traveled_m;
+    double first_seen_distance_m;
+} OpenRideNavigationScenarioInstructionEvent;
+
 typedef struct OpenRideNavigationScenarioResult {
     uint32_t sample_count;
     uint32_t status_transition_count;
     uint32_t on_route_sample_count;
     uint32_t off_route_sample_count;
     uint32_t arrived_sample_count;
+
+    uint32_t instruction_event_count;
+    bool instruction_event_overflow;
+    OpenRideNavigationScenarioInstructionEvent
+        instruction_events[OPENRIDE_NAVIGATION_SCENARIO_MAX_INSTRUCTION_EVENTS];
+
     bool saw_off_route;
     bool saw_return_to_route;
     bool saw_arrival;
