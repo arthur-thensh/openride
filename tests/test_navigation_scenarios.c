@@ -302,6 +302,212 @@ static void run_multi_region_instruction_progression(void)
     openride_routing_graph_destroy(&right);
 }
 
+
+typedef struct RealRerouteFixture {
+    const OpenRideRoutingGraph *graph;
+    OpenRideRoutingNodeId destination;
+    uint32_t callback_count;
+} RealRerouteFixture;
+
+static OpenRideRoutingGraph build_real_reroute_graph(
+    OpenRideRoutingNodeId *start_out,
+    OpenRideRoutingNodeId *destination_out)
+{
+    OpenRideRoutingGraph graph = {0};
+    OpenRideRoutingGraphBuilder *builder =
+        openride_routing_graph_builder_create();
+    assert(builder != NULL);
+
+    const OpenRideRoutingNodeId start =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0000);
+    const OpenRideRoutingNodeId junction =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0060);
+    const OpenRideRoutingNodeId north =
+        openride_routing_graph_builder_add_node(builder, 50.0060, 3.0060);
+    const OpenRideRoutingNodeId destination =
+        openride_routing_graph_builder_add_node(builder, 50.0060, 3.0120);
+
+    const OpenRideRoutingNodeId wrong0 =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0072);
+    const OpenRideRoutingNodeId wrong1 =
+        openride_routing_graph_builder_add_node(builder, 50.0000, 3.0100);
+    const OpenRideRoutingNodeId wrong2 =
+        openride_routing_graph_builder_add_node(builder, 50.0020, 3.0120);
+    const OpenRideRoutingNodeId alternate =
+        openride_routing_graph_builder_add_node(builder, 50.0040, 3.0120);
+
+    OpenRideRoutingEdgeAttributes road =
+        openride_routing_edge_attributes_default();
+    road.road_class = OPENRIDE_ROAD_PRIMARY;
+    road.surface = OPENRIDE_SURFACE_ASPHALT;
+    road.max_speed_kph = 50U;
+
+    road.length_m = 300.0;
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, start, junction, &road));
+
+    road.length_m = 350.0;
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, junction, north, &road));
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, north, destination, &road));
+
+    /*
+     * Deterministic costs for the reroute fixture:
+     *
+     *   initial normal branch from junction = 350 + 350 = 700 m
+     *   initial wrong branch from junction  = 250 + 4 * 150 = 850 m
+     *
+     * Therefore the original route selects the normal branch.
+     *
+     * Once the rider has reached wrong0:
+     *
+     *   continue forward to destination = 4 * 150 = 600 m
+     *   backtrack via junction          = 250 + 700 = 950 m
+     *
+     * Therefore the real reroute must follow the branch actually taken by the
+     * simulated GPS instead of asking the rider to turn around.
+     */
+    road.length_m = 250.0;
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, junction, wrong0, &road));
+
+    road.length_m = 150.0;
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, wrong0, wrong1, &road));
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, wrong1, wrong2, &road));
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, wrong2, alternate, &road));
+    assert(openride_routing_graph_builder_add_bidirectional_edge(
+        builder, alternate, destination, &road));
+
+    char error[160] = {0};
+    assert(openride_routing_graph_builder_build(
+        builder, &graph, error, sizeof(error)));
+    openride_routing_graph_builder_destroy(builder);
+
+    *start_out = start;
+    *destination_out = destination;
+    return graph;
+}
+
+static bool calculate_real_reroute(void *userdata,
+                                   double lat,
+                                   double lon,
+                                   OpenRideRoute *route,
+                                   char *error,
+                                   size_t error_size)
+{
+    RealRerouteFixture *fixture = userdata;
+    assert(fixture != NULL);
+    assert(fixture->graph != NULL);
+    ++fixture->callback_count;
+
+    double snap_distance_m = INFINITY;
+    const OpenRideRoutingNodeId start =
+        openride_routing_graph_nearest_node(
+            fixture->graph, lat, lon, &snap_distance_m);
+    if (start == OPENRIDE_ROUTING_NODE_NONE || snap_distance_m > 150.0) {
+        snprintf(error,
+                 error_size,
+                 "reroute GPS is too far from synthetic graph");
+        return false;
+    }
+
+    OpenRideRoutingRequest request = openride_routing_request_default();
+    request.start = start;
+    request.destination = fixture->destination;
+    request.profile = OPENRIDE_ROUTING_PROFILE_FASTEST;
+    return openride_routing_engine_calculate(
+        fixture->graph, &request, route, error, error_size);
+}
+
+static void run_real_reroute_after_missed_turn(void)
+{
+    OpenRideRoutingNodeId start = OPENRIDE_ROUTING_NODE_NONE;
+    OpenRideRoutingNodeId destination = OPENRIDE_ROUTING_NODE_NONE;
+    OpenRideRoutingGraph graph =
+        build_real_reroute_graph(&start, &destination);
+
+    OpenRideRoutingRequest request = openride_routing_request_default();
+    request.start = start;
+    request.destination = destination;
+    request.profile = OPENRIDE_ROUTING_PROFILE_FASTEST;
+
+    OpenRideRoute initial_route = {0};
+    char error[160] = {0};
+    assert(openride_routing_engine_calculate(
+        &graph, &request, &initial_route, error, sizeof(error)));
+
+    /*
+     * Initial shortest route must be:
+     * start -> junction -> north -> destination.
+     */
+    assert(initial_route.node_count == 4U);
+    assert(initial_route.nodes[0] == start);
+    assert(initial_route.nodes[1] == 1U);
+    assert(initial_route.nodes[2] == 2U);
+    assert(initial_route.nodes[3] == destination);
+
+    const OpenRideNavigationScenarioWaypoint track[] = {
+        {"depart",                 50.0000, 3.0000, 45.0},
+        {"carrefour",              50.0000, 3.0060, 45.0},
+        {"mauvaise branche",       50.0000, 3.0072, 40.0},
+        {"nouvelle route",         50.0000, 3.0100, 40.0},
+        {"bifurcation",            50.0020, 3.0120, 35.0},
+        {"approche destination",   50.0040, 3.0120, 35.0},
+        {"arrivee",                50.0060, 3.0120, 20.0}
+    };
+
+    RealRerouteFixture fixture = {
+        .graph = &graph,
+        .destination = destination,
+        .callback_count = 0U
+    };
+
+    OpenRideNavigationScenarioResult result;
+    assert(openride_test_navigation_scenario_run_with_reroute(
+        "virage rate avec recalcul reel",
+        &initial_route,
+        track,
+        (uint32_t)(sizeof(track) / sizeof(track[0])),
+        5.0,
+        calculate_real_reroute,
+        &fixture,
+        true,
+        &result,
+        error,
+        sizeof(error)));
+
+    assert(result.saw_off_route);
+    assert(result.reroute_requested);
+    assert(!result.reroute_install_failed);
+    assert(result.real_reroute_count == 1U);
+    assert(result.session_reroute_count == 1U);
+    assert(fixture.callback_count == 1U);
+    assert(result.saw_return_to_route);
+    assert(result.saw_arrival);
+    assert(result.final_progress_ratio > 0.999);
+
+    bool saw_generation_one_instruction = false;
+    bool saw_generation_one_arrival = false;
+    for (uint32_t i = 0U; i < result.instruction_event_count; ++i) {
+        const OpenRideNavigationScenarioInstructionEvent *event =
+            &result.instruction_events[i];
+        if (event->route_generation != 1U) continue;
+        saw_generation_one_instruction = true;
+        if (event->maneuver == OPENRIDE_MANEUVER_ARRIVE) {
+            saw_generation_one_arrival = true;
+        }
+    }
+    assert(saw_generation_one_instruction);
+    assert(saw_generation_one_arrival);
+
+    openride_route_destroy(&initial_route);
+    openride_routing_graph_destroy(&graph);
+}
+
 int main(void)
 {
     OpenRideRoute route = make_reference_route();
@@ -311,6 +517,7 @@ int main(void)
     openride_route_destroy(&route);
 
     run_multi_region_instruction_progression();
+    run_real_reroute_after_missed_turn();
 
     puts("\nNavigation scenario tests: OK");
     return 0;

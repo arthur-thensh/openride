@@ -22,9 +22,18 @@ typedef struct OpenRideNavigationScenarioInstructionEvent {
     OpenRideManeuverType maneuver;
     uint32_t geometry_index;
     uint8_t roundabout_exit_number;
+    uint32_t route_generation;
     double first_seen_traveled_m;
     double first_seen_distance_m;
 } OpenRideNavigationScenarioInstructionEvent;
+
+typedef bool (*OpenRideNavigationScenarioRerouteCallback)(
+    void *userdata,
+    double lat,
+    double lon,
+    OpenRideRoute *route,
+    char *error,
+    size_t error_size);
 
 typedef struct OpenRideNavigationScenarioResult {
     uint32_t sample_count;
@@ -42,6 +51,9 @@ typedef struct OpenRideNavigationScenarioResult {
     bool saw_return_to_route;
     bool saw_arrival;
     bool reroute_requested;
+    bool reroute_install_failed;
+    uint32_t real_reroute_count;
+    uint32_t session_reroute_count;
     double elapsed_s;
     double max_distance_from_route_m;
     double final_progress_ratio;
@@ -54,6 +66,19 @@ bool openride_test_navigation_scenario_run(
     const OpenRideNavigationScenarioWaypoint *waypoints,
     uint32_t waypoint_count,
     double sample_step_m,
+    bool verbose,
+    OpenRideNavigationScenarioResult *result,
+    char *error,
+    size_t error_size);
+
+bool openride_test_navigation_scenario_run_with_reroute(
+    const char *name,
+    const OpenRideRoute *route,
+    const OpenRideNavigationScenarioWaypoint *waypoints,
+    uint32_t waypoint_count,
+    double sample_step_m,
+    OpenRideNavigationScenarioRerouteCallback reroute_callback,
+    void *reroute_userdata,
     bool verbose,
     OpenRideNavigationScenarioResult *result,
     char *error,

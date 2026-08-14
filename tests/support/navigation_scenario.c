@@ -39,7 +39,11 @@ static double heading_deg(double lat_a, double lon_a, double lat_b, double lon_b
 static bool record_sample(
     OpenRideNavigationEngine *navigation,
     OpenRideNavigationSession *session,
-    const OpenRideNavigationInstructionList *instructions,
+    OpenRideNavigationInstructionList *instructions,
+    OpenRideRoute *owned_reroute,
+    OpenRideNavigationScenarioRerouteCallback reroute_callback,
+    void *reroute_userdata,
+    uint32_t *route_generation,
     double lat,
     double lon,
     double speed_mps,
@@ -49,7 +53,9 @@ static bool record_sample(
     OpenRideNavigationStatus *previous_status,
     bool *has_previous_status,
     const OpenRideNavigationInstruction **previous_instruction,
-    OpenRideNavigationScenarioResult *result)
+    OpenRideNavigationScenarioResult *result,
+    char *error,
+    size_t error_size)
 {
     OpenRideNavigationState state = {0};
     if (!openride_navigation_engine_update(navigation,
@@ -92,6 +98,7 @@ static bool record_sample(
             event->geometry_index = next_instruction->geometry_index;
             event->roundabout_exit_number =
                 next_instruction->roundabout_exit_number;
+            event->route_generation = *route_generation;
             event->first_seen_traveled_m = state.traveled_m;
             event->first_seen_distance_m = distance_to_instruction_m;
         } else {
@@ -154,25 +161,107 @@ static bool record_sample(
                    result->elapsed_s);
         }
 
+        if (!reroute_callback) {
+            /*
+             * Legacy scenario: validate the trigger only. No replacement route
+             * is installed, so suppress repeated requests from the unchanged
+             * deliberately off-route trace.
+             */
+            openride_navigation_session_set_auto_reroute(session, false);
+            return true;
+        }
+
+        OpenRideRoute candidate = {0};
+        char reroute_error[160] = {0};
+        if (!reroute_callback(reroute_userdata,
+                              lat,
+                              lon,
+                              &candidate,
+                              reroute_error,
+                              sizeof(reroute_error))) {
+            result->reroute_install_failed = true;
+            set_error(error,
+                      error_size,
+                      reroute_error[0]
+                          ? reroute_error
+                          : "scenario reroute calculation failed");
+            openride_route_destroy(&candidate);
+            return false;
+        }
+
+        OpenRideNavigationInstructionList candidate_instructions = {0};
+        char instruction_error[160] = {0};
+        if (!openride_navigation_instructions_build(
+                NULL,
+                &candidate,
+                &candidate_instructions,
+                instruction_error,
+                sizeof(instruction_error))) {
+            result->reroute_install_failed = true;
+            set_error(error,
+                      error_size,
+                      instruction_error[0]
+                          ? instruction_error
+                          : "scenario reroute instructions failed");
+            openride_route_destroy(&candidate);
+            return false;
+        }
+
         /*
-         * This runner validates the trigger only. It does not calculate and
-         * install a replacement route, so a real reroute has not happened.
-         * Disable further automatic requests for the remainder of this trace;
-         * otherwise the unchanged off-route fixture would request again after
-         * every cooldown and make the scenario output misleading.
+         * owned_reroute has a stable address. NavigationEngine stores a route
+         * pointer, so move the newly calculated route there before installing
+         * it. This also supports another reroute later without dangling route
+         * storage.
          */
-        openride_navigation_session_set_auto_reroute(session, false);
+        openride_route_destroy(owned_reroute);
+        *owned_reroute = candidate;
+        memset(&candidate, 0, sizeof(candidate));
+
+        char navigation_error[160] = {0};
+        if (!openride_navigation_engine_set_route(
+                navigation,
+                owned_reroute,
+                navigation_error,
+                sizeof(navigation_error))) {
+            result->reroute_install_failed = true;
+            set_error(error,
+                      error_size,
+                      navigation_error[0]
+                          ? navigation_error
+                          : "scenario reroute installation failed");
+            openride_navigation_instructions_destroy(&candidate_instructions);
+            return false;
+        }
+
+        openride_navigation_instructions_destroy(instructions);
+        *instructions = candidate_instructions;
+        memset(&candidate_instructions, 0, sizeof(candidate_instructions));
+
+        openride_navigation_session_mark_rerouted(session);
+        ++result->real_reroute_count;
+        ++(*route_generation);
+        *previous_instruction = NULL;
+
+        if (verbose) {
+            printf("  t=%6.1fs  >>> nouvel itineraire installe "
+                   "(%.1f m, generation %u)\n",
+                   result->elapsed_s,
+                   owned_reroute->distance_m,
+                   *route_generation);
+        }
     }
 
     return true;
 }
 
-bool openride_test_navigation_scenario_run(
+static bool run_scenario(
     const char *name,
     const OpenRideRoute *route,
     const OpenRideNavigationScenarioWaypoint *waypoints,
     uint32_t waypoint_count,
     double sample_step_m,
+    OpenRideNavigationScenarioRerouteCallback reroute_callback,
+    void *reroute_userdata,
     bool verbose,
     OpenRideNavigationScenarioResult *result,
     char *error,
@@ -192,6 +281,8 @@ bool openride_test_navigation_scenario_run(
     OpenRideNavigationEngine navigation;
     OpenRideNavigationSession session;
     OpenRideNavigationInstructionList instructions = {0};
+    OpenRideRoute owned_reroute = {0};
+    uint32_t route_generation = 0U;
     openride_navigation_engine_init(&navigation);
     openride_navigation_session_init(&session);
 
@@ -239,6 +330,10 @@ bool openride_test_navigation_scenario_run(
     bool ok = record_sample(&navigation,
                             &session,
                             &instructions,
+                            &owned_reroute,
+                            reroute_callback,
+                            reroute_userdata,
+                            &route_generation,
                             waypoints[0].lat,
                             waypoints[0].lon,
                             initial_speed_mps,
@@ -248,7 +343,9 @@ bool openride_test_navigation_scenario_run(
                             &previous_status,
                             &has_previous_status,
                             &previous_instruction,
-                            result);
+                            result,
+                            error,
+                            error_size);
 
     for (uint32_t leg = 0U; ok && leg + 1U < waypoint_count; ++leg) {
         const OpenRideNavigationScenarioWaypoint *a = &waypoints[leg];
@@ -281,6 +378,10 @@ bool openride_test_navigation_scenario_run(
             if (!record_sample(&navigation,
                                &session,
                                &instructions,
+                               &owned_reroute,
+                               reroute_callback,
+                               reroute_userdata,
+                               &route_generation,
                                lat,
                                lon,
                                speed_mps,
@@ -290,7 +391,9 @@ bool openride_test_navigation_scenario_run(
                                &previous_status,
                                &has_previous_status,
                                &previous_instruction,
-                               result)) {
+                               result,
+                               error,
+                               error_size)) {
                 ok = false;
                 break;
             }
@@ -299,17 +402,23 @@ bool openride_test_navigation_scenario_run(
 
     if (verbose && ok) {
         printf("  -> %u echantillons | %.1f s | ecart max %.1f m | "
-               "progression %.2f %% | recalcul %s | instructions %u\n",
+               "progression %.2f %% | recalcul %s/%u | instructions %u\n",
                result->sample_count,
                result->elapsed_s,
                result->max_distance_from_route_m,
                result->final_progress_ratio * 100.0,
                result->reroute_requested ? "OUI" : "NON",
+               result->real_reroute_count,
                result->instruction_event_count);
     }
 
+    const OpenRideNavigationTripStats *stats =
+        openride_navigation_session_stats(&session);
+    result->session_reroute_count = stats ? stats->reroute_count : 0U;
+
     openride_navigation_engine_destroy(&navigation);
     openride_navigation_instructions_destroy(&instructions);
+    openride_route_destroy(&owned_reroute);
 
     if (!ok) {
         set_error(error, error_size, "navigation scenario update failed");
@@ -318,4 +427,58 @@ bool openride_test_navigation_scenario_run(
 
     set_error(error, error_size, "");
     return true;
+}
+
+bool openride_test_navigation_scenario_run(
+    const char *name,
+    const OpenRideRoute *route,
+    const OpenRideNavigationScenarioWaypoint *waypoints,
+    uint32_t waypoint_count,
+    double sample_step_m,
+    bool verbose,
+    OpenRideNavigationScenarioResult *result,
+    char *error,
+    size_t error_size)
+{
+    return run_scenario(name,
+                        route,
+                        waypoints,
+                        waypoint_count,
+                        sample_step_m,
+                        NULL,
+                        NULL,
+                        verbose,
+                        result,
+                        error,
+                        error_size);
+}
+
+bool openride_test_navigation_scenario_run_with_reroute(
+    const char *name,
+    const OpenRideRoute *route,
+    const OpenRideNavigationScenarioWaypoint *waypoints,
+    uint32_t waypoint_count,
+    double sample_step_m,
+    OpenRideNavigationScenarioRerouteCallback reroute_callback,
+    void *reroute_userdata,
+    bool verbose,
+    OpenRideNavigationScenarioResult *result,
+    char *error,
+    size_t error_size)
+{
+    if (!reroute_callback) {
+        set_error(error, error_size, "reroute callback is required");
+        return false;
+    }
+    return run_scenario(name,
+                        route,
+                        waypoints,
+                        waypoint_count,
+                        sample_step_m,
+                        reroute_callback,
+                        reroute_userdata,
+                        verbose,
+                        result,
+                        error,
+                        error_size);
 }
