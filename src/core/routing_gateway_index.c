@@ -267,7 +267,7 @@ bool openride_routing_gateway_index_build(
 {
     if (!first_region_id || !second_region_id || !first_graph || !second_graph
         || !index || first_graph == second_graph
-        || first_region_id[0] == '\\0' || second_region_id[0] == '\\0') {
+        || first_region_id[0] == '\0' || second_region_id[0] == '\0') {
         set_error(error, error_size, "invalid routing gateway index build request");
         return false;
     }
@@ -417,9 +417,9 @@ bool openride_routing_gateway_index_save(
     char *error,
     size_t error_size)
 {
-    if (!index || !path || path[0] == '\\0'
-        || index->first_region_id[0] == '\\0'
-        || index->second_region_id[0] == '\\0'
+    if (!index || !path || path[0] == '\0'
+        || index->first_region_id[0] == '\0'
+        || index->second_region_id[0] == '\0'
         || (index->count > 0U && !index->records)) {
         set_error(error, error_size, "invalid routing gateway index save request");
         return false;
@@ -488,7 +488,7 @@ bool openride_routing_gateway_index_load(
     char *error,
     size_t error_size)
 {
-    if (!index || !path || path[0] == '\\0') {
+    if (!index || !path || path[0] == '\0') {
         set_error(error, error_size, "invalid routing gateway index load request");
         return false;
     }
@@ -527,9 +527,9 @@ bool openride_routing_gateway_index_load(
         return false;
     }
 
-    first_id[sizeof(first_id) - 1U] = '\\0';
-    second_id[sizeof(second_id) - 1U] = '\\0';
-    if (first_id[0] == '\\0' || second_id[0] == '\\0') {
+    first_id[sizeof(first_id) - 1U] = '\0';
+    second_id[sizeof(second_id) - 1U] = '\0';
+    if (first_id[0] == '\0' || second_id[0] == '\0') {
         fclose(file);
         openride_routing_gateway_index_destroy(index);
         set_error(error, error_size, "routing gateway index has invalid region ids");
@@ -657,7 +657,7 @@ bool openride_routing_gateway_index_pair_path(
 {
     if (!output || output_size == 0U || !routing_dir
         || !first_region_id || !second_region_id
-        || first_region_id[0] == '\\0' || second_region_id[0] == '\\0') {
+        || first_region_id[0] == '\0' || second_region_id[0] == '\0') {
         return false;
     }
 

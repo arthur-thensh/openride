@@ -67,6 +67,7 @@ add_library(openride_core STATIC
     src/core/app_storage.c
     src/core/platform_paths.c
     src/core/region_manager.c
+    src/core/region_network.c
     src/core/region_install.c
     src/core/touch_input.c
     src/core/location_provider.c
@@ -255,6 +256,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_region_install PRIVATE openride_core)
     add_test(NAME region_install COMMAND test_region_install "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.osm.pbf")
+
+    add_executable(test_region_network
+        tests/test_region_network.c
+    )
+    target_link_libraries(test_region_network PRIVATE openride_core)
+    add_test(NAME region_network COMMAND test_region_network)
 
     add_executable(test_mbtiles
         tests/test_mbtiles.c
