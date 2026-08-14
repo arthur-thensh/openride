@@ -1680,6 +1680,7 @@ static OpenRideMobilePlaceSearchLayout mobile_place_search_layout(
 static void draw_place_search_overlay(SDL_Renderer *renderer,
                                       bool active,
                                       bool available,
+                                      const char *title,
                                       const char *query,
                                       const OpenRidePlaceSearchResult *results,
                                       uint32_t result_count,
@@ -1715,7 +1716,7 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
                      layout.panel.x + 12.0f * layout.ui_scale,
                      layout.panel.y + 10.0f * layout.ui_scale,
                      layout.title_scale,
-                     "RECHERCHER UN LIEU");
+                     title && title[0] ? title : "RECHERCHER UN LIEU");
 
     SDL_SetRenderDrawColor(renderer, 39, 46, 53, 255);
     SDL_RenderFillRect(renderer, &layout.query);
@@ -1813,7 +1814,10 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
     SDL_RenderRect(renderer, &panel);
 
     SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
-    SDL_RenderDebugText(renderer, x + 14.0f, y + 12.0f, "RECHERCHE HORS LIGNE");
+    SDL_RenderDebugText(renderer,
+                        x + 14.0f,
+                        y + 12.0f,
+                        title && title[0] ? title : "RECHERCHER UN LIEU");
     SDL_SetRenderDrawColor(renderer, 173, 183, 191, 255);
     SDL_RenderDebugText(renderer, x + 14.0f, y + 29.0f, "Entrer: centrer | Fleches: choisir | Esc: fermer");
 
@@ -7651,9 +7655,16 @@ int main(int argc, char **argv)
 #endif
                        &route_download_plan,
                        width);
+        const char *place_search_title =
+            place_search_purpose == OPENRIDE_PLACE_SEARCH_ROUTE_START
+                ? "RECHERCHER LE DEPART"
+                : place_search_purpose == OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION
+                    ? "RECHERCHER L'ARRIVEE"
+                    : "RECHERCHER UN LIEU";
         draw_place_search_overlay(renderer,
                                   place_search_active,
                                   place_world != NULL,
+                                  place_search_title,
                                   place_search_query,
                                   place_search_results,
                                   place_search_result_count,
