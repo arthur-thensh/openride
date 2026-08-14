@@ -1,6 +1,9 @@
 #include "openride/location_provider.h"
+#include "openride/simulated_location_provider.h"
+#include "openride/map_selection.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 
 typedef struct FakeProvider {
@@ -45,6 +48,47 @@ int main(void)
     assert(fake.polls == 1);
     openride_location_provider_stop(&provider);
     assert(fake.stops == 1);
+
+    OpenRideRoutePoint points[2] = {
+        {50.0000, 3.0000},
+        {50.0000, 3.0100}
+    };
+    OpenRideRoute route = {0};
+    route.geometry = points;
+    route.geometry_count = 2U;
+    route.distance_m = openride_geo_distance_m(
+        points[0].lat, points[0].lon,
+        points[1].lat, points[1].lon);
+
+    OpenRideGPSSimulator simulator;
+    openride_gps_simulator_init(&simulator);
+    char error[128] = {0};
+    assert(openride_gps_simulator_set_route(
+        &simulator, &route, 36.0, error, sizeof(error)));
+
+    OpenRideLocationProvider simulated_provider;
+    OpenRideSimulatedLocationContext simulated_context;
+    openride_simulated_location_provider_init(
+        &simulated_provider,
+        &simulated_context,
+        &simulator,
+        2.0,
+        4.0);
+
+    assert(openride_location_provider_start(&simulated_provider));
+    assert(simulator.active);
+
+    OpenRideLocationSample simulated_sample = {0};
+    assert(openride_location_provider_poll(
+        &simulated_provider, 0.5, &simulated_sample));
+    assert(simulated_sample.valid);
+    assert(fabs(simulated_sample.accuracy_m - 4.0) < 1e-9);
+    assert(fabs(simulated_sample.speed_mps - 10.0) < 1e-9);
+    assert(simulated_sample.lon > points[0].lon);
+
+    openride_location_provider_stop(&simulated_provider);
+    assert(!simulator.active);
+    openride_gps_simulator_destroy(&simulator);
 
     puts("Location provider tests: OK");
     return 0;

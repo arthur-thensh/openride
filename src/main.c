@@ -19,6 +19,7 @@
 #include "openride/location_provider.h"
 #ifdef __ANDROID__
 #include "openride/android_location_provider.h"
+#include "openride/simulated_location_provider.h"
 #include "openride/android_voice_guidance.h"
 #include "openride/android_region_download.h"
 #include <SDL3/SDL_system.h>
@@ -53,6 +54,7 @@
 #define OPENRIDE_LOOP_DISTANCE_MIN_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MAX_M 300000.0
 #define OPENRIDE_GPS_SIMULATION_TIME_SCALE 20.0
+#define OPENRIDE_ANDROID_GPS_SIMULATION_TIME_SCALE 5.0
 #define OPENRIDE_GPX_RECORDING_MIN_STEP_M 10.0
 #define OPENRIDE_GPX_NAVIGATION_SPEED_KPH 50.0
 #define OPENRIDE_SEARCH_MAX_RESULTS 8U
@@ -2100,7 +2102,8 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
     OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
     OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE
+    OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
+    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION
 } OpenRideMobilePanelAction;
 
 typedef struct OpenRideMobilePanelHit {
@@ -2284,7 +2287,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 5U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
 
@@ -2347,12 +2350,13 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
             };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
-            static const OpenRideMobilePanelAction actions[5] = {
+            static const OpenRideMobilePanelAction actions[6] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
-                OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE
+                OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
+                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION
             };
             hit.action = actions[i];
         } else {
@@ -2376,6 +2380,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                                   bool follow_gps,
                                   bool auto_reroute,
                                   bool voice_enabled,
+                                  bool simulated_gps_active,
                                   const OpenRideRegionDefinition *region,
                                   const OpenRideRegionStatus *region_status,
                                   bool region_is_active,
@@ -2407,7 +2412,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 5U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
 
@@ -2628,14 +2633,20 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
         mobile_draw_panel_title(renderer, &layout, "PARAMETRES", "Touche une ligne pour modifier");
-        char labels[5][96];
+        char labels[6][96];
         snprintf(labels[0], sizeof(labels[0]), "Style carte : %s", openride_map_style_name(map_style));
         snprintf(labels[1], sizeof(labels[1]), "Profil routage : %s", openride_routing_profile_name(profile));
         snprintf(labels[2], sizeof(labels[2]), "Suivi GPS : %s", follow_gps ? "OUI" : "NON");
         snprintf(labels[3], sizeof(labels[3]), "Recalcul auto : %s", auto_reroute ? "OUI" : "NON");
         snprintf(labels[4], sizeof(labels[4]), "Guidage vocal : %s", voice_enabled ? "OUI" : "NON");
-        for (uint32_t i = 0U; i < 5U; ++i) {
-            mobile_draw_button(renderer, &layout.rows[i], labels[i], layout.text_scale, false, false);
+        snprintf(labels[5], sizeof(labels[5]), "GPS simule [DEV] : %s", simulated_gps_active ? "OUI" : "NON");
+        for (uint32_t i = 0U; i < 6U; ++i) {
+            mobile_draw_button(renderer,
+                               &layout.rows[i],
+                               labels[i],
+                               layout.text_scale,
+                               i == 5U && simulated_gps_active,
+                               false);
         }
         mobile_draw_button(renderer, &layout.back, "Retour", layout.text_scale, false, false);
         return;
@@ -2753,6 +2764,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            bool follow_gps,
                            bool auto_reroute,
                            bool voice_enabled,
+                           bool simulated_gps_active,
                            const OpenRideRegionDefinition *region,
                            const OpenRideRegionStatus *region_status,
                            bool region_is_active,
@@ -2779,6 +2791,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           follow_gps,
                           auto_reroute,
                           voice_enabled,
+                          simulated_gps_active,
                           region,
                           region_status,
                           region_is_active,
@@ -2792,6 +2805,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           viewport_width);
     return;
 #endif
+    (void)simulated_gps_active;
     const float w = 580.0f;
     const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
     const float actual_w = viewport_width > (int)w ? w : (float)viewport_width - 16.0f;
@@ -3692,6 +3706,7 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
                                const OpenRideNavigationSession *session,
                                const OpenRideDriveModeState *drive,
                                bool auto_reroute,
+                               bool simulated_gps,
                                int viewport_width,
                                int viewport_height)
 {
@@ -3797,13 +3812,13 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
     if (drive->gps_quality == OPENRIDE_GPS_GOOD || drive->gps_quality == OPENRIDE_GPS_FAIR) {
         snprintf(gps_text,
                  sizeof(gps_text),
-                 "%s %.0f m",
+                 simulated_gps ? "SIM DEV | %s %.0f m" : "%s %.0f m",
                  openride_drive_mode_gps_quality_name(drive->gps_quality),
                  drive->gps_accuracy_m);
     } else {
         snprintf(gps_text,
                  sizeof(gps_text),
-                 "%s",
+                 simulated_gps ? "SIM DEV | %s" : "%s",
                  openride_drive_mode_gps_quality_name(drive->gps_quality));
     }
     switch (drive->gps_quality) {
@@ -4321,12 +4336,15 @@ int main(int argc, char **argv)
 #ifdef __ANDROID__
     OpenRideLocationProvider location_provider;
     OpenRideAndroidLocationContext android_location_context;
+    OpenRideLocationProvider simulated_location_provider;
+    OpenRideSimulatedLocationContext simulated_location_context;
     openride_android_location_provider_init(&location_provider, &android_location_context);
     bool real_gps_active = false;
     bool real_gps_requested = false;
+    bool simulated_gps_active = false;
     bool route_start_gps_pending = false;
-    double real_gps_sample_age_s = INFINITY;
-    double real_gps_accuracy_m = 0.0;
+    double android_gps_sample_age_s = INFINITY;
+    double android_gps_accuracy_m = 0.0;
 #endif
     OpenRideNavigationState navigation_state = {0};
     OpenRideGPSSample gps_sample = {0};
@@ -4356,6 +4374,14 @@ int main(int argc, char **argv)
     openride_drive_mode_init(&drive_mode);
     openride_app_lifecycle_init(&app_lifecycle);
     openride_gps_simulator_init(&gps_simulator);
+#ifdef __ANDROID__
+    openride_simulated_location_provider_init(
+        &simulated_location_provider,
+        &simulated_location_context,
+        &gps_simulator,
+        OPENRIDE_ANDROID_GPS_SIMULATION_TIME_SCALE,
+        3.0);
+#endif
     OpenRideRoutingProfile routing_profile = OPENRIDE_ROUTING_PROFILE_TOURING;
     OpenRideMapStyle map_style = OPENRIDE_MAP_STYLE_TRAIL;
     double loop_target_distance_m = 100000.0;
@@ -5007,7 +5033,15 @@ int main(int argc, char **argv)
                         }
                     } else if (event.key.key == SDLK_S) {
 #ifdef __ANDROID__
-                        if (real_gps_active) {
+                        if (simulated_gps_active) {
+                            openride_location_provider_stop(
+                                &simulated_location_provider);
+                            simulated_gps_active = false;
+                            openride_drive_mode_set_active(&drive_mode, false);
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "simulation GPS [DEV] arretee");
+                        } else if (real_gps_active) {
                             openride_location_provider_stop(&location_provider);
                             real_gps_active = false;
                             snprintf(route_status, sizeof(route_status), "GPS reel arrete");
@@ -5582,7 +5616,7 @@ int main(int argc, char **argv)
                                     real_gps_active =
                                         openride_location_provider_start(
                                             &location_provider);
-                                    real_gps_sample_age_s = INFINITY;
+                                    android_gps_sample_age_s = INFINITY;
                                 }
                                 if (real_gps_active) {
                                     snprintf(route_status,
@@ -5920,6 +5954,70 @@ int main(int argc, char **argv)
                                                              voice_enabled ? 1 : 0,
                                                              error,
                                                              sizeof(error));
+                            }
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION) {
+                            if (simulated_gps_active) {
+                                openride_location_provider_stop(
+                                    &simulated_location_provider);
+                                simulated_gps_active = false;
+                                openride_drive_mode_set_active(&drive_mode, false);
+                                camera.bearing_deg = 0.0;
+                                gps_sample_valid = false;
+                                memset(&gps_sample, 0, sizeof(gps_sample));
+                                memset(&navigation_state, 0, sizeof(navigation_state));
+                                memset(&filtered_location, 0, sizeof(filtered_location));
+                                openride_location_filter_reset(&location_filter);
+                                openride_voice_guidance_reset(&voice_guidance);
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "simulation GPS [DEV] arretee");
+                            } else if (!route_valid || !gps_simulator.route) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "calcule un itineraire avant la simulation GPS");
+                            } else {
+                                real_gps_requested = false;
+                                if (real_gps_active) {
+                                    openride_location_provider_stop(
+                                        &location_provider);
+                                    real_gps_active = false;
+                                }
+
+                                openride_navigation_session_reset(
+                                    &navigation_session);
+                                openride_navigation_session_set_auto_reroute(
+                                    &navigation_session,
+                                    auto_reroute);
+                                openride_location_filter_reset(&location_filter);
+                                memset(&filtered_location, 0, sizeof(filtered_location));
+                                memset(&navigation_state, 0, sizeof(navigation_state));
+                                memset(&gps_sample, 0, sizeof(gps_sample));
+                                gps_sample_valid = false;
+
+                                simulated_gps_active =
+                                    openride_location_provider_start(
+                                        &simulated_location_provider);
+                                if (simulated_gps_active) {
+                                    android_gps_sample_age_s = INFINITY;
+                                    android_gps_accuracy_m = 3.0;
+                                    openride_drive_mode_set_active(
+                                        &drive_mode, true);
+                                    openride_drive_mode_set_auto_zoom(
+                                        &drive_mode, true);
+                                    follow_gps = true;
+                                    openride_voice_guidance_reset(
+                                        &voice_guidance);
+                                    app_panel = OPENRIDE_APP_PANEL_NONE;
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "SIMULATION GPS [DEV] x%.0f",
+                                             OPENRIDE_ANDROID_GPS_SIMULATION_TIME_SCALE);
+                                } else {
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "simulation GPS indisponible");
+                                }
                             }
                         }
                         break;
@@ -6425,7 +6523,7 @@ int main(int argc, char **argv)
                     real_gps_requested = true;
                     if (openride_location_provider_start(&location_provider)) {
                         real_gps_active = true;
-                        real_gps_sample_age_s = INFINITY;
+                        android_gps_sample_age_s = INFINITY;
                         snprintf(route_status, sizeof(route_status), "GPS repris apres retour application");
                     } else {
                         snprintf(route_status, sizeof(route_status), "GPS a relancer apres retour application");
@@ -6475,6 +6573,11 @@ int main(int argc, char **argv)
             } else if (action == OPENRIDE_DRIVE_ACTION_GPS) {
 #ifdef __ANDROID__
                 real_gps_requested = false;
+                if (simulated_gps_active) {
+                    openride_location_provider_stop(
+                        &simulated_location_provider);
+                    simulated_gps_active = false;
+                }
                 if (real_gps_active) {
                     openride_location_provider_stop(&location_provider);
                     real_gps_active = false;
@@ -6508,19 +6611,32 @@ int main(int argc, char **argv)
             } else if (action == OPENRIDE_TOOLBAR_ROUTE) {
 #ifdef __ANDROID__
                 if (route_valid) {
-                    real_gps_requested = true;
-                    if (!real_gps_active) {
-                        real_gps_active = openride_location_provider_start(&location_provider);
-                        real_gps_sample_age_s = INFINITY;
-                    }
-                    if (real_gps_active) {
+                    if (simulated_gps_active) {
                         openride_drive_mode_set_active(&drive_mode, true);
                         openride_drive_mode_set_auto_zoom(&drive_mode, true);
                         follow_gps = true;
-                        snprintf(route_status, sizeof(route_status), "navigation demarree");
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "navigation GPS simulee [DEV]");
                     } else {
-                        snprintf(route_status, sizeof(route_status),
-                                 "autorise la localisation Android puis retouche Demarrer");
+                        real_gps_requested = true;
+                        if (!real_gps_active) {
+                            real_gps_active =
+                                openride_location_provider_start(
+                                    &location_provider);
+                            android_gps_sample_age_s = INFINITY;
+                        }
+                        if (real_gps_active) {
+                            openride_drive_mode_set_active(&drive_mode, true);
+                            openride_drive_mode_set_auto_zoom(&drive_mode, true);
+                            follow_gps = true;
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "navigation demarree");
+                        } else {
+                            snprintf(route_status, sizeof(route_status),
+                                     "autorise la localisation Android puis retouche Demarrer");
+                        }
                     }
                 } else {
                     app_panel = OPENRIDE_APP_PANEL_ROUTE;
@@ -6576,7 +6692,18 @@ int main(int argc, char **argv)
                 }
             } else if (action == OPENRIDE_TOOLBAR_GPS) {
 #ifdef __ANDROID__
-                if (real_gps_active) {
+                if (simulated_gps_active) {
+                    openride_location_provider_stop(
+                        &simulated_location_provider);
+                    simulated_gps_active = false;
+                    openride_drive_mode_set_active(&drive_mode, false);
+                    camera.bearing_deg = 0.0;
+                    gps_sample_valid = false;
+                    memset(&filtered_location, 0, sizeof(filtered_location));
+                    snprintf(route_status,
+                             sizeof(route_status),
+                             "simulation GPS [DEV] arretee");
+                } else if (real_gps_active) {
                     if (route_valid) {
                         openride_drive_mode_set_active(&drive_mode, true);
                         openride_drive_mode_set_auto_zoom(&drive_mode, true);
@@ -6594,7 +6721,7 @@ int main(int argc, char **argv)
                     real_gps_requested = true;
                     if (openride_location_provider_start(&location_provider)) {
                         real_gps_active = true;
-                        real_gps_sample_age_s = INFINITY;
+                        android_gps_sample_age_s = INFINITY;
                         if (route_valid) {
                             openride_drive_mode_set_active(&drive_mode, true);
                             openride_drive_mode_set_auto_zoom(&drive_mode, true);
@@ -7142,7 +7269,7 @@ int main(int argc, char **argv)
                     }
 
 #ifdef __ANDROID__
-                    if (real_gps_active) {
+                    if (real_gps_active || simulated_gps_active) {
                         openride_drive_mode_set_active(&drive_mode, true);
                         openride_drive_mode_set_auto_zoom(&drive_mode, true);
                         follow_gps = true;
@@ -7237,7 +7364,7 @@ int main(int argc, char **argv)
                     }
                 }
 #ifdef __ANDROID__
-                if (real_gps_active) {
+                if (real_gps_active || simulated_gps_active) {
                     openride_drive_mode_set_active(&drive_mode, true);
                     openride_drive_mode_set_auto_zoom(&drive_mode, true);
                     follow_gps = true;
@@ -7272,14 +7399,23 @@ int main(int argc, char **argv)
         if (delta_seconds > 0.25) delta_seconds = 0.25;
 
 #ifdef __ANDROID__
-        if (real_gps_active) {
-            if (isfinite(real_gps_sample_age_s)) {
-                real_gps_sample_age_s += delta_seconds;
+        const bool android_location_active =
+            simulated_gps_active || real_gps_active;
+        OpenRideLocationProvider *android_location_provider =
+            simulated_gps_active
+                ? &simulated_location_provider
+                : &location_provider;
+        if (android_location_active) {
+            if (isfinite(android_gps_sample_age_s)) {
+                android_gps_sample_age_s += delta_seconds;
             }
             OpenRideLocationSample real_sample;
-            if (openride_location_provider_poll(&location_provider, delta_seconds, &real_sample)) {
-                real_gps_sample_age_s = 0.0;
-                real_gps_accuracy_m = real_sample.accuracy_m;
+            if (openride_location_provider_poll(
+                    android_location_provider,
+                    delta_seconds,
+                    &real_sample)) {
+                android_gps_sample_age_s = 0.0;
+                android_gps_accuracy_m = real_sample.accuracy_m;
                 gps_sample_valid = real_sample.valid;
                 gps_sample.valid = real_sample.valid;
                 gps_sample.finished = false;
@@ -7288,7 +7424,9 @@ int main(int argc, char **argv)
                 gps_sample.speed_mps = real_sample.speed_mps;
                 gps_sample.heading_deg = real_sample.heading_deg;
 
-                if (route_start_gps_pending && gps_sample_valid) {
+                if (route_start_gps_pending
+                    && gps_sample_valid
+                    && !simulated_gps_active) {
                     openride_map_selection_set(&selection,
                                                OPENRIDE_MARKER_START,
                                                gps_sample.lat,
@@ -7302,7 +7440,7 @@ int main(int argc, char **argv)
                     snprintf(route_status,
                              sizeof(route_status),
                              "depart GPS acquis (precision %.0f m)",
-                             real_gps_accuracy_m);
+                             android_gps_accuracy_m);
                 }
 
                 if (openride_location_filter_update(&location_filter,
@@ -7452,9 +7590,10 @@ int main(int argc, char **argv)
             const double drive_heading = filtered_location.valid
                 ? filtered_location.heading_deg : gps_sample.heading_deg;
 #ifdef __ANDROID__
-            const bool drive_gps_active = real_gps_active;
-            const double drive_sample_age_s = real_gps_sample_age_s;
-            const double drive_accuracy_m = real_gps_accuracy_m;
+            const bool drive_gps_active =
+                real_gps_active || simulated_gps_active;
+            const double drive_sample_age_s = android_gps_sample_age_s;
+            const double drive_accuracy_m = android_gps_accuracy_m;
 #else
             const bool drive_gps_active = gps_sample_valid;
             const double drive_sample_age_s = gps_sample_valid ? 0.0 : INFINITY;
@@ -7694,6 +7833,7 @@ int main(int argc, char **argv)
                                &navigation_session,
                                &drive_mode,
                                auto_reroute,
+                               simulated_gps_active,
                                width,
                                height);
         }
@@ -7710,6 +7850,11 @@ int main(int argc, char **argv)
                        follow_gps,
                        auto_reroute,
                        voice_enabled,
+#ifdef __ANDROID__
+                       simulated_gps_active,
+#else
+                       false,
+#endif
                        region,
                        &region_status,
                        region == active_region,
@@ -7719,7 +7864,7 @@ int main(int argc, char **argv)
                        &selection,
                        gps_sample_valid,
 #ifdef __ANDROID__
-                       real_gps_accuracy_m,
+                       android_gps_accuracy_m,
 #else
                        gps_sample_valid ? 5.0 : 0.0,
 #endif
@@ -7759,6 +7904,10 @@ int main(int argc, char **argv)
         region_prepare_thread = NULL;
     }
     real_gps_requested = false;
+    if (simulated_gps_active) {
+        openride_location_provider_stop(&simulated_location_provider);
+        simulated_gps_active = false;
+    }
     if (real_gps_active) {
         openride_location_provider_stop(&location_provider);
         real_gps_active = false;

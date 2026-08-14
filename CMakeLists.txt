@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.25.0 LANGUAGES C)
+project(OpenRide VERSION 0.26.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -63,6 +63,7 @@ add_library(openride_core STATIC
     src/core/voice_guidance.c
     src/core/location_filter.c
     src/core/gps_simulator.c
+    src/core/simulated_location_provider.c
     src/core/gpx.c
     src/core/place_search.c
     src/core/france_lite.c
