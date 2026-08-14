@@ -1,5 +1,6 @@
 #include "openride/routing_world.h"
 #include "openride/routing_gateway_index.h"
+#include "openride/region_network.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -783,7 +784,6 @@ static bool region_contains_point(const OpenRidePlatformPaths *paths,
                                     &status,
                                     local_error,
                                     sizeof(local_error))
-        || !status.routing_installed
         || !status.poly_present) {
         return false;
     }
@@ -821,6 +821,106 @@ static const OpenRideRegionDefinition *region_for_point(
         }
     }
     return NULL;
+}
+
+static void copy_corridor_summary(
+    const OpenRideRegionCorridor *source,
+    OpenRideRoutingWorldCorridorSummary *destination)
+{
+    if (!destination) return;
+    memset(destination, 0, sizeof(*destination));
+    if (!source) return;
+
+    destination->estimated_distance_m = source->estimated_distance_m;
+    const uint32_t count =
+        source->count < OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS
+            ? source->count
+            : OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS;
+    destination->count = count;
+
+    for (uint32_t i = 0U; i < count; ++i) {
+        if (!source->regions[i]) continue;
+        snprintf(destination->region_ids[i],
+                 sizeof(destination->region_ids[i]),
+                 "%s",
+                 source->regions[i]->id);
+    }
+}
+
+bool openride_routing_world_plan_regions(
+    const OpenRideRegionDefinition *start_region,
+    double start_lat,
+    double start_lon,
+    const OpenRideRegionDefinition *destination_region,
+    double destination_lat,
+    double destination_lon,
+    const bool *installed,
+    size_t installed_count,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    if (result) memset(result, 0, sizeof(*result));
+    if (!start_region || !destination_region || !result
+        || !isfinite(start_lat) || !isfinite(start_lon)
+        || !isfinite(destination_lat) || !isfinite(destination_lon)) {
+        set_error(error, error_size, "invalid RoutingWorld regional plan request");
+        return false;
+    }
+
+    OpenRideRegionNetworkPlan plan;
+    memset(&plan, 0, sizeof(plan));
+    if (!openride_region_network_plan(start_region,
+                                      start_lat,
+                                      start_lon,
+                                      destination_region,
+                                      destination_lat,
+                                      destination_lon,
+                                      installed,
+                                      installed_count,
+                                      &plan,
+                                      error,
+                                      error_size)) {
+        return false;
+    }
+
+    snprintf(result->start_region_id,
+             sizeof(result->start_region_id),
+             "%s",
+             start_region->id);
+    snprintf(result->destination_region_id,
+             sizeof(result->destination_region_id),
+             "%s",
+             destination_region->id);
+    result->multi_region =
+        strcmp(start_region->id, destination_region->id) != 0;
+    result->corridor_planned = true;
+
+    copy_corridor_summary(&plan.recommended,
+                          &result->recommended_corridor);
+
+    const uint32_t missing_count =
+        plan.missing_count < OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS
+            ? plan.missing_count
+            : OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS;
+    result->missing_region_count = missing_count;
+    result->download_required = missing_count > 0U;
+    for (uint32_t i = 0U; i < missing_count; ++i) {
+        if (!plan.missing_regions[i]) continue;
+        snprintf(result->missing_region_ids[i],
+                 sizeof(result->missing_region_ids[i]),
+                 "%s",
+                 plan.missing_regions[i]->id);
+    }
+
+    result->has_installed_alternative = plan.has_installed_alternative;
+    if (plan.has_installed_alternative) {
+        copy_corridor_summary(&plan.installed_alternative,
+                              &result->installed_alternative);
+    }
+
+    set_error(error, error_size, "");
+    return true;
 }
 
 static bool load_region_graph(const OpenRidePlatformPaths *paths,
@@ -965,32 +1065,79 @@ bool openride_routing_world_calculate_installed_cached(
         return false;
     }
 
+    /*
+     * Region identification is based on every .poly already known locally,
+     * including a contour downloaded for a region whose heavy offline package
+     * has not been generated yet. Graph availability is checked separately.
+     */
     const OpenRideRegionDefinition *start_region =
         region_for_point(paths, active_region, start_lat, start_lon);
     const OpenRideRegionDefinition *destination_region =
         region_for_point(paths, active_region, destination_lat, destination_lon);
 
     if (!start_region) {
-        set_error(error, error_size, "start is outside installed routing coverage");
+        set_error(error, error_size, "start is outside known regional coverage");
         return false;
     }
     if (!destination_region) {
-        set_error(error, error_size, "destination is outside installed routing coverage");
+        set_error(error, error_size, "destination is outside known regional coverage");
+        return false;
+    }
+
+    if (openride_region_count() > OPENRIDE_REGION_NETWORK_MAX_REGIONS) {
+        set_error(error, error_size, "regional catalog exceeds RoutingWorld capacity");
+        return false;
+    }
+
+    bool installed[OPENRIDE_REGION_NETWORK_MAX_REGIONS] = {false};
+    if (!openride_region_network_installed_mask(paths,
+                                                installed,
+                                                OPENRIDE_REGION_NETWORK_MAX_REGIONS,
+                                                error,
+                                                error_size)) {
         return false;
     }
 
     OpenRideRoutingWorldResult local_result;
     memset(&local_result, 0, sizeof(local_result));
-    snprintf(local_result.start_region_id,
-             sizeof(local_result.start_region_id),
-             "%s",
-             start_region->id);
-    snprintf(local_result.destination_region_id,
-             sizeof(local_result.destination_region_id),
-             "%s",
-             destination_region->id);
-    local_result.multi_region =
-        strcmp(start_region->id, destination_region->id) != 0;
+    if (!openride_routing_world_plan_regions(start_region,
+                                             start_lat,
+                                             start_lon,
+                                             destination_region,
+                                             destination_lat,
+                                             destination_lon,
+                                             installed,
+                                             openride_region_count(),
+                                             &local_result,
+                                             error,
+                                             error_size)) {
+        return false;
+    }
+
+    /*
+     * Missing regions stop the recommended route here. We deliberately do NOT
+     * auto-select the installed-only alternative: it is a fallback choice for
+     * the user, while the recommended corridor remains independent of download
+     * state.
+     */
+    if (local_result.download_required) {
+        if (result) *result = local_result;
+        set_error(error, error_size, "additional regional download required");
+        return false;
+    }
+
+    /*
+     * RegionNetwork is now authoritative for corridor selection. Direct
+     * routing remains implemented for one or two regions. Corridors with 3+
+     * installed regions are surfaced distinctly so the next milestone can
+     * execute them sequentially rather than incorrectly trying a direct
+     * start/destination graph hand-off.
+     */
+    if (local_result.recommended_corridor.count > 2U) {
+        if (result) *result = local_result;
+        set_error(error, error_size, "multi-hop regional corridor ready");
+        return false;
+    }
 
     OpenRideRoutingWorldLoadedGraph start_loaded;
     OpenRideRoutingWorldLoadedGraph destination_loaded;
@@ -1005,6 +1152,7 @@ bool openride_routing_world_calculate_installed_cached(
                            &start_loaded,
                            error,
                            error_size)) {
+        if (result) *result = local_result;
         return false;
     }
 
@@ -1030,6 +1178,7 @@ bool openride_routing_world_calculate_installed_cached(
                                error,
                                error_size)) {
             loaded_graph_destroy(&start_loaded);
+            if (result) *result = local_result;
             return false;
         }
 

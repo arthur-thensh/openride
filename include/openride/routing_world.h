@@ -3,6 +3,7 @@
 
 #include "openride/platform_paths.h"
 #include "openride/region_manager.h"
+#include "openride/region_network.h"
 #include "openride/routing_engine.h"
 #include "openride/routing_graph.h"
 
@@ -11,11 +12,30 @@
 #include <stdint.h>
 
 #define OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES 8U
+#define OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS OPENRIDE_REGION_NETWORK_MAX_REGIONS
+#define OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE 64U
+
+typedef struct OpenRideRoutingWorldCorridorSummary {
+    char region_ids[OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS]
+                   [OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
+    uint32_t count;
+    double estimated_distance_m;
+} OpenRideRoutingWorldCorridorSummary;
 
 typedef struct OpenRideRoutingWorldResult {
     bool multi_region;
-    char start_region_id[64];
-    char destination_region_id[64];
+    char start_region_id[OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
+    char destination_region_id[OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
+
+    bool corridor_planned;
+    bool download_required;
+    OpenRideRoutingWorldCorridorSummary recommended_corridor;
+    char missing_region_ids[OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS]
+                           [OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
+    uint32_t missing_region_count;
+    bool has_installed_alternative;
+    OpenRideRoutingWorldCorridorSummary installed_alternative;
+
     uint32_t shared_gateway_count;
     uint32_t attempted_gateways;
     double gateway_lat;
@@ -30,6 +50,26 @@ typedef struct OpenRideRoutingWorldCache {
 
 void openride_routing_world_cache_init(OpenRideRoutingWorldCache *cache);
 void openride_routing_world_cache_destroy(OpenRideRoutingWorldCache *cache);
+
+/*
+ * Convert a RegionNetwork decision into the RoutingWorld public result.
+ *
+ * The recommended corridor is always computed without download penalties.
+ * Installed-only routing, when available, is exposed only as a separate
+ * fallback. This function does not load graphs or calculate a road route.
+ */
+bool openride_routing_world_plan_regions(
+    const OpenRideRegionDefinition *start_region,
+    double start_lat,
+    double start_lon,
+    const OpenRideRegionDefinition *destination_region,
+    double destination_lat,
+    double destination_lon,
+    const bool *installed,
+    size_t installed_count,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size);
 
 /*
  * First RoutingWorld primitive: route directly between two regional graphs.

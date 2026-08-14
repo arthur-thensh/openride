@@ -5826,12 +5826,65 @@ int main(int argc, char **argv)
             } else if (!calculation_ok) {
                 openride_route_destroy(&routing_world_context.route);
                 route_valid = false;
-                snprintf(route_status,
-                         sizeof(route_status),
-                         "itineraire impossible: %.180s",
-                         routing_world_context.error[0]
-                             ? routing_world_context.error
-                             : "aucune continuite inter-region");
+
+                if (routing_world_context.result.download_required
+                    && routing_world_context.result.missing_region_count > 0U) {
+                    const char *missing_id =
+                        routing_world_context.result.missing_region_ids[0];
+                    const OpenRideRegionDefinition *missing_region =
+                        openride_region_find(missing_id);
+                    const char *missing_name =
+                        missing_region ? missing_region->name : missing_id;
+
+                    if (routing_world_context.result.missing_region_count == 1U) {
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "carte requise: %.150s%s",
+                                 missing_name,
+                                 routing_world_context.result.has_installed_alternative
+                                     ? " | alternative dispo"
+                                     : "");
+                    } else {
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "%u cartes requises, dont %.120s%s",
+                                 routing_world_context.result.missing_region_count,
+                                 missing_name,
+                                 routing_world_context.result.has_installed_alternative
+                                     ? " | alternative dispo"
+                                     : "");
+                    }
+
+                    SDL_Log("RoutingWorld plan: %s -> %s | corridor=%u regions | "
+                            "missing=%u | first_missing=%s | installed_alternative=%s",
+                            routing_world_context.result.start_region_id,
+                            routing_world_context.result.destination_region_id,
+                            routing_world_context.result.recommended_corridor.count,
+                            routing_world_context.result.missing_region_count,
+                            missing_name,
+                            routing_world_context.result.has_installed_alternative
+                                ? "yes"
+                                : "no");
+                } else if (routing_world_context.result.corridor_planned
+                           && routing_world_context.result.recommended_corridor.count > 2U
+                           && strcmp(routing_world_context.error,
+                                     "multi-hop regional corridor ready") == 0) {
+                    snprintf(route_status,
+                             sizeof(route_status),
+                             "corridor multi-region pret: %u regions",
+                             routing_world_context.result.recommended_corridor.count);
+                    SDL_Log("RoutingWorld multi-hop corridor ready: %s -> %s | %u regions",
+                            routing_world_context.result.start_region_id,
+                            routing_world_context.result.destination_region_id,
+                            routing_world_context.result.recommended_corridor.count);
+                } else {
+                    snprintf(route_status,
+                             sizeof(route_status),
+                             "itineraire impossible: %.180s",
+                             routing_world_context.error[0]
+                                 ? routing_world_context.error
+                                 : "aucune continuite inter-region");
+                }
             } else {
                 openride_route_destroy(&route);
                 route = routing_world_context.route;
