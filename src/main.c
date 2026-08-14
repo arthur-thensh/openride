@@ -1837,10 +1837,23 @@ typedef enum OpenRidePlaceSearchPurpose {
     OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION
 } OpenRidePlaceSearchPurpose;
 
+typedef struct OpenRideRouteDownloadPlan {
+    bool available;
+    bool downloading;
+    bool has_installed_alternative;
+    uint32_t count;
+    uint32_t index;
+    char region_ids[OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS]
+                   [OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
+    OpenRideMapSelection selection;
+    OpenRideRoutingProfile profile;
+} OpenRideRouteDownloadPlan;
+
 typedef enum OpenRideAppPanel {
     OPENRIDE_APP_PANEL_NONE = 0,
     OPENRIDE_APP_PANEL_MAIN,
     OPENRIDE_APP_PANEL_ROUTE,
+    OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS,
     OPENRIDE_APP_PANEL_FAVORITES,
     OPENRIDE_APP_PANEL_HISTORY,
     OPENRIDE_APP_PANEL_REGIONS,
@@ -1983,6 +1996,7 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START,
     OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
     OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE,
+    OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED,
     OPENRIDE_MOBILE_PANEL_FAVORITES,
     OPENRIDE_MOBILE_PANEL_HISTORY,
     OPENRIDE_MOBILE_PANEL_REGIONS,
@@ -2178,6 +2192,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 1U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
@@ -2232,6 +2247,8 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
                 OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE
             };
             hit.action = actions[i];
+        } else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) {
+            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED;
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
             static const OpenRideMobilePanelAction actions[4] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
@@ -2269,8 +2286,19 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                                   const OpenRideMapSelection *selection,
                                   bool gps_valid,
                                   double gps_accuracy_m,
+                                  const OpenRideRouteDownloadPlan *route_download_plan_state,
                                   int viewport_width)
 {
+    /*
+     * The state itself is owned by main(). Rendering only needs a read-only
+     * snapshot. Keeping the existing dot syntax below also makes the UI block
+     * independent of the pointer lifetime.
+     */
+    const OpenRideRouteDownloadPlan route_download_plan =
+        route_download_plan_state
+            ? *route_download_plan_state
+            : (OpenRideRouteDownloadPlan){0};
+
     int width = viewport_width;
     int height = 0;
     SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
@@ -2279,6 +2307,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 1U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
@@ -2367,6 +2396,92 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                          hint_scale,
                          "Tu peux aussi fermer et choisir les points sur la carte");
 
+        mobile_draw_button(renderer,
+                           &layout.back,
+                           "Retour",
+                           layout.text_scale,
+                           false,
+                           false);
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) {
+        mobile_draw_panel_title(renderer,
+                                &layout,
+                                "CARTES REQUISES",
+                                route_download_plan.downloading
+                                    ? "Telechargement pour l'itineraire"
+                                    : "Le corridor recommande traverse des cartes absentes");
+
+        const float line_scale =
+            layout.text_scale > 1.75f ? 1.75f : layout.text_scale;
+        float line_y = layout.panel.y + 74.0f * layout.ui_scale;
+        const float line_x = layout.panel.x + 18.0f * layout.ui_scale;
+        const float line_step = 25.0f * layout.ui_scale;
+
+        SDL_SetRenderDrawColor(renderer, 232, 236, 239, 255);
+        for (uint32_t i = 0U;
+             i < route_download_plan.count && i < 6U;
+             ++i) {
+            const OpenRideRegionDefinition *required =
+                openride_region_find(route_download_plan.region_ids[i]);
+            char line[112];
+            snprintf(line,
+                     sizeof(line),
+                     "%s %s",
+                     i == route_download_plan.index
+                         && route_download_plan.downloading ? ">" : "-",
+                     required ? required->name
+                              : route_download_plan.region_ids[i]);
+            draw_scaled_text(renderer,
+                             line_x,
+                             line_y,
+                             line_scale,
+                             line);
+            line_y += line_step;
+        }
+
+        if (route_download_plan.has_installed_alternative) {
+            SDL_SetRenderDrawColor(renderer, 245, 194, 83, 255);
+            draw_scaled_text(renderer,
+                             line_x,
+                             line_y + 6.0f * layout.ui_scale,
+                             line_scale,
+                             "Une alternative avec les cartes actuelles existe");
+        }
+
+        if (route_download_plan.downloading) {
+            SDL_SetRenderDrawColor(renderer, 175, 185, 193, 255);
+            draw_scaled_text(renderer,
+                             line_x,
+                             layout.rows[0].y - 45.0f * layout.ui_scale,
+                             line_scale,
+                             region_work_status && region_work_status[0]
+                                 ? region_work_status
+                                 : "Preparation de la carte...");
+            if (region_progress >= 0.0) {
+                char progress_text[48];
+                snprintf(progress_text,
+                         sizeof(progress_text),
+                         "Progression : %.0f %%",
+                         region_progress * 100.0);
+                draw_scaled_text(renderer,
+                                 line_x,
+                                 layout.rows[0].y - 20.0f * layout.ui_scale,
+                                 line_scale,
+                                 progress_text);
+            }
+        }
+
+        mobile_draw_button(
+            renderer,
+            &layout.rows[0],
+            route_download_plan.downloading
+                ? "TELECHARGEMENT EN COURS..."
+                : "TELECHARGER ET CALCULER",
+            layout.text_scale,
+            !route_download_plan.downloading,
+            false);
         mobile_draw_button(renderer,
                            &layout.back,
                            "Retour",
@@ -2532,6 +2647,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            const OpenRideMapSelection *selection,
                            bool gps_valid,
                            double gps_accuracy_m,
+                           const OpenRideRouteDownloadPlan *route_download_plan_state,
                            int viewport_width)
 {
     if (panel == OPENRIDE_APP_PANEL_NONE) return;
@@ -2556,6 +2672,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           selection,
                           gps_valid,
                           gps_accuracy_m,
+                          route_download_plan_state,
                           viewport_width);
     return;
 #endif
@@ -2615,6 +2732,15 @@ static void draw_app_panel(SDL_Renderer *renderer,
                             x + 18,
                             y + 322,
                             "Esc: retour | placement sur carte toujours disponible");
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) {
+        SDL_RenderDebugText(renderer, x + 18, y + 16, "CARTES REQUISES");
+        SDL_RenderDebugText(renderer,
+                            x + 18,
+                            y + 58,
+                            "Installe les regions requises depuis Android.");
         return;
     }
 
@@ -4131,6 +4257,8 @@ int main(int argc, char **argv)
     bool place_search_active = false;
     OpenRidePlaceSearchPurpose place_search_purpose =
         OPENRIDE_PLACE_SEARCH_BROWSE;
+    OpenRideRouteDownloadPlan route_download_plan;
+    memset(&route_download_plan, 0, sizeof(route_download_plan));
     char place_search_query[128] = {0};
     OpenRidePlaceSearchResult place_search_results[OPENRIDE_SEARCH_MAX_RESULTS];
     uint32_t place_search_result_count = 0U;
@@ -5258,7 +5386,10 @@ int main(int argc, char **argv)
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             app_panel_selected = 0U;
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_BACK) {
-                            app_panel = OPENRIDE_APP_PANEL_MAIN;
+                            app_panel =
+                                app_panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
+                                    ? OPENRIDE_APP_PANEL_ROUTE
+                                    : OPENRIDE_APP_PANEL_MAIN;
                             app_panel_selected = 0U;
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SEARCH) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
@@ -5346,6 +5477,56 @@ int main(int argc, char **argv)
                                          sizeof(route_status),
                                          "choisis un depart et une arrivee");
                             }
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED) {
+#ifdef __ANDROID__
+                            if (route_download_plan.available
+                                && !route_download_plan.downloading
+                                && route_download_plan.count > 0U
+                                && !region_busy) {
+                                route_download_plan.downloading = true;
+                                route_download_plan.index = 0U;
+                                route_download_plan.selection = selection;
+                                route_download_plan.profile = routing_profile;
+
+                                const OpenRideRegionDefinition *required =
+                                    openride_region_find(
+                                        route_download_plan.region_ids[0]);
+                                if (!required) {
+                                    route_download_plan.downloading = false;
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "region requise inconnue");
+                                } else {
+                                    region = required;
+                                    openride_region_get_status(
+                                        &platform_paths,
+                                        region,
+                                        &region_status,
+                                        error,
+                                        sizeof(error));
+                                    begin_android_region_install(
+                                        &platform_paths,
+                                        region,
+                                        &region_status,
+                                        &region_prepare_context,
+                                        &region_prepare_thread,
+                                        &region_download_started,
+                                        &region_download_is_poly,
+                                        &region_busy,
+                                        &region_progress,
+                                        region_work_status,
+                                        sizeof(region_work_status),
+                                        error,
+                                        sizeof(error));
+                                    if (!region_busy
+                                        && !region_download_started
+                                        && !region_prepare_thread) {
+                                        route_download_plan.downloading = false;
+                                    }
+                                }
+                            }
+#endif
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_FAVORITES) {
                             refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                             app_panel = OPENRIDE_APP_PANEL_FAVORITES;
@@ -6167,6 +6348,9 @@ int main(int argc, char **argv)
                 region_download_is_poly = false;
                 region_busy = false;
                 region_progress = -1.0;
+                if (route_download_plan.downloading) {
+                    route_download_plan.downloading = false;
+                }
                 snprintf(region_work_status, sizeof(region_work_status),
                          "Etat du telechargement indisponible");
             } else if (region_download_status.state == OPENRIDE_ANDROID_DOWNLOAD_RUNNING) {
@@ -6199,14 +6383,83 @@ int main(int argc, char **argv)
                     if (openride_region_status_ready(&region_status)) {
                         region_busy = false;
                         region_progress = 1.0;
-                        if (region != active_region) {
-                            snprintf(region_work_status, sizeof(region_work_status),
-                                     "Contour pret - activation en cours");
-                            region_activation_requested = true;
-                        } else {
-                            snprintf(region_work_status, sizeof(region_work_status),
-                                     "Contour de region ajoute a MapWorld");
-                        }
+                            if (route_download_plan.downloading) {
+                                refresh_map_world_overview(map_world,
+                                                           &platform_paths);
+                                if (place_world) {
+                                    openride_place_world_refresh(place_world,
+                                                                 error,
+                                                                 sizeof(error));
+                                }
+
+                                ++route_download_plan.index;
+                                if (route_download_plan.index
+                                    < route_download_plan.count) {
+                                    const OpenRideRegionDefinition *next_required =
+                                        openride_region_find(
+                                            route_download_plan.region_ids[
+                                                route_download_plan.index]);
+                                    if (!next_required) {
+                                        route_download_plan.downloading = false;
+                                        snprintf(region_work_status,
+                                                 sizeof(region_work_status),
+                                                 "Region requise suivante inconnue");
+                                    } else {
+                                        region = next_required;
+                                        openride_region_get_status(
+                                            &platform_paths,
+                                            region,
+                                            &region_status,
+                                            error,
+                                            sizeof(error));
+                                        begin_android_region_install(
+                                            &platform_paths,
+                                            region,
+                                            &region_status,
+                                            &region_prepare_context,
+                                            &region_prepare_thread,
+                                            &region_download_started,
+                                            &region_download_is_poly,
+                                            &region_busy,
+                                            &region_progress,
+                                            region_work_status,
+                                            sizeof(region_work_status),
+                                            error,
+                                            sizeof(error));
+                                        if (!region_busy
+                                            && !region_download_started
+                                            && !region_prepare_thread) {
+                                            route_download_plan.downloading =
+                                                false;
+                                        }
+                                    }
+                                } else {
+                                    route_download_plan.downloading = false;
+                                    route_download_plan.available = false;
+                                    selection = route_download_plan.selection;
+                                    routing_profile =
+                                        route_download_plan.profile;
+                                    app_panel = OPENRIDE_APP_PANEL_NONE;
+                                    route_dirty =
+                                        openride_map_selection_complete(
+                                            &selection);
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "cartes pretes - recalcul itineraire...");
+                                    snprintf(region_work_status,
+                                             sizeof(region_work_status),
+                                             "Cartes requises installees");
+                                }
+                            } else if (region != active_region) {
+                                snprintf(region_work_status,
+                                         sizeof(region_work_status),
+                                         "Contour pret - activation en cours");
+                                region_activation_requested = true;
+                            } else {
+                                snprintf(region_work_status,
+                                         sizeof(region_work_status),
+                                         "Contour de region ajoute a MapWorld");
+                            }
                     } else if (region_status.source_pbf_present) {
                         region_prepare_thread = start_region_prepare_thread(&region_prepare_context,
                                                                              &platform_paths,
@@ -6258,6 +6511,9 @@ int main(int argc, char **argv)
                 region_download_is_poly = false;
                 region_busy = false;
                 region_progress = -1.0;
+                if (route_download_plan.downloading) {
+                    route_download_plan.downloading = false;
+                }
                 snprintf(region_work_status, sizeof(region_work_status),
                          "%s%s%s",
                          region_download_status.state == OPENRIDE_ANDROID_DOWNLOAD_CANCELLED
@@ -6282,10 +6538,78 @@ int main(int argc, char **argv)
                 openride_region_get_status(&platform_paths, region,
                                            &region_status, error, sizeof(error));
                 if (prepared) {
-                    snprintf(region_work_status, sizeof(region_work_status),
-                             "Region prete - activation en cours");
-                    region_activation_requested = true;
+                    if (route_download_plan.downloading) {
+                        refresh_map_world_overview(map_world, &platform_paths);
+                        if (place_world) {
+                            openride_place_world_refresh(place_world,
+                                                         error,
+                                                         sizeof(error));
+                        }
+
+                        ++route_download_plan.index;
+                        if (route_download_plan.index
+                            < route_download_plan.count) {
+                            const OpenRideRegionDefinition *next_required =
+                                openride_region_find(
+                                    route_download_plan.region_ids[
+                                        route_download_plan.index]);
+                            if (!next_required) {
+                                route_download_plan.downloading = false;
+                                snprintf(region_work_status,
+                                         sizeof(region_work_status),
+                                         "Region requise suivante inconnue");
+                            } else {
+                                region = next_required;
+                                openride_region_get_status(&platform_paths,
+                                                           region,
+                                                           &region_status,
+                                                           error,
+                                                           sizeof(error));
+                                begin_android_region_install(
+                                    &platform_paths,
+                                    region,
+                                    &region_status,
+                                    &region_prepare_context,
+                                    &region_prepare_thread,
+                                    &region_download_started,
+                                    &region_download_is_poly,
+                                    &region_busy,
+                                    &region_progress,
+                                    region_work_status,
+                                    sizeof(region_work_status),
+                                    error,
+                                    sizeof(error));
+                                if (!region_busy
+                                    && !region_download_started
+                                    && !region_prepare_thread) {
+                                    route_download_plan.downloading = false;
+                                }
+                            }
+                        } else {
+                            route_download_plan.downloading = false;
+                            route_download_plan.available = false;
+                            selection = route_download_plan.selection;
+                            routing_profile = route_download_plan.profile;
+                            app_panel = OPENRIDE_APP_PANEL_NONE;
+                            route_dirty =
+                                openride_map_selection_complete(&selection);
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "cartes pretes - recalcul itineraire...");
+                            snprintf(region_work_status,
+                                     sizeof(region_work_status),
+                                     "Cartes requises installees");
+                        }
+                    } else {
+                        snprintf(region_work_status,
+                                 sizeof(region_work_status),
+                                 "Region prete - activation en cours");
+                        region_activation_requested = true;
+                    }
                 } else {
+                    if (route_download_plan.downloading) {
+                        route_download_plan.downloading = false;
+                    }
                     snprintf(region_work_status, sizeof(region_work_status),
                              "Preparation impossible: %.150s",
                              region_prepare_context.error[0]
@@ -6398,6 +6722,34 @@ int main(int argc, char **argv)
 
                 if (routing_world_context.result.download_required
                     && routing_world_context.result.missing_region_count > 0U) {
+                    memset(&route_download_plan,
+                           0,
+                           sizeof(route_download_plan));
+                    route_download_plan.available = true;
+                    route_download_plan.count =
+                        routing_world_context.result.missing_region_count;
+                    if (route_download_plan.count
+                        > OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS) {
+                        route_download_plan.count =
+                            OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS;
+                    }
+                    route_download_plan.has_installed_alternative =
+                        routing_world_context.result.has_installed_alternative;
+                    route_download_plan.selection = selection;
+                    route_download_plan.profile = routing_profile;
+                    for (uint32_t i = 0U;
+                         i < route_download_plan.count;
+                         ++i) {
+                        snprintf(route_download_plan.region_ids[i],
+                                 sizeof(route_download_plan.region_ids[i]),
+                                 "%s",
+                                 routing_world_context.result.missing_region_ids[i]);
+                    }
+#ifdef __ANDROID__
+                    app_panel = OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS;
+                    app_panel_selected = 0U;
+#endif
+
                     const char *missing_id =
                         routing_world_context.result.missing_region_ids[0];
                     const OpenRideRegionDefinition *missing_region =
@@ -6455,6 +6807,7 @@ int main(int argc, char **argv)
                                  : "aucune continuite inter-region");
                 }
             } else {
+                memset(&route_download_plan, 0, sizeof(route_download_plan));
                 openride_route_destroy(&route);
                 route = routing_world_context.route;
                 memset(&routing_world_context.route, 0, sizeof(routing_world_context.route));
@@ -7058,6 +7411,7 @@ int main(int argc, char **argv)
 #else
                        gps_sample_valid ? 5.0 : 0.0,
 #endif
+                       &route_download_plan,
                        width);
         draw_place_search_overlay(renderer,
                                   place_search_active,
