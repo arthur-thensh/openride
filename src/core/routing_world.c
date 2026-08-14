@@ -1,4 +1,5 @@
 #include "openride/routing_world.h"
+#include "openride/france_regions_lite.h"
 #include "openride/routing_gateway_index.h"
 #include "openride/region_network.h"
 
@@ -820,7 +821,15 @@ static const OpenRideRegionDefinition *region_for_point(
             return region;
         }
     }
-    return NULL;
+
+    /*
+     * No local exact contour knew the point. Fall back to the generated,
+     * always-available FranceRegionsLite coverage. This is what makes GPS/map
+     * endpoints in never-downloaded regions resolvable offline.
+     */
+    const char *lite_region_id =
+        openride_france_regions_lite_region_id(lat, lon);
+    return lite_region_id ? openride_region_find(lite_region_id) : NULL;
 }
 
 static void copy_corridor_summary(

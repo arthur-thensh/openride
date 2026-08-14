@@ -65,6 +65,7 @@ add_library(openride_core STATIC
     src/core/gpx.c
     src/core/place_search.c
     src/core/france_lite.c
+    src/core/france_regions_lite.c
     src/core/place_world.c
     src/core/app_storage.c
     src/core/platform_paths.c
@@ -372,6 +373,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_france_lite PRIVATE openride_core)
     add_test(NAME france_lite COMMAND test_france_lite)
+
+    add_executable(test_france_regions_lite
+        tests/test_france_regions_lite.c
+    )
+    target_link_libraries(test_france_regions_lite PRIVATE openride_core)
+    add_test(NAME france_regions_lite COMMAND test_france_regions_lite)
 
     add_executable(test_place_world
         tests/test_place_world.c
