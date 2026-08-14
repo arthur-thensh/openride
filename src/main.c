@@ -2075,7 +2075,9 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_SEARCH,
     OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START,
     OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START,
+    OPENRIDE_MOBILE_PANEL_ROUTE_MAP_START,
     OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
+    OPENRIDE_MOBILE_PANEL_ROUTE_MAP_DESTINATION,
     OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE,
     OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED,
     OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED,
@@ -2273,7 +2275,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
-    else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
@@ -2322,10 +2324,12 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
             };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_ROUTE) {
-            static const OpenRideMobilePanelAction actions[4] = {
+            static const OpenRideMobilePanelAction actions[6] = {
                 OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START,
                 OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START,
+                OPENRIDE_MOBILE_PANEL_ROUTE_MAP_START,
                 OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
+                OPENRIDE_MOBILE_PANEL_ROUTE_MAP_DESTINATION,
                 OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE
             };
             hit.action = actions[i];
@@ -2392,7 +2396,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
-    else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
@@ -2452,21 +2456,23 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                      "Depart : utiliser ma position GPS");
         }
 
-        const char *labels[4] = {
+        const char *labels[6] = {
             gps_label,
             "Depart : rechercher un lieu",
+            "Depart : choisir sur la carte",
             "Arrivee : rechercher un lieu",
+            "Arrivee : choisir sur la carte",
             selection && selection->has_start && selection->has_destination
                 ? "CALCULER L'ITINERAIRE"
                 : "Calculer - depart et arrivee requis"
         };
 
-        for (uint32_t i = 0U; i < 4U; ++i) {
+        for (uint32_t i = 0U; i < 6U; ++i) {
             mobile_draw_button(renderer,
                                &layout.rows[i],
                                labels[i],
                                layout.text_scale,
-                               i == 3U
+                               i == 5U
                                    && selection
                                    && selection->has_start
                                    && selection->has_destination,
@@ -4355,6 +4361,8 @@ int main(int argc, char **argv)
     bool place_search_active = false;
     OpenRidePlaceSearchPurpose place_search_purpose =
         OPENRIDE_PLACE_SEARCH_BROWSE;
+    OpenRideSelectionMarker route_map_pick_marker =
+        OPENRIDE_MARKER_NONE;
     OpenRideRouteDownloadPlan route_download_plan;
     memset(&route_download_plan, 0, sizeof(route_download_plan));
     char place_search_query[128] = {0};
@@ -5511,6 +5519,7 @@ int main(int argc, char **argv)
                                               sizeof(route_status));
                         } else if (mobile_hit.action
                                    == OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START) {
+                            route_map_pick_marker = OPENRIDE_MARKER_NONE;
 #ifdef __ANDROID__
                             if (gps_sample_valid) {
                                 openride_map_selection_set(&selection,
@@ -5549,6 +5558,7 @@ int main(int argc, char **argv)
 #endif
                         } else if (mobile_hit.action
                                    == OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START) {
+                            route_map_pick_marker = OPENRIDE_MARKER_NONE;
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_ROUTE_START;
                             app_panel = OPENRIDE_APP_PANEL_NONE;
@@ -5561,7 +5571,15 @@ int main(int argc, char **argv)
                                               route_status,
                                               sizeof(route_status));
                         } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_MAP_START) {
+                            route_map_pick_marker = OPENRIDE_MARKER_START;
+                            app_panel = OPENRIDE_APP_PANEL_NONE;
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "Touchez la carte pour choisir le depart");
+                        } else if (mobile_hit.action
                                    == OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION) {
+                            route_map_pick_marker = OPENRIDE_MARKER_NONE;
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION;
                             app_panel = OPENRIDE_APP_PANEL_NONE;
@@ -5573,6 +5591,14 @@ int main(int argc, char **argv)
                                               &place_search_selected,
                                               route_status,
                                               sizeof(route_status));
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_MAP_DESTINATION) {
+                            route_map_pick_marker =
+                                OPENRIDE_MARKER_DESTINATION;
+                            app_panel = OPENRIDE_APP_PANEL_NONE;
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "Touchez la carte pour choisir l'arrivee");
                         } else if (mobile_hit.action
                                    == OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE) {
                             if (openride_map_selection_complete(&selection)) {
@@ -6046,6 +6072,7 @@ int main(int argc, char **argv)
                         const OpenRideToolbarAction toolbar_action = mobile_toolbar_hit_test(
                             renderer, x, y, width, height);
                         if (toolbar_action != OPENRIDE_TOOLBAR_NONE) {
+                            route_map_pick_marker = OPENRIDE_MARKER_NONE;
                             pending_toolbar_action = toolbar_action;
                             openride_touch_input_cancel(&touch_input);
                             break;
@@ -6058,9 +6085,11 @@ int main(int argc, char **argv)
                      * it; a drag moves it. Route calculation is restarted only
                      * after the finger is released.
                      */
-                    dragging_marker = drive_mode.active
-                        ? OPENRIDE_MARKER_NONE
-                        : marker_at_screen(&camera,
+                    dragging_marker =
+                        (route_map_pick_marker != OPENRIDE_MARKER_NONE
+                         || drive_mode.active)
+                            ? OPENRIDE_MARKER_NONE
+                            : marker_at_screen(&camera,
                                            &selection,
                                            x,
                                            y,
@@ -6194,17 +6223,68 @@ int main(int argc, char **argv)
                         loop_waypoint_count = 0U;
                     } else if (action.type == OPENRIDE_TOUCH_ACTION_TAP
                                && !drive_mode.active) {
-                        add_selection_from_screen(&selection,
-                                                  &camera,
-                                                  action.x,
-                                                  action.y,
-                                                  width,
-                                                  height,
-                                                  &route_dirty,
-                                                  &loop_active,
-                                                  &loop_waypoint_count,
-                                                  route_status,
-                                                  sizeof(route_status));
+                        if (route_map_pick_marker != OPENRIDE_MARKER_NONE) {
+                            double picked_lat = 0.0;
+                            double picked_lon = 0.0;
+                            openride_screen_to_geo(&camera,
+                                                   action.x,
+                                                   action.y,
+                                                   width,
+                                                   height,
+                                                   &picked_lat,
+                                                   &picked_lon);
+
+                            const OpenRideSelectionMarker picked_marker =
+                                route_map_pick_marker;
+                            route_map_pick_marker = OPENRIDE_MARKER_NONE;
+
+                            openride_map_selection_set(&selection,
+                                                       picked_marker,
+                                                       picked_lat,
+                                                       picked_lon);
+                            if (picked_marker == OPENRIDE_MARKER_START) {
+                                start_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                            } else {
+                                destination_snap.segment_id =
+                                    OPENRIDE_ROUTING_SEGMENT_NONE;
+                            }
+
+                            clear_navigation_session(&navigation,
+                                                     &gps_simulator,
+                                                     &navigation_state,
+                                                     &gps_sample,
+                                                     &gps_sample_valid);
+                            openride_navigation_session_reset(
+                                &navigation_session);
+                            openride_location_filter_reset(&location_filter);
+                            openride_route_destroy(&route);
+                            route_valid = false;
+                            route_dirty = false;
+                            loop_active = false;
+                            gpx_navigation_active = false;
+                            loop_waypoint_count = 0U;
+
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     picked_marker == OPENRIDE_MARKER_START
+                                         ? "Depart choisi sur la carte"
+                                         : "Arrivee choisie sur la carte");
+                            app_panel = OPENRIDE_APP_PANEL_ROUTE;
+                            app_panel_selected = 0U;
+                        } else {
+                            add_selection_from_screen(&selection,
+                                                      &camera,
+                                                      action.x,
+                                                      action.y,
+                                                      width,
+                                                      height,
+                                                      &route_dirty,
+                                                      &loop_active,
+                                                      &loop_waypoint_count,
+                                                      route_status,
+                                                      sizeof(route_status));
+                        }
                     }
                     break;
                 }
