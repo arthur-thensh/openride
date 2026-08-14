@@ -858,6 +858,7 @@ static bool recalculate_route(const OpenRideRoutingGraph *graph,
 typedef struct OpenRideRoutingWorldThreadContext {
     OpenRidePlatformPaths paths;
     const OpenRideRegionDefinition *active_region;
+    const OpenRideRoutingGraph *active_graph;
     OpenRideRoutingWorldCache *cache;
     OpenRideMapSelection selection;
     OpenRideRoutingProfile profile;
@@ -878,7 +879,7 @@ static int SDLCALL routing_world_thread_main(void *userdata)
     const bool ok = openride_routing_world_calculate_installed_cached(
         &context->paths,
         context->active_region,
-        NULL,
+        context->active_graph,
         context->cache,
         context->selection.start.lat,
         context->selection.start.lon,
@@ -900,6 +901,7 @@ static SDL_Thread *start_routing_world_thread(
     OpenRideRoutingWorldThreadContext *context,
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
     OpenRideRoutingWorldCache *cache,
     const OpenRideMapSelection *selection,
     OpenRideRoutingProfile profile,
@@ -915,6 +917,7 @@ static SDL_Thread *start_routing_world_thread(
     memset(context, 0, sizeof(*context));
     context->paths = *paths;
     context->active_region = active_region;
+    context->active_graph = active_graph;
     context->cache = cache;
     context->selection = *selection;
     context->profile = profile;
@@ -5727,7 +5730,12 @@ int main(int argc, char **argv)
             }
         }
 #endif
-        if (region_activation_requested && !region_busy) {
+        /*
+         * RoutingWorld borrows the currently active routing graph read-only.
+         * Region activation can destroy/reload that graph, so defer activation
+         * until the worker has joined on the main thread.
+         */
+        if (region_activation_requested && !region_busy && !routing_world_thread) {
             region_activation_requested = false;
             if (region == active_region) {
                 snprintf(region_work_status, sizeof(region_work_status),
@@ -5924,6 +5932,7 @@ int main(int argc, char **argv)
                     &routing_world_context,
                     &platform_paths,
                     active_region,
+                    graph_loaded ? &routing_graph : NULL,
                     &routing_world_cache,
                     &selection,
                     routing_profile,
