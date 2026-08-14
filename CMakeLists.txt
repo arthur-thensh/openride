@@ -54,6 +54,7 @@ add_library(openride_core STATIC
     src/core/routing_segment_index.c
     src/core/pathfinder.c
     src/core/routing_engine.c
+    src/core/routing_gateway_index.c
     src/core/routing_world.c
     src/core/loop_generator.c
     src/core/navigation_engine.c
@@ -293,6 +294,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_routing_engine PRIVATE openride_core)
     add_test(NAME routing_engine COMMAND test_routing_engine)
+
+    add_executable(test_routing_gateway_index
+        tests/test_routing_gateway_index.c
+    )
+    target_link_libraries(test_routing_gateway_index PRIVATE openride_core)
+    add_test(NAME routing_gateway_index COMMAND test_routing_gateway_index)
 
     add_executable(test_routing_world
         tests/test_routing_world.c

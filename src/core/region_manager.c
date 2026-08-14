@@ -1,4 +1,5 @@
 #include "openride/region_manager.h"
+#include "openride/routing_gateway_index.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -169,11 +170,59 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
     return true;
 }
 
+bool openride_region_remove_gateway_indexes(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *region,
+    char *error,
+    size_t error_size)
+{
+    if (!paths || !region) {
+        set_error(error, error_size, "invalid gateway index removal request");
+        return false;
+    }
+
+    for (size_t i = 0U; i < openride_region_count(); ++i) {
+        const OpenRideRegionDefinition *other = openride_region_at(i);
+        if (!other || other == region || strcmp(other->id, region->id) == 0) continue;
+
+        char path[512];
+        if (!openride_routing_gateway_index_pair_path(
+                path,
+                sizeof(path),
+                paths->routing_dir,
+                region->id,
+                other->id)) {
+            set_error(error, error_size, "routing gateway index path is too long");
+            return false;
+        }
+
+        if (openride_platform_file_exists(path) && remove(path) != 0) {
+            set_error(error, error_size, "unable to remove routing gateway index");
+            return false;
+        }
+
+        char part_path[544];
+        const int written = snprintf(part_path, sizeof(part_path), "%s.part", path);
+        if (written >= 0 && (size_t)written < sizeof(part_path)
+            && openride_platform_file_exists(part_path)) {
+            (void)remove(part_path);
+        }
+    }
+
+    set_error(error, error_size, "");
+    return true;
+}
+
 bool openride_region_remove_generated(const OpenRidePlatformPaths *paths,
                                       const OpenRideRegionDefinition *region,
                                       char *error,
                                       size_t error_size)
 {
+    if (!openride_region_remove_gateway_indexes(
+            paths, region, error, error_size)) {
+        return false;
+    }
+
     OpenRideRegionStatus status;
     if (!openride_region_get_status(paths, region, &status, error, error_size)) return false;
     const char *files[] = {

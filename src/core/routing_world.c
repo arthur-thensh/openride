@@ -1,4 +1,5 @@
 #include "openride/routing_world.h"
+#include "openride/routing_gateway_index.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -266,6 +267,103 @@ static uint32_t find_gateways(
     return count;
 }
 
+static uint32_t find_gateways_from_persistent_index(
+    const OpenRideRoutingGatewayIndex *index,
+    bool reversed,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    OpenRideGatewayCandidate candidates[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES])
+{
+    if (!index) return 0U;
+
+    uint32_t count = 0U;
+    for (uint32_t i = 0U; i < index->count; ++i) {
+        const OpenRideRoutingGatewayRecord *record = &index->records[i];
+
+        OpenRideGatewayCandidate candidate;
+        memset(&candidate, 0, sizeof(candidate));
+        candidate.start_node = reversed ? record->second_node : record->first_node;
+        candidate.destination_node = reversed ? record->first_node : record->second_node;
+        candidate.lat = (double)record->lat_e7 / 10000000.0;
+        candidate.lon = (double)record->lon_e7 / 10000000.0;
+        candidate.score = geo_distance_m(start_lat, start_lon,
+                                         candidate.lat, candidate.lon)
+                        + geo_distance_m(candidate.lat, candidate.lon,
+                                         destination_lat, destination_lon)
+                        + (double)record->road_penalty_m;
+        insert_candidate(candidates, &count, &candidate);
+    }
+    return count;
+}
+
+static bool load_or_build_persistent_gateway_index(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *start_region,
+    const OpenRideRoutingGraph *start_graph,
+    const OpenRideRegionDefinition *destination_region,
+    const OpenRideRoutingGraph *destination_graph,
+    OpenRideRoutingGatewayIndex *index,
+    bool *reversed)
+{
+    if (reversed) *reversed = false;
+    if (!paths || !start_region || !start_graph
+        || !destination_region || !destination_graph || !index) {
+        return false;
+    }
+
+    char path[512];
+    if (!openride_routing_gateway_index_pair_path(
+            path,
+            sizeof(path),
+            paths->routing_dir,
+            start_region->id,
+            destination_region->id)) {
+        return false;
+    }
+
+    char local_error[192] = {0};
+    if (openride_platform_file_exists(path)) {
+        if (openride_routing_gateway_index_load(
+                index, path, local_error, sizeof(local_error))) {
+            bool loaded_reversed = false;
+            if (openride_routing_gateway_index_matches(
+                    index,
+                    start_region->id,
+                    start_graph,
+                    destination_region->id,
+                    destination_graph,
+                    &loaded_reversed)) {
+                if (reversed) *reversed = loaded_reversed;
+                return true;
+            }
+        }
+
+        openride_routing_gateway_index_destroy(index);
+        openride_routing_gateway_index_init(index);
+        remove(path);
+    }
+
+    if (!openride_routing_gateway_index_build(
+            start_region->id,
+            start_graph,
+            destination_region->id,
+            destination_graph,
+            index,
+            local_error,
+            sizeof(local_error))) {
+        openride_routing_gateway_index_destroy(index);
+        openride_routing_gateway_index_init(index);
+        return false;
+    }
+
+    (void)openride_routing_gateway_index_save(
+        index, path, local_error, sizeof(local_error));
+    if (reversed) *reversed = false;
+    return true;
+}
+
 static bool calculate_nodes(const OpenRideRoutingGraph *graph,
                             OpenRideRoutingNodeId start,
                             OpenRideRoutingNodeId destination,
@@ -365,9 +463,11 @@ fail:
     return false;
 }
 
-bool openride_routing_world_calculate_graph_pair(
+static bool calculate_graph_pair_internal(
     const OpenRideRoutingGraph *start_graph,
     const OpenRideRoutingGraph *destination_graph,
+    const OpenRideRoutingGatewayIndex *gateway_index,
+    bool gateway_index_reversed,
     double start_lat,
     double start_lon,
     double destination_lat,
@@ -411,13 +511,24 @@ bool openride_routing_world_calculate_graph_pair(
     OpenRideGatewayCandidate candidates[
         OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
     memset(candidates, 0, sizeof(candidates));
-    const uint32_t gateway_count = find_gateways(start_graph,
-                                                  destination_graph,
-                                                  start_lat,
-                                                  start_lon,
-                                                  destination_lat,
-                                                  destination_lon,
-                                                  candidates);
+
+    const uint32_t gateway_count = gateway_index
+        ? find_gateways_from_persistent_index(
+              gateway_index,
+              gateway_index_reversed,
+              start_lat,
+              start_lon,
+              destination_lat,
+              destination_lon,
+              candidates)
+        : find_gateways(start_graph,
+                        destination_graph,
+                        start_lat,
+                        start_lon,
+                        destination_lat,
+                        destination_lon,
+                        candidates);
+
     if (result) result->shared_gateway_count = gateway_count;
     if (gateway_count == 0U) {
         set_error(error, error_size, "no shared routing gateway between regions");
@@ -465,6 +576,37 @@ bool openride_routing_world_calculate_graph_pair(
 
     set_error(error, error_size, "shared gateways exist but none is routable");
     return false;
+}
+
+bool openride_routing_world_calculate_graph_pair(
+    const OpenRideRoutingGraph *start_graph,
+    const OpenRideRoutingGraph *destination_graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    return calculate_graph_pair_internal(
+        start_graph,
+        destination_graph,
+        NULL,
+        false,
+        start_lat,
+        start_lon,
+        destination_lat,
+        destination_lon,
+        max_snap_distance_m,
+        profile,
+        route,
+        result,
+        error,
+        error_size);
 }
 
 void openride_routing_world_cache_init(OpenRideRoutingWorldCache *cache)
@@ -891,20 +1033,36 @@ bool openride_routing_world_calculate_installed_cached(
             return false;
         }
 
+        OpenRideRoutingGatewayIndex gateway_index;
+        openride_routing_gateway_index_init(&gateway_index);
+        bool gateway_index_reversed = false;
+        const bool gateway_index_ready =
+            load_or_build_persistent_gateway_index(
+                paths,
+                start_region,
+                start_loaded.graph,
+                destination_region,
+                destination_loaded.graph,
+                &gateway_index,
+                &gateway_index_reversed);
+
         OpenRideRoutingWorldResult gateway_result;
         memset(&gateway_result, 0, sizeof(gateway_result));
-        ok = openride_routing_world_calculate_graph_pair(start_loaded.graph,
-                                                         destination_loaded.graph,
-                                                         start_lat,
-                                                         start_lon,
-                                                         destination_lat,
-                                                         destination_lon,
-                                                         max_snap_distance_m,
-                                                         profile,
-                                                         route,
-                                                         &gateway_result,
-                                                         error,
-                                                         error_size);
+        ok = calculate_graph_pair_internal(start_loaded.graph,
+                                           destination_loaded.graph,
+                                           gateway_index_ready ? &gateway_index : NULL,
+                                           gateway_index_reversed,
+                                           start_lat,
+                                           start_lon,
+                                           destination_lat,
+                                           destination_lon,
+                                           max_snap_distance_m,
+                                           profile,
+                                           route,
+                                           &gateway_result,
+                                           error,
+                                           error_size);
+        openride_routing_gateway_index_destroy(&gateway_index);
         local_result.shared_gateway_count = gateway_result.shared_gateway_count;
         local_result.attempted_gateways = gateway_result.attempted_gateways;
         local_result.gateway_lat = gateway_result.gateway_lat;

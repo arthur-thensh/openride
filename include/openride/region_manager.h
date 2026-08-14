@@ -55,6 +55,12 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
                                 char *error,
                                 size_t error_size);
 
+bool openride_region_remove_gateway_indexes(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *region,
+    char *error,
+    size_t error_size);
+
 bool openride_region_remove_generated(const OpenRidePlatformPaths *paths,
                                       const OpenRideRegionDefinition *region,
                                       char *error,

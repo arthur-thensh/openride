@@ -72,6 +72,12 @@ bool openride_region_prepare_from_pbf(const OpenRidePlatformPaths *paths,
     if (ok) ok = replace_file(graph_part, status.routing_path, error, error_size);
 
     if (ok) {
+        char gateway_error[160] = {0};
+        (void)openride_region_remove_gateway_indexes(
+            paths, region, gateway_error, sizeof(gateway_error));
+    }
+
+    if (ok) {
         report(progress,
                OPENRIDE_REGION_PREPARE_SEARCH,
                "Construction de l'index de recherche",
