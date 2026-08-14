@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.23.0 LANGUAGES C)
+project(OpenRide VERSION 0.24.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -60,6 +60,7 @@ add_library(openride_core STATIC
     src/core/navigation_engine.c
     src/core/navigation_instructions.c
     src/core/navigation_session.c
+    src/core/voice_guidance.c
     src/core/location_filter.c
     src/core/gps_simulator.c
     src/core/gpx.c
@@ -119,6 +120,7 @@ if(ANDROID)
     add_library(main SHARED
         ${OPENRIDE_APP_SOURCES}
         src/platform/android_location_provider.c
+        src/platform/android_voice_guidance.c
         src/platform/android_region_download.c
     )
     set(OPENRIDE_APP_TARGET main)
@@ -346,6 +348,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_navigation_session PRIVATE openride_core)
     add_test(NAME navigation_session COMMAND test_navigation_session)
+
+    add_executable(test_voice_guidance
+        tests/test_voice_guidance.c
+    )
+    target_link_libraries(test_voice_guidance PRIVATE openride_core)
+    add_test(NAME voice_guidance COMMAND test_voice_guidance)
 
     add_executable(test_location_filter
         tests/test_location_filter.c

@@ -8,6 +8,7 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
 import android.view.WindowManager;
 
 import java.io.File;
@@ -15,6 +16,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Locale;
 
 import org.libsdl.app.SDLActivity;
 
@@ -24,6 +26,10 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
     private volatile Location latestLocation;
     private volatile boolean locationRequested;
     private boolean updatesActive;
+
+    private TextToSpeech textToSpeech;
+    private volatile boolean ttsReady;
+    private volatile boolean ttsInitRequested;
 
     private static final int DOWNLOAD_IDLE = 0;
     private static final int DOWNLOAD_RUNNING = 1;
@@ -145,6 +151,64 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
         };
     }
 
+
+/* Called through JNI. TextToSpeech initialization is asynchronous. */
+public boolean openRideTtsInit() {
+    if (ttsInitRequested || textToSpeech != null) return true;
+    ttsInitRequested = true;
+    runOnUiThread(() -> {
+        if (textToSpeech != null) return;
+        try {
+            textToSpeech = new TextToSpeech(this, status -> {
+                TextToSpeech engine = textToSpeech;
+                if (status == TextToSpeech.SUCCESS && engine != null) {
+                    int language = engine.setLanguage(Locale.FRANCE);
+                    ttsReady = language != TextToSpeech.LANG_MISSING_DATA
+                        && language != TextToSpeech.LANG_NOT_SUPPORTED;
+                } else {
+                    ttsReady = false;
+                }
+            });
+        } catch (RuntimeException exception) {
+            textToSpeech = null;
+            ttsReady = false;
+            ttsInitRequested = false;
+        }
+    });
+    return true;
+}
+
+public boolean openRideTtsReady() {
+    return ttsReady && textToSpeech != null;
+}
+
+public boolean openRideTtsSpeak(String text, boolean flush) {
+    TextToSpeech engine = textToSpeech;
+    if (!ttsReady || engine == null || text == null || text.isEmpty()) return false;
+    int queueMode = flush ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+    return engine.speak(text, queueMode, null, "openride-guidance") == TextToSpeech.SUCCESS;
+}
+
+public void openRideTtsStop() {
+    TextToSpeech engine = textToSpeech;
+    if (engine != null) engine.stop();
+}
+
+private void shutdownTtsOnUiThread() {
+    TextToSpeech engine = textToSpeech;
+    textToSpeech = null;
+    ttsReady = false;
+    ttsInitRequested = false;
+    if (engine != null) {
+        engine.stop();
+        engine.shutdown();
+    }
+}
+
+public void openRideTtsShutdown() {
+    runOnUiThread(this::shutdownTtsOnUiThread);
+}
+
     public synchronized boolean openRideStartDownload(String urlText, String relativePath) {
         if (urlText == null || relativePath == null || downloadState == DOWNLOAD_RUNNING) return false;
         downloadCancelRequested = false;
@@ -166,7 +230,7 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
                 connection.setConnectTimeout(20000);
                 connection.setReadTimeout(30000);
                 connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("User-Agent", "OpenRide/0.23 Android");
+                connection.setRequestProperty("User-Agent", "OpenRide/0.24 Android");
                 connection.connect();
                 int code = connection.getResponseCode();
                 if (code < 200 || code >= 300) {
@@ -230,6 +294,7 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
 
     @Override
     protected void onPause() {
+        openRideTtsStop();
         stopLocationUpdatesOnUiThread();
         super.onPause();
     }
@@ -257,6 +322,7 @@ public class OpenRideActivity extends SDLActivity implements LocationListener {
         locationRequested = false;
         downloadCancelRequested = true;
         stopLocationUpdatesOnUiThread();
+        shutdownTtsOnUiThread();
         super.onDestroy();
     }
 }

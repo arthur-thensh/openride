@@ -14,10 +14,12 @@
 #include "openride/navigation_engine.h"
 #include "openride/navigation_instructions.h"
 #include "openride/navigation_session.h"
+#include "openride/voice_guidance.h"
 #include "openride/location_filter.h"
 #include "openride/location_provider.h"
 #ifdef __ANDROID__
 #include "openride/android_location_provider.h"
+#include "openride/android_voice_guidance.h"
 #include "openride/android_region_download.h"
 #include <SDL3/SDL_system.h>
 #endif
@@ -2097,7 +2099,8 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
     OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
     OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE
+    OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
+    OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE
 } OpenRideMobilePanelAction;
 
 typedef struct OpenRideMobilePanelHit {
@@ -2281,7 +2284,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
 
@@ -2344,11 +2347,12 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
             };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
-            static const OpenRideMobilePanelAction actions[4] = {
+            static const OpenRideMobilePanelAction actions[5] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
-                OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE
+                OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
+                OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE
             };
             hit.action = actions[i];
         } else {
@@ -2371,6 +2375,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                                   OpenRideRoutingProfile profile,
                                   bool follow_gps,
                                   bool auto_reroute,
+                                  bool voice_enabled,
                                   const OpenRideRegionDefinition *region,
                                   const OpenRideRegionStatus *region_status,
                                   bool region_is_active,
@@ -2402,7 +2407,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
 
@@ -2623,12 +2628,13 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
         mobile_draw_panel_title(renderer, &layout, "PARAMETRES", "Touche une ligne pour modifier");
-        char labels[4][96];
+        char labels[5][96];
         snprintf(labels[0], sizeof(labels[0]), "Style carte : %s", openride_map_style_name(map_style));
         snprintf(labels[1], sizeof(labels[1]), "Profil routage : %s", openride_routing_profile_name(profile));
         snprintf(labels[2], sizeof(labels[2]), "Suivi GPS : %s", follow_gps ? "OUI" : "NON");
         snprintf(labels[3], sizeof(labels[3]), "Recalcul auto : %s", auto_reroute ? "OUI" : "NON");
-        for (uint32_t i = 0U; i < 4U; ++i) {
+        snprintf(labels[4], sizeof(labels[4]), "Guidage vocal : %s", voice_enabled ? "OUI" : "NON");
+        for (uint32_t i = 0U; i < 5U; ++i) {
             mobile_draw_button(renderer, &layout.rows[i], labels[i], layout.text_scale, false, false);
         }
         mobile_draw_button(renderer, &layout.back, "Retour", layout.text_scale, false, false);
@@ -2746,6 +2752,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            OpenRideRoutingProfile profile,
                            bool follow_gps,
                            bool auto_reroute,
+                           bool voice_enabled,
                            const OpenRideRegionDefinition *region,
                            const OpenRideRegionStatus *region_status,
                            bool region_is_active,
@@ -2771,6 +2778,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           profile,
                           follow_gps,
                           auto_reroute,
+                          voice_enabled,
                           region,
                           region_status,
                           region_is_active,
@@ -2949,6 +2957,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
         SDL_RenderDebugTextFormat(renderer, x + 18, y + 88, "1/2/3 Profil routage : %s", openride_routing_profile_name(profile));
         SDL_RenderDebugTextFormat(renderer, x + 18, y + 118, "F  Suivi GPS camera  : %s", follow_gps ? "oui" : "non");
         SDL_RenderDebugTextFormat(renderer, x + 18, y + 148, "A  Recalcul auto      : %s", auto_reroute ? "oui" : "non");
+        SDL_RenderDebugTextFormat(renderer, x + 18, y + 178, "V  Guidage vocal      : %s", voice_enabled ? "oui" : "non");
         SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
         SDL_RenderDebugText(renderer, x + 18, y + 322, "Les reglages sont sauvegardes automatiquement | Esc: retour");
     }
@@ -4301,6 +4310,7 @@ int main(int argc, char **argv)
     OpenRideNavigationEngine navigation;
     OpenRideNavigationInstructionList navigation_instructions = {0};
     OpenRideNavigationSession navigation_session;
+    OpenRideVoiceGuidance voice_guidance;
     OpenRideLocationFilter location_filter;
     OpenRideFilteredLocation filtered_location = {0};
     OpenRideDriveModeState drive_mode;
@@ -4330,11 +4340,18 @@ int main(int argc, char **argv)
     double gpx_last_recorded_position_m = -1.0;
     bool follow_gps = true;
     bool auto_reroute = true;
+    bool voice_enabled = true;
+    bool voice_drive_active = false;
     bool simulator_deviation = false;
     bool gpx_navigation_active = false;
     Uint64 last_frame_ticks = 0;
     openride_navigation_engine_init(&navigation);
     openride_navigation_session_init(&navigation_session);
+    openride_voice_guidance_init(&voice_guidance);
+#ifdef __ANDROID__
+    openride_voice_guidance_set_backend(&voice_guidance,
+                                        openride_android_voice_guidance_backend());
+#endif
     openride_location_filter_init(&location_filter);
     openride_drive_mode_init(&drive_mode);
     openride_app_lifecycle_init(&app_lifecycle);
@@ -4526,6 +4543,9 @@ int main(int argc, char **argv)
         const int saved_auto_reroute = openride_app_storage_get_int(app_storage,
                                                                      "auto_reroute",
                                                                      auto_reroute ? 1 : 0);
+        const int saved_voice = openride_app_storage_get_int(app_storage,
+                                                              "voice_enabled",
+                                                              voice_enabled ? 1 : 0);
         if (saved_style >= (int)OPENRIDE_MAP_STYLE_ROAD
             && saved_style <= (int)OPENRIDE_MAP_STYLE_TOPO) {
             map_style = (OpenRideMapStyle)saved_style;
@@ -4538,11 +4558,20 @@ int main(int argc, char **argv)
         }
         follow_gps = saved_follow != 0;
         auto_reroute = saved_auto_reroute != 0;
+        voice_enabled = saved_voice != 0;
         openride_navigation_session_set_auto_reroute(&navigation_session, auto_reroute);
+        openride_voice_guidance_set_enabled(&voice_guidance, voice_enabled);
         refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
         refresh_stored_places(app_storage, false, history_places, &history_count);    } else {
         fprintf(stderr, "App storage unavailable: %s\n", error[0] ? error : "unknown error");
     }
+#ifdef __ANDROID__
+    if (voice_enabled) {
+        if (!openride_android_voice_guidance_init()) {
+            SDL_Log("Android TTS initialization request failed");
+        }
+    }
+#endif
     OpenRideMapWorld *map_world = openride_map_world_create(renderer,
                                                            &platform_paths,
                                                            error,
@@ -4759,6 +4788,13 @@ int main(int argc, char **argv)
                                 auto_reroute = !auto_reroute;
                                 openride_navigation_session_set_auto_reroute(&navigation_session, auto_reroute);
                                 if (app_storage) openride_app_storage_set_int(app_storage, "auto_reroute", auto_reroute ? 1 : 0, error, sizeof(error));
+                            } else if (event.key.key == SDLK_V) {
+                                voice_enabled = !voice_enabled;
+                                openride_voice_guidance_set_enabled(&voice_guidance, voice_enabled);
+#ifdef __ANDROID__
+                                if (voice_enabled) openride_android_voice_guidance_init();
+#endif
+                                if (app_storage) openride_app_storage_set_int(app_storage, "voice_enabled", voice_enabled ? 1 : 0, error, sizeof(error));
                             }
                         }
                         break;
@@ -5868,6 +5904,20 @@ int main(int argc, char **argv)
                                 openride_app_storage_set_int(app_storage,
                                                              "auto_reroute",
                                                              auto_reroute ? 1 : 0,
+                                                             error,
+                                                             sizeof(error));
+                            }
+                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE) {
+                            voice_enabled = !voice_enabled;
+                            openride_voice_guidance_set_enabled(&voice_guidance,
+                                                                voice_enabled);
+                            if (voice_enabled) {
+                                openride_android_voice_guidance_init();
+                            }
+                            if (app_storage) {
+                                openride_app_storage_set_int(app_storage,
+                                                             "voice_enabled",
+                                                             voice_enabled ? 1 : 0,
                                                              error,
                                                              sizeof(error));
                             }
@@ -7065,6 +7115,7 @@ int main(int argc, char **argv)
                     if (routing_world_context.reroute) {
                         openride_navigation_session_mark_rerouted(&navigation_session);
                         openride_location_filter_reset(&location_filter);
+                        openride_voice_guidance_reset(&voice_guidance);
                         if (routing_world_context.resume_simulator) {
                             openride_gps_simulator_start(&gps_simulator);
                         }
@@ -7180,6 +7231,7 @@ int main(int argc, char **argv)
                                            sizeof(route_status));
                 if (routing_world_pending_reroute) {
                     openride_navigation_session_mark_rerouted(&navigation_session);
+                    openride_voice_guidance_reset(&voice_guidance);
                     if (routing_world_pending_resume_simulator) {
                         openride_gps_simulator_start(&gps_simulator);
                     }
@@ -7375,6 +7427,7 @@ int main(int argc, char **argv)
             memset(&navigation_state, 0, sizeof(navigation_state));
             memset(&filtered_location, 0, sizeof(filtered_location));
             if (route_valid) {
+                openride_voice_guidance_reset(&voice_guidance);
                 snprintf(route_status, sizeof(route_status), "recalcul automatique termine");
             } else if (openride_map_selection_complete(&selection)) {
                 routing_world_pending_reroute = true;
@@ -7442,6 +7495,16 @@ int main(int argc, char **argv)
                 camera.bearing_deg = drive_mode.heading_up
                     ? drive_mode.camera_bearing_deg : 0.0;
             }
+        }
+
+        if (drive_mode.active != voice_drive_active) {
+            openride_voice_guidance_reset(&voice_guidance);
+            voice_drive_active = drive_mode.active;
+        }
+        if (drive_mode.active) {
+            (void)openride_voice_guidance_update(&voice_guidance,
+                                                 &navigation_instructions,
+                                                 &navigation_state);
         }
 
         int width = 0;
@@ -7646,6 +7709,7 @@ int main(int argc, char **argv)
                        routing_profile,
                        follow_gps,
                        auto_reroute,
+                       voice_enabled,
                        region,
                        &region_status,
                        region == active_region,
@@ -7699,6 +7763,8 @@ int main(int argc, char **argv)
         openride_location_provider_stop(&location_provider);
         real_gps_active = false;
     }
+    openride_voice_guidance_reset(&voice_guidance);
+    openride_android_voice_guidance_shutdown();
 #endif
 
     if (routing_world_thread) {
