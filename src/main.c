@@ -863,6 +863,7 @@ typedef struct OpenRideRoutingWorldThreadContext {
     OpenRideRoutingWorldCache *cache;
     OpenRideMapSelection selection;
     OpenRideRoutingProfile profile;
+    bool installed_alternative;
     bool reroute;
     bool resume_simulator;
     SDL_AtomicInt done;
@@ -877,28 +878,44 @@ static int SDLCALL routing_world_thread_main(void *userdata)
     OpenRideRoutingWorldThreadContext *context = userdata;
     if (!context) return 1;
 
-    const bool ok = openride_routing_world_calculate_installed_cached(
-        &context->paths,
-        context->active_region,
-        context->active_graph,
-        context->cache,
-        context->selection.start.lat,
-        context->selection.start.lon,
-        context->selection.destination.lat,
-        context->selection.destination.lon,
-        OPENRIDE_MAX_SNAP_DISTANCE_M,
-        context->profile,
-        &context->route,
-        &context->result,
-        context->error,
-        sizeof(context->error));
+    const bool ok = context->installed_alternative
+        ? openride_routing_world_calculate_installed_alternative_cached(
+              &context->paths,
+              context->active_region,
+              context->active_graph,
+              context->cache,
+              context->selection.start.lat,
+              context->selection.start.lon,
+              context->selection.destination.lat,
+              context->selection.destination.lon,
+              OPENRIDE_MAX_SNAP_DISTANCE_M,
+              context->profile,
+              &context->route,
+              &context->result,
+              context->error,
+              sizeof(context->error))
+        : openride_routing_world_calculate_installed_cached(
+              &context->paths,
+              context->active_region,
+              context->active_graph,
+              context->cache,
+              context->selection.start.lat,
+              context->selection.start.lon,
+              context->selection.destination.lat,
+              context->selection.destination.lon,
+              OPENRIDE_MAX_SNAP_DISTANCE_M,
+              context->profile,
+              &context->route,
+              &context->result,
+              context->error,
+              sizeof(context->error));
 
     SDL_SetAtomicInt(&context->success, ok ? 1 : 0);
     SDL_SetAtomicInt(&context->done, 1);
     return ok ? 0 : 1;
 }
 
-static SDL_Thread *start_routing_world_thread(
+static SDL_Thread *start_routing_world_thread_mode(
     OpenRideRoutingWorldThreadContext *context,
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
@@ -906,6 +923,7 @@ static SDL_Thread *start_routing_world_thread(
     OpenRideRoutingWorldCache *cache,
     const OpenRideMapSelection *selection,
     OpenRideRoutingProfile profile,
+    bool installed_alternative,
     bool reroute,
     bool resume_simulator)
 {
@@ -922,6 +940,7 @@ static SDL_Thread *start_routing_world_thread(
     context->cache = cache;
     context->selection = *selection;
     context->profile = profile;
+    context->installed_alternative = installed_alternative;
     context->reroute = reroute;
     context->resume_simulator = resume_simulator;
     SDL_SetAtomicInt(&context->done, 0);
@@ -930,6 +949,52 @@ static SDL_Thread *start_routing_world_thread(
     return SDL_CreateThread(routing_world_thread_main,
                             "OpenRide-routing-world",
                             context);
+}
+
+static SDL_Thread *start_routing_world_thread(
+    OpenRideRoutingWorldThreadContext *context,
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    const OpenRideMapSelection *selection,
+    OpenRideRoutingProfile profile,
+    bool reroute,
+    bool resume_simulator)
+{
+    return start_routing_world_thread_mode(
+        context,
+        paths,
+        active_region,
+        active_graph,
+        cache,
+        selection,
+        profile,
+        false,
+        reroute,
+        resume_simulator);
+}
+
+static SDL_Thread *start_routing_world_installed_alternative_thread(
+    OpenRideRoutingWorldThreadContext *context,
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    const OpenRideMapSelection *selection,
+    OpenRideRoutingProfile profile)
+{
+    return start_routing_world_thread_mode(
+        context,
+        paths,
+        active_region,
+        active_graph,
+        cache,
+        selection,
+        profile,
+        true,
+        false,
+        false);
 }
 
 static bool routing_world_request_matches(
@@ -1997,6 +2062,7 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
     OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE,
     OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED,
+    OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED,
     OPENRIDE_MOBILE_PANEL_FAVORITES,
     OPENRIDE_MOBILE_PANEL_HISTORY,
     OPENRIDE_MOBILE_PANEL_REGIONS,
@@ -2192,7 +2258,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
-    else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 1U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
@@ -2248,7 +2314,11 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
             };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) {
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED;
+            static const OpenRideMobilePanelAction actions[2] = {
+                OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED,
+                OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED
+            };
+            hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
             static const OpenRideMobilePanelAction actions[4] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
@@ -2307,7 +2377,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 4U;
-    else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 1U;
+    else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 4U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
@@ -2482,6 +2552,18 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
             layout.text_scale,
             !route_download_plan.downloading,
             false);
+
+        mobile_draw_button(
+            renderer,
+            &layout.rows[1],
+            route_download_plan.has_installed_alternative
+                ? "CALCULER AVEC MES CARTES ACTUELLES"
+                : "AUCUNE ALTERNATIVE INSTALLEE",
+            layout.text_scale,
+            route_download_plan.has_installed_alternative
+                && !route_download_plan.downloading,
+            false);
+
         mobile_draw_button(renderer,
                            &layout.back,
                            "Retour",
@@ -5527,6 +5609,39 @@ int main(int argc, char **argv)
                                 }
                             }
 #endif
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED) {
+                            if (route_download_plan.available
+                                && route_download_plan.has_installed_alternative
+                                && !route_download_plan.downloading
+                                && !region_busy
+                                && !routing_world_thread) {
+                                selection = route_download_plan.selection;
+                                routing_profile = route_download_plan.profile;
+                                app_panel = OPENRIDE_APP_PANEL_NONE;
+
+                                routing_world_thread =
+                                    start_routing_world_installed_alternative_thread(
+                                        &routing_world_context,
+                                        &platform_paths,
+                                        active_region,
+                                        graph_loaded ? &routing_graph : NULL,
+                                        &routing_world_cache,
+                                        &selection,
+                                        routing_profile);
+
+                                if (routing_world_thread) {
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "Calcul avec les cartes installees...");
+                                } else {
+                                    app_panel =
+                                        OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS;
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "Impossible de lancer l'alternative");
+                                }
+                            }
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_FAVORITES) {
                             refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                             app_panel = OPENRIDE_APP_PANEL_FAVORITES;
@@ -6807,6 +6922,12 @@ int main(int argc, char **argv)
                                  : "aucune continuite inter-region");
                 }
             } else {
+                if (routing_world_context.result.used_installed_alternative) {
+                    SDL_Log("RoutingWorld installed alternative: %s -> %s | corridor=%u regions",
+                            routing_world_context.result.start_region_id,
+                            routing_world_context.result.destination_region_id,
+                            routing_world_context.result.installed_alternative.count);
+                }
                 memset(&route_download_plan, 0, sizeof(route_download_plan));
                 openride_route_destroy(&route);
                 route = routing_world_context.route;
@@ -6833,7 +6954,12 @@ int main(int argc, char **argv)
                         }
                     }
 
-                    if (routing_world_context.result.multi_region) {
+                    if (routing_world_context.result.used_installed_alternative) {
+                        snprintf(route_status,
+                                 sizeof(route_status),
+                                 "alternative avec cartes installees | %.1f km",
+                                 route.distance_m / 1000.0);
+                    } else if (routing_world_context.result.multi_region) {
                         snprintf(route_status,
                                  sizeof(route_status),
                                  "itineraire multi-region %s -> %s | %.1f km",

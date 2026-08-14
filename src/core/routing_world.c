@@ -1834,6 +1834,205 @@ bool openride_routing_world_calculate_installed_cached(
     return ok;
 }
 
+
+bool openride_routing_world_calculate_installed_alternative_cached(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    if (result) memset(result, 0, sizeof(*result));
+    if (!paths || !route
+        || !isfinite(start_lat) || !isfinite(start_lon)
+        || !isfinite(destination_lat) || !isfinite(destination_lon)) {
+        set_error(error, error_size,
+                  "invalid installed-alternative routing request");
+        return false;
+    }
+
+    const OpenRideRegionDefinition *start_region =
+        region_for_point(paths, active_region, start_lat, start_lon);
+    const OpenRideRegionDefinition *destination_region =
+        region_for_point(paths, active_region, destination_lat, destination_lon);
+
+    if (!start_region) {
+        set_error(error, error_size,
+                  "start is outside known regional coverage");
+        return false;
+    }
+    if (!destination_region) {
+        set_error(error, error_size,
+                  "destination is outside known regional coverage");
+        return false;
+    }
+
+    if (openride_region_count() > OPENRIDE_REGION_NETWORK_MAX_REGIONS) {
+        set_error(error, error_size,
+                  "regional catalog exceeds RoutingWorld capacity");
+        return false;
+    }
+
+    bool installed[OPENRIDE_REGION_NETWORK_MAX_REGIONS] = {false};
+    if (!openride_region_network_installed_mask(
+            paths,
+            installed,
+            OPENRIDE_REGION_NETWORK_MAX_REGIONS,
+            error,
+            error_size)) {
+        return false;
+    }
+
+    OpenRideRoutingWorldResult local_result;
+    memset(&local_result, 0, sizeof(local_result));
+    if (!openride_routing_world_plan_regions(
+            start_region,
+            start_lat,
+            start_lon,
+            destination_region,
+            destination_lat,
+            destination_lon,
+            installed,
+            openride_region_count(),
+            &local_result,
+            error,
+            error_size)) {
+        return false;
+    }
+
+    if (!local_result.download_required
+        || !local_result.has_installed_alternative
+        || local_result.installed_alternative.count == 0U) {
+        if (result) *result = local_result;
+        set_error(error, error_size,
+                  "no installed-only regional alternative");
+        return false;
+    }
+
+    local_result.used_installed_alternative = true;
+    const OpenRideRoutingWorldCorridorSummary *corridor =
+        &local_result.installed_alternative;
+
+    if (corridor->count > 2U) {
+        const bool ok = calculate_multi_hop_installed(
+            paths,
+            active_region,
+            active_graph,
+            cache,
+            corridor,
+            start_lat,
+            start_lon,
+            destination_lat,
+            destination_lon,
+            max_snap_distance_m,
+            profile,
+            route,
+            &local_result,
+            error,
+            error_size);
+        if (result) *result = local_result;
+        return ok;
+    }
+
+    OpenRideRoutingWorldLoadedGraph start_loaded;
+    OpenRideRoutingWorldLoadedGraph destination_loaded;
+    memset(&start_loaded, 0, sizeof(start_loaded));
+    memset(&destination_loaded, 0, sizeof(destination_loaded));
+
+    if (!load_region_graph(paths,
+                           start_region,
+                           active_region,
+                           active_graph,
+                           cache,
+                           &start_loaded,
+                           error,
+                           error_size)) {
+        if (result) *result = local_result;
+        return false;
+    }
+
+    bool ok = false;
+    if (corridor->count == 1U) {
+        ok = calculate_single_installed_region(
+            start_loaded.graph,
+            start_lat,
+            start_lon,
+            destination_lat,
+            destination_lon,
+            max_snap_distance_m,
+            profile,
+            route,
+            error,
+            error_size);
+    } else {
+        if (!load_region_graph(paths,
+                               destination_region,
+                               active_region,
+                               active_graph,
+                               cache,
+                               &destination_loaded,
+                               error,
+                               error_size)) {
+            loaded_graph_destroy(&start_loaded);
+            if (result) *result = local_result;
+            return false;
+        }
+
+        OpenRideRoutingGatewayIndex gateway_index;
+        openride_routing_gateway_index_init(&gateway_index);
+        bool gateway_index_reversed = false;
+        const bool gateway_index_ready =
+            load_or_build_persistent_gateway_index(
+                paths,
+                start_region,
+                start_loaded.graph,
+                destination_region,
+                destination_loaded.graph,
+                &gateway_index,
+                &gateway_index_reversed);
+
+        OpenRideRoutingWorldResult gateway_result;
+        memset(&gateway_result, 0, sizeof(gateway_result));
+        ok = calculate_graph_pair_internal(
+            start_loaded.graph,
+            destination_loaded.graph,
+            gateway_index_ready ? &gateway_index : NULL,
+            gateway_index_reversed,
+            start_lat,
+            start_lon,
+            destination_lat,
+            destination_lon,
+            max_snap_distance_m,
+            profile,
+            route,
+            &gateway_result,
+            error,
+            error_size);
+        openride_routing_gateway_index_destroy(&gateway_index);
+
+        local_result.shared_gateway_count =
+            gateway_result.shared_gateway_count;
+        local_result.attempted_gateways =
+            gateway_result.attempted_gateways;
+        local_result.gateway_lat = gateway_result.gateway_lat;
+        local_result.gateway_lon = gateway_result.gateway_lon;
+    }
+
+    loaded_graph_destroy(&destination_loaded);
+    loaded_graph_destroy(&start_loaded);
+    if (result) *result = local_result;
+    return ok;
+}
+
 bool openride_routing_world_calculate_installed(
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,

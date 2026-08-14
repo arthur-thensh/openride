@@ -37,6 +37,7 @@ typedef struct OpenRideRoutingWorldResult {
     uint32_t missing_region_count;
     bool has_installed_alternative;
     OpenRideRoutingWorldCorridorSummary installed_alternative;
+    bool used_installed_alternative;
 
     uint32_t shared_gateway_count;
     uint32_t attempted_gateways;
@@ -106,6 +107,27 @@ bool openride_routing_world_calculate_graph_pair(
  * resolves exact gateway transitions in one graph pass and retains only the
  * candidate route geometries needed for final backtracking.
  */
+/*
+ * Explicit user-selected fallback: calculate along RegionNetwork's
+ * installed-only corridor while preserving the recommended corridor in result.
+ * This function never auto-selects the fallback.
+ */
+bool openride_routing_world_calculate_installed_alternative_cached(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size);
+
 bool openride_routing_world_calculate_installed(
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
