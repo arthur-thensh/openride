@@ -26,6 +26,29 @@ typedef struct LabelBox {
     float bottom;
 } LabelBox;
 
+static double ormap_zoom_smoothstep(double zoom,
+                                   double start,
+                                   double end)
+{
+    if (zoom <= start) return 0.0;
+    if (zoom >= end) return 1.0;
+    double t = (zoom - start) / (end - start);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+static uint8_t ormap_scaled_alpha(uint8_t alpha, double factor)
+{
+    if (factor <= 0.0) return 0U;
+    if (factor >= 1.0) return alpha;
+    return (uint8_t)lround((double)alpha * factor);
+}
+
+static void ormap_scale_color_alpha(OpenRideMapColor *color, double factor)
+{
+    if (!color) return;
+    color->a = ormap_scaled_alpha(color->a, factor);
+}
+
 static int wrap_x(int x, int count)
 {
     int wrapped = x % count;
@@ -285,6 +308,87 @@ static const char *road_kind(uint8_t road_class)
     }
 }
 
+static void road_cache_entry_destroy(OpenRideORMapRoadCacheEntry *entry)
+{
+    if (!entry) return;
+    if (entry->occupied) {
+        openride_ormap_road_tile_destroy(&entry->tile);
+    }
+    free(entry->record_order);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static bool road_cache_build_class_index(OpenRideORMapRoadCacheEntry *entry)
+{
+    if (!entry) return false;
+
+    free(entry->record_order);
+    entry->record_order = NULL;
+    memset(entry->class_offsets, 0, sizeof(entry->class_offsets));
+
+    if (entry->tile.count == 0U) return true;
+
+    uint32_t counts[OPENRIDE_ROAD_OTHER + 1] = {0};
+    for (uint32_t i = 0U; i < entry->tile.count; ++i) {
+        const uint8_t raw_class = entry->tile.records[i].road_class;
+        const uint8_t road_class =
+            raw_class <= OPENRIDE_ROAD_OTHER
+                ? raw_class
+                : OPENRIDE_ROAD_OTHER;
+        ++counts[road_class];
+    }
+
+    uint32_t cursor = 0U;
+    for (int road_class = OPENRIDE_ROAD_UNKNOWN;
+         road_class <= OPENRIDE_ROAD_OTHER;
+         ++road_class) {
+        entry->class_offsets[road_class] = cursor;
+        cursor += counts[road_class];
+    }
+    entry->class_offsets[OPENRIDE_ROAD_OTHER + 1] = cursor;
+
+    entry->record_order =
+        malloc((size_t)entry->tile.count * sizeof(*entry->record_order));
+    if (!entry->record_order) {
+        memset(entry->class_offsets, 0, sizeof(entry->class_offsets));
+        return false;
+    }
+
+    uint32_t write_cursor[OPENRIDE_ROAD_OTHER + 1];
+    for (int road_class = OPENRIDE_ROAD_UNKNOWN;
+         road_class <= OPENRIDE_ROAD_OTHER;
+         ++road_class) {
+        write_cursor[road_class] = entry->class_offsets[road_class];
+    }
+
+    for (uint32_t i = 0U; i < entry->tile.count; ++i) {
+        const uint8_t raw_class = entry->tile.records[i].road_class;
+        const uint8_t road_class =
+            raw_class <= OPENRIDE_ROAD_OTHER
+                ? raw_class
+                : OPENRIDE_ROAD_OTHER;
+        entry->record_order[write_cursor[road_class]++] = i;
+    }
+
+    return true;
+}
+
+static const uint8_t OPENRIDE_ROAD_DRAW_ORDER[] = {
+    OPENRIDE_ROAD_OTHER,
+    OPENRIDE_ROAD_PATH,
+    OPENRIDE_ROAD_TRACK,
+    OPENRIDE_ROAD_LIVING_STREET,
+    OPENRIDE_ROAD_SERVICE,
+    OPENRIDE_ROAD_RESIDENTIAL,
+    OPENRIDE_ROAD_UNCLASSIFIED,
+    OPENRIDE_ROAD_TERTIARY,
+    OPENRIDE_ROAD_SECONDARY,
+    OPENRIDE_ROAD_PRIMARY,
+    OPENRIDE_ROAD_TRUNK,
+    OPENRIDE_ROAD_MOTORWAY,
+    OPENRIDE_ROAD_UNKNOWN
+};
+
 static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *renderer,
                                                      int zoom,
                                                      int x,
@@ -306,8 +410,7 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
         }
     }
     if (!victim) victim = oldest;
-    if (victim->occupied) openride_ormap_road_tile_destroy(&victim->tile);
-    memset(victim, 0, sizeof(*victim));
+    road_cache_entry_destroy(victim);
     victim->occupied = true;
     victim->zoom = zoom;
     victim->x = x;
@@ -322,6 +425,8 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
                                        error,
                                        sizeof(error))) {
         /* Keep an occupied empty entry to cache absent tiles too. */
+    } else {
+        (void)road_cache_build_class_index(victim);
     }
     return victim;
 }
@@ -545,7 +650,14 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
     builtup.a = renderer->style == OPENRIDE_MAP_STYLE_TRAIL ? 92 : 125;
     OpenRideMapColor water = palette.water;
     water.a = 210;
-    const OpenRideMapColor forest = forest_color(renderer->style);
+    OpenRideMapColor forest = forest_color(renderer->style);
+
+    const double mask_fade =
+        ormap_zoom_smoothstep(camera->zoom, 14.0, 14.50);
+    ormap_scale_color_alpha(&builtup, mask_fade);
+    ormap_scale_color_alpha(&water, mask_fade);
+    ormap_scale_color_alpha(&forest, mask_fade);
+
     GeometryBatch batch = {0};
 
     for (int ty = first_y; ty <= last_y; ++ty) {
@@ -625,8 +737,18 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
     const int last_x = (int)floor((center_x + half_w) / tile_size);
     const int first_y = (int)floor((center_y - half_h) / tile_size);
     const int last_y = (int)floor((center_y + half_h) / tile_size);
-    const OpenRideMapColor builtup_color = area_color(renderer, OPENRIDE_ORMAP_AREA_BUILTUP);
-    const OpenRideMapColor water_color = area_color(renderer, OPENRIDE_ORMAP_AREA_WATER);
+    OpenRideMapColor builtup_color =
+        area_color(renderer, OPENRIDE_ORMAP_AREA_BUILTUP);
+    OpenRideMapColor water_color =
+        area_color(renderer, OPENRIDE_ORMAP_AREA_WATER);
+
+    const double water_fade =
+        ormap_zoom_smoothstep(camera->zoom, 10.75, 11.20);
+    const double builtup_fade =
+        ormap_zoom_smoothstep(camera->zoom, 13.0, 13.45);
+    ormap_scale_color_alpha(&water_color, water_fade);
+    ormap_scale_color_alpha(&builtup_color, builtup_fade);
+
     GeometryBatch batch = {0};
 
     for (int ty = first_y; ty <= last_y; ++ty) {
@@ -715,6 +837,21 @@ static int waterway_width(uint8_t kind, double zoom)
     }
 }
 
+static double waterway_fade_factor(uint8_t kind, double zoom)
+{
+    switch ((OpenRideORMapWaterwayKind)kind) {
+        case OPENRIDE_ORMAP_WATERWAY_RIVER:
+        case OPENRIDE_ORMAP_WATERWAY_CANAL:
+            return ormap_zoom_smoothstep(zoom, 12.0, 12.40);
+        case OPENRIDE_ORMAP_WATERWAY_STREAM:
+            return ormap_zoom_smoothstep(zoom, 12.5, 12.90);
+        case OPENRIDE_ORMAP_WATERWAY_DRAIN:
+            return ormap_zoom_smoothstep(zoom, 14.5, 14.90);
+        default:
+            return 0.0;
+    }
+}
+
 static void draw_waterways(OpenRideORMapRenderer *renderer,
                            const OpenRideMapCamera *camera,
                            int width,
@@ -753,8 +890,16 @@ static void draw_waterways(OpenRideORMapRenderer *renderer,
             const double top = height * 0.5 + ty * tile_size - center_y;
             for (uint32_t i = 0U; i < entry->tile.count; ++i) {
                 const OpenRideORMapWaterRecord *record = &entry->tile.records[i];
-                const int line_width = waterway_width(record->kind, camera->zoom);
+                const int line_width =
+                    waterway_width(record->kind, camera->zoom);
                 if (line_width <= 0) continue;
+
+                OpenRideMapColor line_color = color;
+                const double waterway_fade =
+                    waterway_fade_factor(record->kind, camera->zoom);
+                ormap_scale_color_alpha(&line_color, waterway_fade);
+                if (line_color.a == 0U) continue;
+
                 float x1 = (float)(left + ((double)record->x1 / 65535.0) * tile_size);
                 float y1 = (float)(top + ((double)record->y1 / 65535.0) * tile_size);
                 float x2 = (float)(left + ((double)record->x2 / 65535.0) * tile_size);
@@ -768,7 +913,7 @@ static void draw_waterways(OpenRideORMapRenderer *renderer,
                                          x2,
                                          y2,
                                          line_width,
-                                         color)) {
+                                         line_color)) {
                     geometry_batch_flush(renderer, &batch);
                     return;
                 }
@@ -782,6 +927,102 @@ typedef struct RoadPaintTable {
     OpenRideMapRoadPaint paints[OPENRIDE_ROAD_OTHER + 1];
     bool visible[OPENRIDE_ROAD_OTHER + 1];
 } RoadPaintTable;
+
+static void apply_android_minor_road_lod(double zoom,
+                                         int road_class,
+                                         OpenRideMapRoadPaint *paint)
+{
+#ifdef __ANDROID__
+    if (!paint || zoom >= 14.50) return;
+
+    const bool local =
+        road_class == OPENRIDE_ROAD_UNCLASSIFIED
+        || road_class == OPENRIDE_ROAD_RESIDENTIAL
+        || road_class == OPENRIDE_ROAD_SERVICE
+        || road_class == OPENRIDE_ROAD_LIVING_STREET;
+    const bool trail_detail =
+        road_class == OPENRIDE_ROAD_TRACK
+        || road_class == OPENRIDE_ROAD_PATH;
+
+    /*
+     * Below z14.5 the casing is more expensive than the visual information
+     * it adds on a phone. Removing it makes the casing pass skip the entire
+     * class before touching any road record.
+     *
+     * Restore the exact original style as the camera approaches z14.
+     */
+    if (zoom < 14.50) {
+        paint->casing_width = 0;
+        paint->casing.a = 0U;
+    }
+
+    if (local || trail_detail) {
+        paint->dashed = false;
+        if (local) {
+            paint->width = 1;
+        } else if (paint->width > 2) {
+            paint->width = 2;
+        }
+    }
+
+    /*
+     * At regional/inter-city scales a 2 px major-road stroke is enough.
+     * Geometry count is unchanged, but rasterization/submission is lighter
+     * and the hierarchy remains readable without the casing.
+     */
+    if (zoom < 12.75
+        && road_class >= OPENRIDE_ROAD_MOTORWAY
+        && road_class <= OPENRIDE_ROAD_SECONDARY
+        && paint->width > 2) {
+        paint->width = 2;
+    }
+#else
+    (void)zoom;
+    (void)road_class;
+    (void)paint;
+#endif
+}
+
+static double android_road_class_fade(double zoom, int road_class)
+{
+#ifdef __ANDROID__
+    switch ((OpenRideRoadClass)road_class) {
+        case OPENRIDE_ROAD_SECONDARY:
+            return ormap_zoom_smoothstep(zoom, 11.75, 12.15);
+
+        case OPENRIDE_ROAD_TERTIARY:
+            return ormap_zoom_smoothstep(zoom, 12.75, 13.15);
+
+        case OPENRIDE_ROAD_UNCLASSIFIED:
+        case OPENRIDE_ROAD_RESIDENTIAL:
+        case OPENRIDE_ROAD_SERVICE:
+        case OPENRIDE_ROAD_LIVING_STREET:
+        case OPENRIDE_ROAD_OTHER:
+            return ormap_zoom_smoothstep(zoom, 13.75, 14.20);
+
+        case OPENRIDE_ROAD_TRACK:
+        case OPENRIDE_ROAD_PATH:
+            return ormap_zoom_smoothstep(zoom, 14.50, 14.95);
+
+        default:
+            return 1.0;
+    }
+#else
+    (void)zoom;
+    (void)road_class;
+    return 1.0;
+#endif
+}
+
+static void apply_android_road_fade(double zoom,
+                                    int road_class,
+                                    OpenRideMapRoadPaint *paint)
+{
+    if (!paint) return;
+    const double fade = android_road_class_fade(zoom, road_class);
+    ormap_scale_color_alpha(&paint->line, fade);
+    ormap_scale_color_alpha(&paint->casing, fade);
+}
 
 static void build_road_paint_table(OpenRideORMapRenderer *renderer,
                                    double zoom,
@@ -797,6 +1038,16 @@ static void build_road_paint_table(OpenRideORMapRenderer *renderer,
             false,
             zoom,
             &table->paints[road_class]);
+        if (table->visible[road_class]) {
+            apply_android_minor_road_lod(
+                zoom,
+                road_class,
+                &table->paints[road_class]);
+            apply_android_road_fade(
+                zoom,
+                road_class,
+                &table->paints[road_class]);
+        }
     }
 }
 
@@ -833,60 +1084,193 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
             if (!entry || entry->tile.count == 0U) continue;
             const double left = width * 0.5 + tx * tile_size - center_x;
             const double top = height * 0.5 + ty * tile_size - center_y;
-            for (uint32_t r = 0U; r < entry->tile.count; ++r) {
-                const OpenRideORMapRoadRecord *record = &entry->tile.records[r];
-                const uint8_t road_class = record->road_class <= OPENRIDE_ROAD_OTHER
-                    ? record->road_class : OPENRIDE_ROAD_OTHER;
-                if (!paint_table->visible[road_class]) continue;
-                const OpenRideMapRoadPaint paint = paint_table->paints[road_class];
-                if (casing_pass
-                    && !(paint.casing_width > paint.width && paint.casing.a > 0U)) {
-                    continue;
-                }
-                float x1 = (float)(left + ((double)record->x1 / 65535.0) * tile_size);
-                float y1 = (float)(top + ((double)record->y1 / 65535.0) * tile_size);
-                float x2 = (float)(left + ((double)record->x2 / 65535.0) * tile_size);
-                float y2 = (float)(top + ((double)record->y2 / 65535.0) * tile_size);
-                rotate_point(camera, width, height, &x1, &y1);
-                rotate_point(camera, width, height, &x2, &y2);
+            if (entry->record_order) {
+                for (size_t order_index = 0U;
+                     order_index < sizeof(OPENRIDE_ROAD_DRAW_ORDER)
+                         / sizeof(OPENRIDE_ROAD_DRAW_ORDER[0]);
+                     ++order_index) {
+                    const uint8_t road_class =
+                        OPENRIDE_ROAD_DRAW_ORDER[order_index];
+                    if (!paint_table->visible[road_class]) continue;
 
-                bool ok = true;
-                if (casing_pass) {
-                    ok = geometry_batch_line(renderer,
-                                             &batch,
-                                             x1,
-                                             y1,
-                                             x2,
-                                             y2,
-                                             paint.casing_width,
-                                             paint.casing);
-                } else if (paint.dashed) {
-                    ok = geometry_batch_dashed_line(renderer,
-                                                    &batch,
-                                                    x1,
-                                                    y1,
-                                                    x2,
-                                                    y2,
-                                                    paint.width,
-                                                    paint.line);
-                } else {
-                    ok = geometry_batch_line(renderer,
-                                             &batch,
-                                             x1,
-                                             y1,
-                                             x2,
-                                             y2,
-                                             paint.width,
-                                             paint.line);
+                    const OpenRideMapRoadPaint paint =
+                        paint_table->paints[road_class];
+                    if (casing_pass
+                        && !(paint.casing_width > paint.width
+                             && paint.casing.a > 0U)) {
+                        continue;
+                    }
+
+                    const uint32_t first =
+                        entry->class_offsets[road_class];
+                    const uint32_t end =
+                        entry->class_offsets[road_class + 1U];
+                    for (uint32_t position = first;
+                         position < end;
+                         ++position) {
+                        const OpenRideORMapRoadRecord *record =
+                            &entry->tile.records[entry->record_order[position]];
+
+                        float x1 = (float)(
+                            left + ((double)record->x1 / 65535.0) * tile_size);
+                        float y1 = (float)(
+                            top + ((double)record->y1 / 65535.0) * tile_size);
+                        float x2 = (float)(
+                            left + ((double)record->x2 / 65535.0) * tile_size);
+                        float y2 = (float)(
+                            top + ((double)record->y2 / 65535.0) * tile_size);
+                        rotate_point(camera, width, height, &x1, &y1);
+                        rotate_point(camera, width, height, &x2, &y2);
+
+                        const float clip_margin =
+                            (float)(paint.casing_width > paint.width
+                                        ? paint.casing_width
+                                        : paint.width)
+                            + 3.0f;
+                        if ((x1 < -clip_margin && x2 < -clip_margin)
+                            || (x1 > (float)width + clip_margin
+                                && x2 > (float)width + clip_margin)
+                            || (y1 < -clip_margin && y2 < -clip_margin)
+                            || (y1 > (float)height + clip_margin
+                                && y2 > (float)height + clip_margin)) {
+                            continue;
+                        }
+
+                        bool ok = true;
+                        if (casing_pass) {
+                            ok = geometry_batch_line(renderer,
+                                                     &batch,
+                                                     x1,
+                                                     y1,
+                                                     x2,
+                                                     y2,
+                                                     paint.casing_width,
+                                                     paint.casing);
+                        } else if (paint.dashed) {
+                            ok = geometry_batch_dashed_line(renderer,
+                                                            &batch,
+                                                            x1,
+                                                            y1,
+                                                            x2,
+                                                            y2,
+                                                            paint.width,
+                                                            paint.line);
+                        } else {
+                            ok = geometry_batch_line(renderer,
+                                                     &batch,
+                                                     x1,
+                                                     y1,
+                                                     x2,
+                                                     y2,
+                                                     paint.width,
+                                                     paint.line);
+                        }
+                        if (!ok) {
+                            geometry_batch_flush(renderer, &batch);
+                            return;
+                        }
+                    }
                 }
-                if (!ok) {
-                    geometry_batch_flush(renderer, &batch);
-                    return;
+            } else {
+                for (uint32_t r = 0U; r < entry->tile.count; ++r) {
+                    const OpenRideORMapRoadRecord *record =
+                        &entry->tile.records[r];
+                    const uint8_t road_class =
+                        record->road_class <= OPENRIDE_ROAD_OTHER
+                            ? record->road_class
+                            : OPENRIDE_ROAD_OTHER;
+                    if (!paint_table->visible[road_class]) continue;
+
+                    const OpenRideMapRoadPaint paint =
+                        paint_table->paints[road_class];
+                    if (casing_pass
+                        && !(paint.casing_width > paint.width
+                             && paint.casing.a > 0U)) {
+                        continue;
+                    }
+
+                    float x1 = (float)(
+                        left + ((double)record->x1 / 65535.0) * tile_size);
+                    float y1 = (float)(
+                        top + ((double)record->y1 / 65535.0) * tile_size);
+                    float x2 = (float)(
+                        left + ((double)record->x2 / 65535.0) * tile_size);
+                    float y2 = (float)(
+                        top + ((double)record->y2 / 65535.0) * tile_size);
+                    rotate_point(camera, width, height, &x1, &y1);
+                    rotate_point(camera, width, height, &x2, &y2);
+
+                    bool ok = true;
+                    if (casing_pass) {
+                        ok = geometry_batch_line(renderer,
+                                                 &batch,
+                                                 x1,
+                                                 y1,
+                                                 x2,
+                                                 y2,
+                                                 paint.casing_width,
+                                                 paint.casing);
+                    } else if (paint.dashed) {
+                        ok = geometry_batch_dashed_line(renderer,
+                                                        &batch,
+                                                        x1,
+                                                        y1,
+                                                        x2,
+                                                        y2,
+                                                        paint.width,
+                                                        paint.line);
+                    } else {
+                        ok = geometry_batch_line(renderer,
+                                                 &batch,
+                                                 x1,
+                                                 y1,
+                                                 x2,
+                                                 y2,
+                                                 paint.width,
+                                                 paint.line);
+                    }
+                    if (!ok) {
+                        geometry_batch_flush(renderer, &batch);
+                        return;
+                    }
                 }
             }
         }
     }
     geometry_batch_flush(renderer, &batch);
+}
+
+static int android_road_data_zoom(const OpenRideORMapMetadata *metadata,
+                                  double camera_zoom)
+{
+    if (!metadata) return OPENRIDE_ORMAP_MIN_ROAD_ZOOM;
+
+    int zoom = (int)floor(camera_zoom);
+#ifdef __ANDROID__
+    /*
+     * Mobile source-LOD hysteresis.
+     *
+     * The ORMap itself already contains progressively denser road datasets.
+     * Delaying the next data level by roughly 0.75 zoom prevents a large
+     * geometry jump while the extra road hierarchy is still visually small.
+     */
+    const int min_zoom = metadata->min_zoom;
+    if (camera_zoom < 11.75) {
+        zoom = min_zoom;
+    } else if (camera_zoom < 12.75) {
+        zoom = min_zoom + 1;
+    } else if (camera_zoom < 13.75) {
+        zoom = min_zoom + 2;
+    } else if (camera_zoom < 14.50) {
+        zoom = min_zoom + 3;
+    } else {
+        zoom = min_zoom + 4;
+    }
+#endif
+
+    if (zoom < metadata->min_zoom) zoom = metadata->min_zoom;
+    if (zoom > metadata->road_max_zoom) zoom = metadata->road_max_zoom;
+    return zoom;
 }
 
 static void draw_roads(OpenRideORMapRenderer *renderer,
@@ -896,9 +1280,7 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
 {
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     if (!metadata) return;
-    int zoom = (int)floor(camera->zoom);
-    if (zoom < metadata->min_zoom) zoom = metadata->min_zoom;
-    if (zoom > metadata->road_max_zoom) zoom = metadata->road_max_zoom;
+    const int zoom = android_road_data_zoom(metadata, camera->zoom);
 
     RoadPaintTable paint_table;
     build_road_paint_table(renderer, camera->zoom, &paint_table);
@@ -928,6 +1310,82 @@ static bool boxes_overlap(LabelBox a, LabelBox b)
     return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
+static bool label_is_region_reference(const OpenRideORMapLabel *labels,
+                                      uint32_t count,
+                                      uint32_t label_index)
+{
+    if (!labels || label_index >= count) return false;
+
+    uint32_t selected = 0U;
+    for (int pass = 0; pass < 3 && selected < 3U; ++pass) {
+        const uint8_t wanted_kind =
+            pass == 0
+                ? OPENRIDE_PLACE_CITY
+                : (pass == 1 ? OPENRIDE_PLACE_TOWN
+                             : OPENRIDE_PLACE_VILLAGE);
+
+        for (uint32_t i = 0U; i < count && selected < 3U; ++i) {
+            if (labels[i].kind != wanted_kind || labels[i].name[0] == '\0') {
+                continue;
+            }
+            if (i == label_index) return true;
+            ++selected;
+        }
+    }
+
+    return false;
+}
+
+static double label_fade_start_zoom(const char *kind)
+{
+    if (!kind || kind[0] == '\0') return 13.0;
+    if (strcmp(kind, "capital") == 0) return 4.0;
+    if (strcmp(kind, "city") == 0) return 8.5;
+    if (strcmp(kind, "town") == 0) return 10.5;
+    if (strcmp(kind, "village") == 0) return 12.75;
+    if (strcmp(kind, "suburb") == 0) return 12.75;
+    if (strcmp(kind, "borough") == 0) return 12.75;
+    if (strcmp(kind, "hamlet") == 0) return 13.5;
+    if (strcmp(kind, "quarter") == 0) return 13.75;
+    if (strcmp(kind, "neighbourhood") == 0) return 13.75;
+    if (strcmp(kind, "locality") == 0) return 14.0;
+    if (strcmp(kind, "isolated_dwelling") == 0) return 14.0;
+    return 13.5;
+}
+
+static double label_fade_factor(const char *kind, double zoom)
+{
+    const double start = label_fade_start_zoom(kind);
+    return ormap_zoom_smoothstep(zoom, start, start + 0.65);
+}
+
+static OpenRidePointD label_world_to_screen(OpenRidePointD world,
+                                                OpenRidePointD center,
+                                                double world_size,
+                                                double bearing_cos,
+                                                double bearing_sin,
+                                                int width,
+                                                int height)
+{
+    double dx = world.x - center.x;
+    if (dx > 0.5) dx -= 1.0;
+    if (dx < -0.5) dx += 1.0;
+
+    const double dy = world.y - center.y;
+    const double world_dx = dx * world_size;
+    const double world_dy = dy * world_size;
+
+    const double screen_dx =
+        world_dx * bearing_cos + world_dy * bearing_sin;
+    const double screen_dy =
+        -world_dx * bearing_sin + world_dy * bearing_cos;
+
+    return (OpenRidePointD){
+        (double)width * 0.5 + screen_dx,
+        (double)height * 0.5 + screen_dy
+    };
+}
+
 static void draw_labels(OpenRideORMapRenderer *renderer,
                         const OpenRideMapCamera *camera,
                         int width,
@@ -936,19 +1394,60 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
     uint32_t count = 0U;
     const OpenRideORMapLabel *labels = openride_ormap_labels(renderer->map, &count);
     if (!labels || count == 0U) return;
+
+    const OpenRidePointD center =
+        openride_mercator_forward(camera->center_lat, camera->center_lon);
+    const double world_size = openride_world_size_pixels(camera->zoom);
+    const double angle =
+        camera->bearing_deg * 3.14159265358979323846 / 180.0;
+    const double bearing_cos = cos(angle);
+    const double bearing_sin = sin(angle);
+    const bool cached_positions =
+        renderer->label_world_positions
+        && renderer->label_world_position_count == count;
+
     LabelBox boxes[ORMAP_LABEL_BOX_MAX];
     uint32_t box_count = 0U;
     const OpenRideMapPalette palette = openride_map_palette(renderer->style);
+
+    SDL_BlendMode previous_blend_mode = SDL_BLENDMODE_NONE;
+    const bool have_previous_blend_mode =
+        SDL_GetRenderDrawBlendMode(renderer->renderer, &previous_blend_mode);
+    SDL_SetRenderDrawBlendMode(renderer->renderer, SDL_BLENDMODE_BLEND);
+
+    /*
+     * Some labels (notably city/town) have a semantic visibility threshold
+     * below the Android detail-renderer handoff. Without a global handoff
+     * fade, those labels arrive already at full opacity the first frame the
+     * detailed renderer becomes active.
+     */
+    const double detail_label_fade =
+        ormap_zoom_smoothstep(camera->zoom, 10.70, 11.30);
+
     for (uint32_t i = 0U; i < count && box_count < ORMAP_LABEL_BOX_MAX; ++i) {
         const OpenRideORMapLabel *label = &labels[i];
         const char *kind = label_kind_name(label->kind);
         if (!openride_map_place_label_visible(kind, 0, camera->zoom)) continue;
-        const OpenRidePointD p = openride_geo_to_screen(camera,
-                                                         label->lat_e7 / 10000000.0,
-                                                         label->lon_e7 / 10000000.0,
-                                                         width,
-                                                         height);
-        if (p.x < -100.0 || p.x > width + 100.0 || p.y < -40.0 || p.y > height + 40.0) continue;
+
+        const OpenRidePointD world = cached_positions
+            ? renderer->label_world_positions[i]
+            : openride_mercator_forward(label->lat_e7 / 10000000.0,
+                                        label->lon_e7 / 10000000.0);
+        const OpenRidePointD p = label_world_to_screen(world,
+                                                       center,
+                                                       world_size,
+                                                       bearing_cos,
+                                                       bearing_sin,
+                                                       width,
+                                                       height);
+
+        if (p.x < -100.0
+            || p.x > width + 100.0
+            || p.y < -40.0
+            || p.y > height + 40.0) {
+            continue;
+        }
+
         const float text_w = (float)strlen(label->name) * 8.0f;
         LabelBox box = {
             .left = (float)p.x - text_w * 0.5f - 4.0f,
@@ -956,23 +1455,46 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
             .right = (float)p.x + text_w * 0.5f + 4.0f,
             .bottom = (float)p.y + 10.0f
         };
+
         bool collision = false;
         for (uint32_t b = 0U; b < box_count; ++b) {
-            if (boxes_overlap(box, boxes[b])) { collision = true; break; }
+            if (boxes_overlap(box, boxes[b])) {
+                collision = true;
+                break;
+            }
         }
         if (collision) continue;
+
+        const bool persistent_region_reference =
+            label_is_region_reference(labels, count, i);
+        const double label_fade = persistent_region_reference
+            ? 1.0
+            : detail_label_fade * label_fade_factor(kind, camera->zoom);
+        if (label_fade <= 0.0) continue;
+
+        OpenRideMapColor label_halo = palette.label_halo;
+        OpenRideMapColor label_color = palette.label;
+        ormap_scale_color_alpha(&label_halo, label_fade);
+        ormap_scale_color_alpha(&label_color, label_fade);
+
         boxes[box_count++] = box;
-        set_color(renderer->renderer, palette.label_halo);
+        set_color(renderer->renderer, label_halo);
         SDL_RenderDebugText(renderer->renderer,
                             (float)p.x - text_w * 0.5f + 1.0f,
                             (float)p.y + 1.0f,
                             label->name);
-        set_color(renderer->renderer, palette.label);
+        set_color(renderer->renderer, label_color);
         SDL_RenderDebugText(renderer->renderer,
                             (float)p.x - text_w * 0.5f,
                             (float)p.y,
                             label->name);
     }
+
+    SDL_SetRenderDrawBlendMode(
+        renderer->renderer,
+        have_previous_blend_mode
+            ? previous_blend_mode
+            : SDL_BLENDMODE_NONE);
 }
 
 bool openride_ormap_renderer_init(OpenRideORMapRenderer *renderer,
@@ -984,6 +1506,25 @@ bool openride_ormap_renderer_init(OpenRideORMapRenderer *renderer,
     renderer->renderer = sdl_renderer;
     renderer->map = map;
     renderer->style = OPENRIDE_MAP_STYLE_TRAIL;
+
+    uint32_t label_count = 0U;
+    const OpenRideORMapLabel *labels =
+        openride_ormap_labels(map, &label_count);
+    if (labels && label_count > 0U) {
+        renderer->label_world_positions =
+            malloc((size_t)label_count
+                   * sizeof(*renderer->label_world_positions));
+        if (renderer->label_world_positions) {
+            renderer->label_world_position_count = label_count;
+            for (uint32_t i = 0U; i < label_count; ++i) {
+                renderer->label_world_positions[i] =
+                    openride_mercator_forward(
+                        labels[i].lat_e7 / 10000000.0,
+                        labels[i].lon_e7 / 10000000.0);
+            }
+        }
+    }
+
     return true;
 }
 
@@ -991,7 +1532,7 @@ void openride_ormap_renderer_destroy(OpenRideORMapRenderer *renderer)
 {
     if (!renderer) return;
     for (size_t i = 0U; i < OPENRIDE_ORMAP_ROAD_CACHE_CAPACITY; ++i) {
-        if (renderer->roads[i].occupied) openride_ormap_road_tile_destroy(&renderer->roads[i].tile);
+        road_cache_entry_destroy(&renderer->roads[i]);
     }
     for (size_t i = 0U; i < OPENRIDE_ORMAP_MASK_CACHE_CAPACITY; ++i) {
         if (renderer->masks[i].occupied) openride_ormap_mask_tile_destroy(&renderer->masks[i].tile);
@@ -1002,6 +1543,7 @@ void openride_ormap_renderer_destroy(OpenRideORMapRenderer *renderer)
     for (size_t i = 0U; i < OPENRIDE_ORMAP_AREA_CACHE_CAPACITY; ++i) {
         if (renderer->areas[i].occupied) openride_ormap_area_tile_destroy(&renderer->areas[i].tile);
     }
+    free(renderer->label_world_positions);
     free(renderer->area_vertices);
     free(renderer->area_indices);
     memset(renderer, 0, sizeof(*renderer));

@@ -30,6 +30,13 @@ typedef struct OpenRideORMapRoadCacheEntry {
     int y;
     uint64_t last_used;
     OpenRideORMapRoadTile tile;
+    /*
+     * Runtime-only class index. record_order contains original record indexes
+     * grouped by OpenRideRoadClass; class_offsets has one sentinel entry.
+     * This avoids scanning hidden urban/path records every frame at low zoom.
+     */
+    uint32_t *record_order;
+    uint32_t class_offsets[OPENRIDE_ROAD_OTHER + 2];
 } OpenRideORMapRoadCacheEntry;
 
 typedef struct OpenRideORMapMaskCacheEntry {
@@ -68,6 +75,8 @@ typedef struct OpenRideORMapRenderer {
     OpenRideORMapMaskCacheEntry masks[OPENRIDE_ORMAP_MASK_CACHE_CAPACITY];
     OpenRideORMapWaterCacheEntry waters[OPENRIDE_ORMAP_WATER_CACHE_CAPACITY];
     OpenRideORMapAreaCacheEntry areas[OPENRIDE_ORMAP_AREA_CACHE_CAPACITY];
+    OpenRidePointD *label_world_positions;
+    uint32_t label_world_position_count;
     SDL_Vertex *area_vertices;
     int *area_indices;
     uint32_t area_vertex_capacity;

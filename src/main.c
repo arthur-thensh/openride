@@ -7453,8 +7453,14 @@ int main(int argc, char **argv)
 
         const bool world_available = map_world
             && openride_map_world_region_count(map_world) > 0U;
+#ifdef __ANDROID__
+        const double OPENRIDE_ANDROID_DETAIL_ZOOM = 10.75;
+        const bool world_overview_only = world_available
+            && camera.zoom < OPENRIDE_ANDROID_DETAIL_ZOOM;
+#else
         const bool world_overview_only = world_available
             && camera.zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM;
+#endif
         if (world_overview_only) {
             const OpenRideMapPalette palette = openride_map_palette(map_style);
             SDL_SetRenderDrawColor(renderer,

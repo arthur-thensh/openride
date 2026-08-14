@@ -2,6 +2,7 @@
 #include "map/ormap_renderer.h"
 
 #include "openride/ormap.h"
+#include "openride/place_search.h"
 #include "openride/region_manager.h"
 #include "openride/routing_graph.h"
 
@@ -12,22 +13,53 @@
 #include <string.h>
 
 #define WORLD_ROAD_ZOOM 10
+#define WORLD_MAJOR_ROAD_CLASS_COUNT 3
 #define WORLD_MAX_LINE_WIDTH 3
+#define WORLD_REGION_REFERENCE_LABEL_TARGET 3U
+#define WORLD_MAJOR_CITY_LABEL_MAX 96U
+#define WORLD_LINE_CHUNK_SIZE 64U
+/*
+ * MapWorld is an orientation overview, not the navigation cartography.
+ * Snap its major-road geometry to a ~131k WebMercator lattice and collapse
+ * duplicate cell-to-cell edges. At z10.75 one lattice step is ~3.4 px;
+ * at z6-z9 it is sub-pixel to ~1 px, while removing huge numbers of tiny
+ * OSM/routing-graph segments and parallel carriageway duplicates.
+ */
+#define WORLD_OVERVIEW_ROAD_GRID 131072U
 #define WORLD_GEOMETRY_BATCH_VERTEX_LIMIT 8192U
 #define WORLD_GEOMETRY_BATCH_INDEX_LIMIT 12288U
 
 typedef struct WorldLine {
-    double lat1;
-    double lon1;
-    double lat2;
-    double lon2;
+    double x1;
+    double y1;
+    double x2;
+    double y2;
     uint8_t kind;
 } WorldLine;
+
+typedef struct WorldQuantizedEdge {
+    uint32_t ax;
+    uint32_t ay;
+    uint32_t bx;
+    uint32_t by;
+    uint8_t kind;
+} WorldQuantizedEdge;
+
+typedef struct WorldLineChunk {
+    size_t first;
+    size_t count;
+    double min_x;
+    double min_y;
+    double max_x;
+    double max_y;
+} WorldLineChunk;
 
 typedef struct WorldLineArray {
     WorldLine *items;
     size_t count;
     size_t capacity;
+    WorldLineChunk *chunks;
+    size_t chunk_count;
 } WorldLineArray;
 
 typedef struct WorldGeometryBatch {
@@ -35,11 +67,18 @@ typedef struct WorldGeometryBatch {
     uint32_t index_count;
 } WorldGeometryBatch;
 
+typedef struct WorldCityLabelBox {
+    float left;
+    float top;
+    float right;
+    float bottom;
+} WorldCityLabelBox;
+
 typedef struct OpenRideMapWorldRegion {
     const OpenRideRegionDefinition *definition;
     OpenRideORMapMetadata metadata;
     WorldLineArray boundary;
-    WorldLineArray roads;
+    WorldLineArray roads[WORLD_MAJOR_ROAD_CLASS_COUNT];
     WorldLineArray waterways;
     OpenRideORMap *map;
     OpenRideORMapRenderer *detail_renderer;
@@ -66,7 +105,68 @@ static void line_array_destroy(WorldLineArray *array)
 {
     if (!array) return;
     free(array->items);
+    free(array->chunks);
     memset(array, 0, sizeof(*array));
+}
+
+static bool line_array_build_chunks(WorldLineArray *array)
+{
+    if (!array) return false;
+
+    free(array->chunks);
+    array->chunks = NULL;
+    array->chunk_count = 0U;
+
+    if (array->count == 0U) return true;
+
+    const size_t chunk_count =
+        (array->count + WORLD_LINE_CHUNK_SIZE - 1U)
+        / WORLD_LINE_CHUNK_SIZE;
+    WorldLineChunk *chunks =
+        calloc(chunk_count, sizeof(*chunks));
+    if (!chunks) return false;
+
+    for (size_t c = 0U; c < chunk_count; ++c) {
+        WorldLineChunk *chunk = &chunks[c];
+        chunk->first = c * WORLD_LINE_CHUNK_SIZE;
+        const size_t remaining = array->count - chunk->first;
+        chunk->count =
+            remaining < WORLD_LINE_CHUNK_SIZE
+                ? remaining
+                : WORLD_LINE_CHUNK_SIZE;
+
+        const WorldLine *first = &array->items[chunk->first];
+        chunk->min_x = first->x1 < first->x2 ? first->x1 : first->x2;
+        chunk->max_x = first->x1 > first->x2 ? first->x1 : first->x2;
+        chunk->min_y = first->y1 < first->y2 ? first->y1 : first->y2;
+        chunk->max_y = first->y1 > first->y2 ? first->y1 : first->y2;
+
+        for (size_t i = 1U; i < chunk->count; ++i) {
+            const WorldLine *line =
+                &array->items[chunk->first + i];
+            const double xs[2] = {line->x1, line->x2};
+            const double ys[2] = {line->y1, line->y2};
+
+            for (int endpoint = 0; endpoint < 2; ++endpoint) {
+                if (xs[endpoint] < chunk->min_x) {
+                    chunk->min_x = xs[endpoint];
+                }
+                if (xs[endpoint] > chunk->max_x) {
+                    chunk->max_x = xs[endpoint];
+                }
+                if (ys[endpoint] < chunk->min_y) {
+                    chunk->min_y = ys[endpoint];
+                }
+                if (ys[endpoint] > chunk->max_y) {
+                    chunk->max_y = ys[endpoint];
+                }
+            }
+        }
+    }
+
+    array->chunks = chunks;
+    array->chunk_count = chunk_count;
+    return true;
 }
 
 static bool line_array_append(WorldLineArray *array,
@@ -85,11 +185,13 @@ static bool line_array_append(WorldLineArray *array,
         array->items = grown;
         array->capacity = next;
     }
+    const OpenRidePointD a = openride_mercator_forward(lat1, lon1);
+    const OpenRidePointD b = openride_mercator_forward(lat2, lon2);
     WorldLine *line = &array->items[array->count++];
-    line->lat1 = lat1;
-    line->lon1 = lon1;
-    line->lat2 = lat2;
-    line->lon2 = lon2;
+    line->x1 = a.x;
+    line->y1 = a.y;
+    line->x2 = b.x;
+    line->y2 = b.y;
     line->kind = kind;
     return true;
 }
@@ -251,7 +353,13 @@ static bool load_major_roads(OpenRideORMap *map,
                            (double)record->x2 / 65535.0,
                            (double)record->y2 / 65535.0,
                            &lat2, &lon2);
-            if (!line_array_append(&region->roads,
+            const int road_index =
+                (int)record->road_class - (int)OPENRIDE_ROAD_MOTORWAY;
+            if (road_index < 0
+                || road_index >= WORLD_MAJOR_ROAD_CLASS_COUNT) {
+                continue;
+            }
+            if (!line_array_append(&region->roads[road_index],
                                    lat1, lon1, lat2, lon2, record->road_class)) {
                 openride_ormap_road_tile_destroy(&tile);
                 openride_ormap_tile_coords_destroy(coords);
@@ -336,7 +444,9 @@ static void world_region_destroy(OpenRideMapWorldRegion *region)
         openride_ormap_close(region->map);
     }
     line_array_destroy(&region->boundary);
-    line_array_destroy(&region->roads);
+    for (int i = 0; i < WORLD_MAJOR_ROAD_CLASS_COUNT; ++i) {
+        line_array_destroy(&region->roads[i]);
+    }
     line_array_destroy(&region->waterways);
     memset(region, 0, sizeof(*region));
 }
@@ -346,6 +456,203 @@ static void destroy_regions(OpenRideMapWorldRegion *regions, size_t count)
     if (!regions) return;
     for (size_t i = 0U; i < count; ++i) world_region_destroy(&regions[i]);
     free(regions);
+}
+
+static bool line_array_append_world(WorldLineArray *array,
+                                    double x1,
+                                    double y1,
+                                    double x2,
+                                    double y2,
+                                    uint8_t kind)
+{
+    if (!array) return false;
+    if (array->count == array->capacity) {
+        size_t next =
+            array->capacity == 0U ? 512U : array->capacity * 2U;
+        if (next < array->capacity) return false;
+        WorldLine *grown =
+            realloc(array->items, next * sizeof(*grown));
+        if (!grown) return false;
+        array->items = grown;
+        array->capacity = next;
+    }
+
+    WorldLine *line = &array->items[array->count++];
+    line->x1 = x1;
+    line->y1 = y1;
+    line->x2 = x2;
+    line->y2 = y2;
+    line->kind = kind;
+    return true;
+}
+
+static uint32_t world_quantize_coordinate(double value, uint32_t grid)
+{
+    if (value <= 0.0) return 0U;
+    if (value >= 1.0) return grid;
+    return (uint32_t)llround(value * (double)grid);
+}
+
+static bool world_quantized_point_less(uint32_t ax,
+                                       uint32_t ay,
+                                       uint32_t bx,
+                                       uint32_t by)
+{
+    return ax < bx || (ax == bx && ay < by);
+}
+
+static int compare_world_quantized_edge(const void *left,
+                                        const void *right)
+{
+    const WorldQuantizedEdge *a = left;
+    const WorldQuantizedEdge *b = right;
+
+    if (a->ax != b->ax) return a->ax < b->ax ? -1 : 1;
+    if (a->ay != b->ay) return a->ay < b->ay ? -1 : 1;
+    if (a->bx != b->bx) return a->bx < b->bx ? -1 : 1;
+    if (a->by != b->by) return a->by < b->by ? -1 : 1;
+    if (a->kind != b->kind) return a->kind < b->kind ? -1 : 1;
+    return 0;
+}
+
+static bool world_quantized_edge_equal(const WorldQuantizedEdge *a,
+                                       const WorldQuantizedEdge *b)
+{
+    return a->ax == b->ax
+        && a->ay == b->ay
+        && a->bx == b->bx
+        && a->by == b->by
+        && a->kind == b->kind;
+}
+
+static bool line_array_generalize_for_overview(
+    const WorldLineArray *source,
+    WorldLineArray *destination)
+{
+    if (!source || !destination) return false;
+    memset(destination, 0, sizeof(*destination));
+
+    if (source->count == 0U) return true;
+    if (source->count > SIZE_MAX / sizeof(WorldQuantizedEdge)) {
+        return false;
+    }
+
+    WorldQuantizedEdge *edges =
+        malloc(source->count * sizeof(*edges));
+    if (!edges) return false;
+
+    size_t edge_count = 0U;
+    for (size_t i = 0U; i < source->count; ++i) {
+        const WorldLine *line = &source->items[i];
+
+        uint32_t ax =
+            world_quantize_coordinate(
+                line->x1, WORLD_OVERVIEW_ROAD_GRID);
+        uint32_t ay =
+            world_quantize_coordinate(
+                line->y1, WORLD_OVERVIEW_ROAD_GRID);
+        uint32_t bx =
+            world_quantize_coordinate(
+                line->x2, WORLD_OVERVIEW_ROAD_GRID);
+        uint32_t by =
+            world_quantize_coordinate(
+                line->y2, WORLD_OVERVIEW_ROAD_GRID);
+
+        /* Sub-grid road fragments are invisible in the world overview. */
+        if (ax == bx && ay == by) continue;
+
+        /*
+         * Roads are rendered as undirected overview strokes. Canonicalise
+         * endpoints so parallel/duplicate edges collapse after sorting.
+         */
+        if (world_quantized_point_less(bx, by, ax, ay)) {
+            const uint32_t tx = ax;
+            const uint32_t ty = ay;
+            ax = bx;
+            ay = by;
+            bx = tx;
+            by = ty;
+        }
+
+        edges[edge_count++] = (WorldQuantizedEdge){
+            .ax = ax,
+            .ay = ay,
+            .bx = bx,
+            .by = by,
+            .kind = line->kind
+        };
+    }
+
+    if (edge_count > 1U) {
+        qsort(edges,
+              edge_count,
+              sizeof(*edges),
+              compare_world_quantized_edge);
+    }
+
+    const double inverse_grid =
+        1.0 / (double)WORLD_OVERVIEW_ROAD_GRID;
+    bool ok = true;
+    bool have_previous = false;
+    WorldQuantizedEdge previous = {0};
+
+    for (size_t i = 0U; i < edge_count; ++i) {
+        const WorldQuantizedEdge *edge = &edges[i];
+        if (have_previous
+            && world_quantized_edge_equal(edge, &previous)) {
+            continue;
+        }
+
+        if (!line_array_append_world(
+                destination,
+                (double)edge->ax * inverse_grid,
+                (double)edge->ay * inverse_grid,
+                (double)edge->bx * inverse_grid,
+                (double)edge->by * inverse_grid,
+                edge->kind)) {
+            ok = false;
+            break;
+        }
+
+        previous = *edge;
+        have_previous = true;
+    }
+
+    free(edges);
+
+    if (!ok) {
+        line_array_destroy(destination);
+        return false;
+    }
+
+    if (!line_array_build_chunks(destination)) {
+        line_array_destroy(destination);
+        return false;
+    }
+
+    return true;
+}
+
+static bool generalize_region_overview_roads(
+    OpenRideMapWorldRegion *region)
+{
+    if (!region) return false;
+
+    for (int road_index = 0;
+         road_index < WORLD_MAJOR_ROAD_CLASS_COUNT;
+         ++road_index) {
+        WorldLineArray generalized = {0};
+        if (!line_array_generalize_for_overview(
+                &region->roads[road_index],
+                &generalized)) {
+            return false;
+        }
+
+        line_array_destroy(&region->roads[road_index]);
+        region->roads[road_index] = generalized;
+    }
+
+    return true;
 }
 
 static bool build_world_region(SDL_Renderer *renderer,
@@ -369,10 +676,26 @@ static bool build_world_region(SDL_Renderer *renderer,
     }
 
     out->metadata = *metadata;
-    const bool ok = load_major_roads(out->map, out, error, error_size)
+    bool ok = load_major_roads(out->map, out, error, error_size)
         && load_major_waterways(out->map, out, error, error_size)
         && load_poly_boundary(poly_path, &out->boundary, error, error_size);
+
+    /*
+     * Boundaries are already cheap. Major roads are not: the raw z10 routing
+     * geometry contains hundreds of thousands of tiny segments. Generalise
+     * those arrays once at load time, then build v12 spatial chunks over the
+     * much smaller result.
+     */
+    if (ok) {
+        ok = line_array_build_chunks(&out->boundary)
+            && generalize_region_overview_roads(out);
+    }
     if (!ok) {
+        if (!error || error[0] == '\0') {
+            set_error(error,
+                      error_size,
+                      "out of memory indexing map-world overview geometry");
+        }
         world_region_destroy(out);
         return false;
     }
@@ -628,6 +951,92 @@ static bool geometry_batch_line(OpenRideMapWorld *world,
     return true;
 }
 
+static OpenRidePointD world_line_to_screen(double world_x,
+                                               double world_y,
+                                               OpenRidePointD center,
+                                               double world_size,
+                                               double bearing_cos,
+                                               double bearing_sin,
+                                               int viewport_width,
+                                               int viewport_height)
+{
+    double dx = world_x - center.x;
+    if (dx > 0.5) dx -= 1.0;
+    if (dx < -0.5) dx += 1.0;
+
+    const double dy = world_y - center.y;
+    const double world_dx = dx * world_size;
+    const double world_dy = dy * world_size;
+
+    const double screen_dx =
+        world_dx * bearing_cos + world_dy * bearing_sin;
+    const double screen_dy =
+        -world_dx * bearing_sin + world_dy * bearing_cos;
+
+    return (OpenRidePointD){
+        (double)viewport_width * 0.5 + screen_dx,
+        (double)viewport_height * 0.5 + screen_dy
+    };
+}
+
+static bool world_line_chunk_maybe_visible(
+    const WorldLineChunk *chunk,
+    OpenRidePointD center,
+    double world_size,
+    double bearing_cos,
+    double bearing_sin,
+    int viewport_width,
+    int viewport_height)
+{
+    if (!chunk) return true;
+
+    /*
+     * A chunk spanning more than half the Mercator world may cross the
+     * dateline. Keep it rather than risking an incorrect cull.
+     */
+    if (chunk->max_x - chunk->min_x > 0.5) return true;
+
+    const double xs[4] = {
+        chunk->min_x,
+        chunk->max_x,
+        chunk->max_x,
+        chunk->min_x
+    };
+    const double ys[4] = {
+        chunk->min_y,
+        chunk->min_y,
+        chunk->max_y,
+        chunk->max_y
+    };
+
+    const double margin = 48.0;
+    bool all_left = true;
+    bool all_right = true;
+    bool all_above = true;
+    bool all_below = true;
+
+    for (int i = 0; i < 4; ++i) {
+        const OpenRidePointD p = world_line_to_screen(
+            xs[i],
+            ys[i],
+            center,
+            world_size,
+            bearing_cos,
+            bearing_sin,
+            viewport_width,
+            viewport_height);
+
+        all_left = all_left && p.x < -margin;
+        all_right =
+            all_right && p.x > (double)viewport_width + margin;
+        all_above = all_above && p.y < -margin;
+        all_below =
+            all_below && p.y > (double)viewport_height + margin;
+    }
+
+    return !(all_left || all_right || all_above || all_below);
+}
+
 static void draw_line_array(OpenRideMapWorld *world,
                             const OpenRideMapCamera *camera,
                             const WorldLineArray *array,
@@ -639,24 +1048,121 @@ static void draw_line_array(OpenRideMapWorld *world,
                             bool filter_kind)
 {
     if (!world || !world->renderer || !camera || !array) return;
+
+    const OpenRidePointD center =
+        openride_mercator_forward(camera->center_lat, camera->center_lon);
+    const double world_size = openride_world_size_pixels(camera->zoom);
+    const double angle =
+        camera->bearing_deg * 3.14159265358979323846 / 180.0;
+    const double bearing_cos = cos(angle);
+    const double bearing_sin = sin(angle);
+
     WorldGeometryBatch batch = {0};
-    for (size_t i = 0U; i < array->count; ++i) {
-        const WorldLine *line = &array->items[i];
-        if (filter_kind && line->kind != kind_filter) continue;
-        const OpenRidePointD a = openride_geo_to_screen(camera,
-                                                        line->lat1,
-                                                        line->lon1,
-                                                        viewport_width,
-                                                        viewport_height);
-        const OpenRidePointD b = openride_geo_to_screen(camera,
-                                                        line->lat2,
-                                                        line->lon2,
-                                                        viewport_width,
-                                                        viewport_height);
-        if (!line_maybe_visible(a, b, viewport_width, viewport_height)) continue;
-        if (!geometry_batch_line(world, &batch, a, b, line_width, color)) break;
+
+    if (array->chunk_count == 0U || !array->chunks) {
+        for (size_t i = 0U; i < array->count; ++i) {
+            const WorldLine *line = &array->items[i];
+            if (filter_kind && line->kind != kind_filter) continue;
+
+            const OpenRidePointD a = world_line_to_screen(
+                line->x1,
+                line->y1,
+                center,
+                world_size,
+                bearing_cos,
+                bearing_sin,
+                viewport_width,
+                viewport_height);
+            const OpenRidePointD b = world_line_to_screen(
+                line->x2,
+                line->y2,
+                center,
+                world_size,
+                bearing_cos,
+                bearing_sin,
+                viewport_width,
+                viewport_height);
+
+            if (!line_maybe_visible(a, b,
+                                    viewport_width, viewport_height)) {
+                continue;
+            }
+            if (!geometry_batch_line(world, &batch,
+                                     a, b, line_width, color)) {
+                break;
+            }
+        }
+        geometry_batch_flush(world, &batch);
+        return;
     }
+
+    for (size_t c = 0U; c < array->chunk_count; ++c) {
+        const WorldLineChunk *chunk = &array->chunks[c];
+        if (!world_line_chunk_maybe_visible(
+                chunk,
+                center,
+                world_size,
+                bearing_cos,
+                bearing_sin,
+                viewport_width,
+                viewport_height)) {
+            continue;
+        }
+
+        const size_t end = chunk->first + chunk->count;
+        for (size_t i = chunk->first; i < end; ++i) {
+            const WorldLine *line = &array->items[i];
+            if (filter_kind && line->kind != kind_filter) continue;
+
+            const OpenRidePointD a = world_line_to_screen(
+                line->x1,
+                line->y1,
+                center,
+                world_size,
+                bearing_cos,
+                bearing_sin,
+                viewport_width,
+                viewport_height);
+            const OpenRidePointD b = world_line_to_screen(
+                line->x2,
+                line->y2,
+                center,
+                world_size,
+                bearing_cos,
+                bearing_sin,
+                viewport_width,
+                viewport_height);
+
+            if (!line_maybe_visible(a, b,
+                                    viewport_width, viewport_height)) {
+                continue;
+            }
+            if (!geometry_batch_line(world, &batch,
+                                     a, b, line_width, color)) {
+                geometry_batch_flush(world, &batch);
+                return;
+            }
+        }
+    }
+
     geometry_batch_flush(world, &batch);
+}
+
+static double openride_zoom_smoothstep(double zoom,
+                                      double start,
+                                      double end)
+{
+    if (zoom <= start) return 0.0;
+    if (zoom >= end) return 1.0;
+    double t = (zoom - start) / (end - start);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+static uint8_t openride_scaled_alpha(uint8_t alpha, double factor)
+{
+    if (factor <= 0.0) return 0U;
+    if (factor >= 1.0) return alpha;
+    return (uint8_t)lround((double)alpha * factor);
 }
 
 static void draw_region_label(OpenRideMapWorld *world,
@@ -699,11 +1205,14 @@ static void draw_region_label(OpenRideMapWorld *world,
         return;
     }
 
+    const double label_fade_out =
+        1.0 - openride_zoom_smoothstep(camera->zoom, 8.90, 9.50);
+
     SDL_SetRenderDrawColor(world->renderer,
                            palette->label_halo.r,
                            palette->label_halo.g,
                            palette->label_halo.b,
-                           235U);
+                           openride_scaled_alpha(235U, label_fade_out));
     SDL_RenderDebugText(world->renderer, x - 1.0f, y, name);
     SDL_RenderDebugText(world->renderer, x + 1.0f, y, name);
     SDL_RenderDebugText(world->renderer, x, y - 1.0f, name);
@@ -713,9 +1222,257 @@ static void draw_region_label(OpenRideMapWorld *world,
                            palette->label.r,
                            palette->label.g,
                            palette->label.b,
-                           245U);
+                           openride_scaled_alpha(245U, label_fade_out));
     SDL_RenderDebugText(world->renderer, x, y, name);
 }
+
+static bool world_city_label_boxes_overlap(WorldCityLabelBox a,
+                                           WorldCityLabelBox b)
+{
+    return a.left < b.right
+        && a.right > b.left
+        && a.top < b.bottom
+        && a.bottom > b.top;
+}
+
+static bool world_reference_label_kind_matches(int pass,
+                                               uint8_t kind)
+{
+    if (pass == 0) return kind == OPENRIDE_PLACE_CITY;
+    if (pass == 1) return kind == OPENRIDE_PLACE_TOWN;
+    return kind == OPENRIDE_PLACE_VILLAGE;
+}
+
+static bool world_reference_label_try_place(
+    WorldCityLabelBox *boxes,
+    uint32_t box_count,
+    float base_x,
+    float base_y,
+    float text_width,
+    int viewport_width,
+    int viewport_height,
+    float *x_out,
+    float *y_out,
+    WorldCityLabelBox *box_out)
+{
+    static const float offsets[][2] = {
+        {0.0f, 0.0f},
+        {0.0f, -12.0f},
+        {0.0f, 12.0f},
+        {-14.0f, 0.0f},
+        {14.0f, 0.0f}
+    };
+
+    for (size_t attempt = 0U;
+         attempt < sizeof(offsets) / sizeof(offsets[0]);
+         ++attempt) {
+        const float x = base_x + offsets[attempt][0];
+        const float y = base_y + offsets[attempt][1];
+
+        if (x + text_width < 0.0f
+            || y + 8.0f < 0.0f
+            || x >= (float)viewport_width
+            || y >= (float)viewport_height) {
+            continue;
+        }
+
+        const WorldCityLabelBox box = {
+            .left = x - 5.0f,
+            .top = y - 3.0f,
+            .right = x + text_width + 5.0f,
+            .bottom = y + 11.0f
+        };
+
+        bool collision = false;
+        for (uint32_t b = 0U; b < box_count; ++b) {
+            if (world_city_label_boxes_overlap(box, boxes[b])) {
+                collision = true;
+                break;
+            }
+        }
+        if (collision) continue;
+
+        *x_out = x;
+        *y_out = y;
+        *box_out = box;
+        return true;
+    }
+
+    return false;
+}
+
+static void draw_major_city_labels(OpenRideMapWorld *world,
+                                   const OpenRideMapCamera *camera,
+                                   const OpenRideMapPalette *palette,
+                                   int viewport_width,
+                                   int viewport_height)
+{
+    if (!world || !world->renderer || !camera || !palette) return;
+
+    WorldCityLabelBox boxes[WORLD_MAJOR_CITY_LABEL_MAX];
+    uint32_t box_count = 0U;
+
+    SDL_BlendMode previous_blend_mode = SDL_BLENDMODE_NONE;
+    const bool have_previous_blend_mode =
+        SDL_GetRenderDrawBlendMode(world->renderer, &previous_blend_mode);
+    SDL_SetRenderDrawBlendMode(world->renderer, SDL_BLENDMODE_BLEND);
+
+    for (size_t region_index = 0U;
+         region_index < world->region_count
+         && box_count < WORLD_MAJOR_CITY_LABEL_MAX;
+         ++region_index) {
+        const OpenRideMapWorldRegion *region = &world->regions[region_index];
+        if (!region->map) continue;
+
+        uint32_t label_count = 0U;
+        const OpenRideORMapLabel *labels =
+            openride_ormap_labels(region->map, &label_count);
+        if (!labels || label_count == 0U) continue;
+
+        uint32_t emitted_for_region = 0U;
+
+        /*
+         * Prefer true OSM cities. If a region has too few, complete with its
+         * highest-ranked towns, then villages as a final fallback.
+         *
+         * The ORMap label array is globally rank-sorted, therefore each pass
+         * naturally selects the most important settlements of that kind.
+         */
+        for (int pass = 0;
+             pass < 3
+             && emitted_for_region < WORLD_REGION_REFERENCE_LABEL_TARGET
+             && box_count < WORLD_MAJOR_CITY_LABEL_MAX;
+             ++pass) {
+            for (uint32_t i = 0U;
+                 i < label_count
+                 && emitted_for_region < WORLD_REGION_REFERENCE_LABEL_TARGET
+                 && box_count < WORLD_MAJOR_CITY_LABEL_MAX;
+                 ++i) {
+                const OpenRideORMapLabel *label = &labels[i];
+                if (!world_reference_label_kind_matches(pass, label->kind)
+                    || label->name[0] == '\0') {
+                    continue;
+                }
+
+                const OpenRidePointD point =
+                    openride_geo_to_screen(camera,
+                                           label->lat_e7 / 10000000.0,
+                                           label->lon_e7 / 10000000.0,
+                                           viewport_width,
+                                           viewport_height);
+
+                const float text_width =
+                    (float)strlen(label->name) * 8.0f;
+                const float base_x =
+                    (float)point.x - text_width * 0.5f;
+                const float base_y = (float)point.y - 4.0f;
+
+                float x = 0.0f;
+                float y = 0.0f;
+                WorldCityLabelBox box = {0};
+
+                if (!world_reference_label_try_place(
+                        boxes,
+                        box_count,
+                        base_x,
+                        base_y,
+                        text_width,
+                        viewport_width,
+                        viewport_height,
+                        &x,
+                        &y,
+                        &box)) {
+                    continue;
+                }
+
+                boxes[box_count++] = box;
+                ++emitted_for_region;
+
+                SDL_SetRenderDrawColor(world->renderer,
+                                       palette->label_halo.r,
+                                       palette->label_halo.g,
+                                       palette->label_halo.b,
+                                       245U);
+                SDL_RenderDebugText(world->renderer,
+                                    x - 1.0f,
+                                    y,
+                                    label->name);
+                SDL_RenderDebugText(world->renderer,
+                                    x + 1.0f,
+                                    y,
+                                    label->name);
+                SDL_RenderDebugText(world->renderer,
+                                    x,
+                                    y - 1.0f,
+                                    label->name);
+                SDL_RenderDebugText(world->renderer,
+                                    x,
+                                    y + 1.0f,
+                                    label->name);
+
+                SDL_SetRenderDrawColor(world->renderer,
+                                       palette->label.r,
+                                       palette->label.g,
+                                       palette->label.b,
+                                       SDL_ALPHA_OPAQUE);
+                SDL_RenderDebugText(world->renderer, x, y, label->name);
+            }
+        }
+
+    }
+
+    SDL_SetRenderDrawBlendMode(
+        world->renderer,
+        have_previous_blend_mode
+            ? previous_blend_mode
+            : SDL_BLENDMODE_NONE);
+}
+
+static bool overview_region_maybe_visible(
+    const OpenRideMapWorldRegion *region,
+    const OpenRideMapCamera *camera,
+    int viewport_width,
+    int viewport_height)
+{
+    if (!region || !camera || !region->metadata.has_bounds) return true;
+
+    const double latitudes[4] = {
+        region->metadata.north,
+        region->metadata.north,
+        region->metadata.south,
+        region->metadata.south
+    };
+    const double longitudes[4] = {
+        region->metadata.west,
+        region->metadata.east,
+        region->metadata.west,
+        region->metadata.east
+    };
+
+    const double margin = 96.0;
+    bool all_left = true;
+    bool all_right = true;
+    bool all_above = true;
+    bool all_below = true;
+
+    for (int i = 0; i < 4; ++i) {
+        const OpenRidePointD point =
+            openride_geo_to_screen(camera,
+                                   latitudes[i],
+                                   longitudes[i],
+                                   viewport_width,
+                                   viewport_height);
+        all_left = all_left && point.x < -margin;
+        all_right =
+            all_right && point.x > (double)viewport_width + margin;
+        all_above = all_above && point.y < -margin;
+        all_below =
+            all_below && point.y > (double)viewport_height + margin;
+    }
+
+    return !(all_left || all_right || all_above || all_below);
+}
+
 
 void openride_map_world_draw(OpenRideMapWorld *world,
                              const OpenRideMapCamera *camera,
@@ -737,10 +1494,18 @@ void openride_map_world_draw(OpenRideMapWorld *world,
             && strcmp(skip_region_id, region->definition->id) == 0) {
             continue;
         }
-
+        if (!overview_region_maybe_visible(region,
+                                           camera,
+                                           viewport_width,
+                                           viewport_height)) {
+            continue;
+        }
         /* Coverage is an availability hint, not an administrative border. */
         OpenRideMapColor boundary = palette.boundary;
         boundary.a = camera->zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM ? 78U : 52U;
+        const double boundary_fade_out =
+            1.0 - openride_zoom_smoothstep(camera->zoom, 9.60, 10.70);
+        boundary.a = openride_scaled_alpha(boundary.a, boundary_fade_out);
         draw_line_array(world,
                         camera,
                         &region->boundary,
@@ -752,43 +1517,21 @@ void openride_map_world_draw(OpenRideMapWorld *world,
                         false);
 
         /*
-         * The current .ormap distinguishes river/canal but does not rank
-         * rivers by importance. Delay hydrography at low zoom rather than
-         * rendering every river at z6.
+         * No overview waterways: the current format has no importance rank,
+         * so drawing every river/canal dominates Android CPU around z8-z9.
+         * Detailed cartography owns hydrography at close zoom.
          */
-        if (camera->zoom >= 7.25) {
-            OpenRideMapColor water = palette.water_line;
-            water.a = camera->zoom < 8.75 ? 155U : 195U;
-            draw_line_array(world,
-                            camera,
-                            &region->waterways,
-                            water,
-                            camera->zoom >= 9.0 ? 2 : 1,
-                            viewport_width,
-                            viewport_height,
-                            OPENRIDE_ORMAP_WATERWAY_RIVER,
-                            true);
-
-            if (camera->zoom >= 8.75) {
-                water.a = 160U;
-                draw_line_array(world,
-                                camera,
-                                &region->waterways,
-                                water,
-                                1,
-                                viewport_width,
-                                viewport_height,
-                                OPENRIDE_ORMAP_WATERWAY_CANAL,
-                                true);
-            }
-        }
 
         /* Progressive road hierarchy: motorway -> trunk -> primary. */
         for (int road_class = OPENRIDE_ROAD_MOTORWAY;
              road_class <= OPENRIDE_ROAD_PRIMARY;
              ++road_class) {
-            if (road_class == OPENRIDE_ROAD_TRUNK && camera->zoom < 7.0) continue;
-            if (road_class == OPENRIDE_ROAD_PRIMARY && camera->zoom < 8.25) continue;
+            if (road_class == OPENRIDE_ROAD_TRUNK
+                && camera->zoom < 7.5) continue;
+            if (road_class == OPENRIDE_ROAD_PRIMARY
+                && camera->zoom < 9.65) {
+                continue;
+            }
 
             OpenRideMapRoadPaint paint;
             const double paint_zoom = camera->zoom < 10.0 ? 10.0 : camera->zoom;
@@ -803,19 +1546,27 @@ void openride_map_world_draw(OpenRideMapWorld *world,
             OpenRideMapColor color = paint.line;
             color.a = road_class == OPENRIDE_ROAD_MOTORWAY ? 220U : 190U;
 
+            if (road_class == OPENRIDE_ROAD_PRIMARY) {
+                const double primary_fade =
+                    openride_zoom_smoothstep(camera->zoom, 9.65, 10.55);
+                color.a = openride_scaled_alpha(190U, primary_fade);
+            }
+
             int line_width = paint.width;
             if (camera->zoom < 8.0 && line_width > 2) line_width = 2;
             if (road_class == OPENRIDE_ROAD_PRIMARY) line_width = 1;
 
+            const int road_index =
+                road_class - (int)OPENRIDE_ROAD_MOTORWAY;
             draw_line_array(world,
                             camera,
-                            &region->roads,
+                            &region->roads[road_index],
                             color,
                             line_width,
                             viewport_width,
                             viewport_height,
-                            (uint8_t)road_class,
-                            true);
+                            0U,
+                            false);
         }
     }
 
@@ -839,6 +1590,16 @@ void openride_map_world_draw(OpenRideMapWorld *world,
                               viewport_height);
         }
     }
+
+    /*
+     * Keep 2-3 important settlement names per installed region as
+     * permanent orientation landmarks throughout the overview.
+     */
+    draw_major_city_labels(world,
+                           camera,
+                           &palette,
+                           viewport_width,
+                           viewport_height);
 }
 
 
@@ -938,8 +1699,9 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
                                                viewport_height,
                                                (OpenRideORMapRenderLayer)layer);
         }
-    }
 }
+}
+
 
 size_t openride_map_world_region_count(const OpenRideMapWorld *world)
 {
