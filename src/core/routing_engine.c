@@ -296,6 +296,150 @@ bool openride_routing_engine_calculate(const OpenRideRoutingGraph *graph,
     return true;
 }
 
+bool openride_routing_engine_calculate_frontier_routes(
+    const OpenRideRoutingGraph *graph,
+    const OpenRideRoutingNodeId *sources,
+    const double *source_costs,
+    uint32_t source_count,
+    const OpenRideRoutingNodeId *targets,
+    uint32_t target_count,
+    OpenRideRoutingProfile profile,
+    double *target_costs,
+    uint32_t *target_source_indices,
+    OpenRideRoute *target_routes,
+    bool *reachable,
+    char *error,
+    size_t error_size)
+{
+    if (!graph || !sources || !source_costs || source_count == 0U
+        || !targets || target_count == 0U || !target_costs
+        || !target_source_indices || !target_routes || !reachable) {
+        set_error(error, error_size, "invalid routing frontier arguments");
+        return false;
+    }
+    if (profile < OPENRIDE_ROUTING_PROFILE_FASTEST
+        || profile > OPENRIDE_ROUTING_PROFILE_TRAIL) {
+        set_error(error, error_size, "unknown routing profile");
+        return false;
+    }
+
+    for (uint32_t i = 0U; i < target_count; ++i) {
+        openride_route_destroy(&target_routes[i]);
+    }
+
+    OpenRideEngineContext context;
+    memset(&context, 0, sizeof(context));
+    context.graph = graph;
+    context.request = openride_routing_request_default();
+    context.request.profile = profile;
+
+    OpenRidePathfinderCallbacks callbacks;
+    callbacks.edge_allowed = edge_allowed;
+    callbacks.edge_cost = edge_cost;
+    callbacks.heuristic = heuristic;
+    callbacks.context = &context;
+
+    OpenRidePathfinderResult *paths =
+        calloc(target_count, sizeof(*paths));
+    if (!paths) {
+        set_error(error, error_size, "unable to allocate frontier routes");
+        return false;
+    }
+
+    const bool ok = openride_pathfinder_find_frontier_paths(
+        graph,
+        sources,
+        source_costs,
+        source_count,
+        targets,
+        target_count,
+        &callbacks,
+        target_costs,
+        target_source_indices,
+        paths,
+        reachable,
+        error,
+        error_size);
+    if (!ok) {
+        for (uint32_t i = 0U; i < target_count; ++i) {
+            openride_pathfinder_result_destroy(&paths[i]);
+        }
+        free(paths);
+        return false;
+    }
+
+    for (uint32_t i = 0U; i < target_count; ++i) {
+        if (!reachable[i]) continue;
+        if (target_source_indices[i] >= source_count
+            || !paths[i].nodes
+            || paths[i].node_count == 0U) {
+            for (uint32_t j = 0U; j < target_count; ++j) {
+                openride_pathfinder_result_destroy(&paths[j]);
+                openride_route_destroy(&target_routes[j]);
+            }
+            free(paths);
+            set_error(error, error_size, "invalid reconstructed frontier route");
+            return false;
+        }
+
+        double distance_m = 0.0;
+        double estimated_time_s = 0.0;
+        for (uint32_t node_index = 1U;
+             node_index < paths[i].node_count;
+             ++node_index) {
+            const OpenRideRoutingEdge *edge =
+                find_edge(graph,
+                          paths[i].nodes[node_index - 1U],
+                          paths[i].nodes[node_index]);
+            if (!edge) {
+                for (uint32_t j = 0U; j < target_count; ++j) {
+                    openride_pathfinder_result_destroy(&paths[j]);
+                    openride_route_destroy(&target_routes[j]);
+                }
+                free(paths);
+                set_error(error, error_size,
+                          "frontier route references a missing graph edge");
+                return false;
+            }
+            const double length_m = (double)edge->length_cm / 100.0;
+            distance_m += length_m;
+            estimated_time_s += length_m / (edge_speed_kph(edge) / 3.6);
+        }
+
+        OpenRideRoute *route = &target_routes[i];
+        route->nodes = paths[i].nodes;
+        route->node_count = paths[i].node_count;
+        route->distance_m = distance_m;
+        route->estimated_time_s = estimated_time_s;
+        route->weighted_cost_s =
+            target_costs[i] - source_costs[target_source_indices[i]];
+        paths[i].nodes = NULL;
+        paths[i].node_count = 0U;
+
+        if (!route_build_geometry_from_nodes(graph, route)) {
+            for (uint32_t j = 0U; j < target_count; ++j) {
+                openride_pathfinder_result_destroy(&paths[j]);
+                openride_route_destroy(&target_routes[j]);
+            }
+            free(paths);
+            set_error(error, error_size,
+                      "unable to allocate frontier route geometry");
+            return false;
+        }
+
+        free(route->nodes);
+        route->nodes = NULL;
+        route->node_count = 0U;
+    }
+
+    for (uint32_t i = 0U; i < target_count; ++i) {
+        openride_pathfinder_result_destroy(&paths[i]);
+    }
+    free(paths);
+    set_error(error, error_size, "");
+    return true;
+}
+
 OpenRideSnappedRoutingRequest openride_snapped_routing_request_default(void)
 {
     OpenRideSnappedRoutingRequest request;

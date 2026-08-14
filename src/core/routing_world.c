@@ -1041,6 +1041,602 @@ static bool calculate_single_installed_region(
     return true;
 }
 
+typedef struct OpenRideRoutingWorldBoundaryPlan {
+    OpenRideGatewayCandidate candidates[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    OpenRideRoute segments[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    uint32_t predecessor[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    uint32_t count;
+} OpenRideRoutingWorldBoundaryPlan;
+
+static void loaded_graph_move(OpenRideRoutingWorldLoadedGraph *destination,
+                              OpenRideRoutingWorldLoadedGraph *source)
+{
+    if (!destination || !source) return;
+    *destination = *source;
+    if (destination->owns_graph) {
+        destination->graph = &destination->owned;
+    }
+    memset(source, 0, sizeof(*source));
+}
+
+static void boundary_plans_destroy(
+    OpenRideRoutingWorldBoundaryPlan *boundaries,
+    uint32_t boundary_count)
+{
+    if (!boundaries) return;
+    for (uint32_t boundary_index = 0U;
+         boundary_index < boundary_count;
+         ++boundary_index) {
+        for (uint32_t candidate_index = 0U;
+             candidate_index < OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES;
+             ++candidate_index) {
+            openride_route_destroy(
+                &boundaries[boundary_index].segments[candidate_index]);
+        }
+    }
+}
+
+static uint32_t multi_hop_boundary_candidates(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *left_region,
+    const OpenRideRoutingGraph *left_graph,
+    const OpenRideRegionDefinition *right_region,
+    const OpenRideRoutingGraph *right_graph,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    OpenRideGatewayCandidate candidates[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES])
+{
+    OpenRideRoutingGatewayIndex index;
+    openride_routing_gateway_index_init(&index);
+    bool reversed = false;
+
+    const bool index_ready = load_or_build_persistent_gateway_index(
+        paths,
+        left_region,
+        left_graph,
+        right_region,
+        right_graph,
+        &index,
+        &reversed);
+
+    const uint32_t count = index_ready
+        ? find_gateways_from_persistent_index(&index,
+                                              reversed,
+                                              start_lat,
+                                              start_lon,
+                                              destination_lat,
+                                              destination_lon,
+                                              candidates)
+        : find_gateways(left_graph,
+                        right_graph,
+                        start_lat,
+                        start_lon,
+                        destination_lat,
+                        destination_lon,
+                        candidates);
+
+    openride_routing_gateway_index_destroy(&index);
+    return count;
+}
+
+static bool dynamic_geometry_append(OpenRideRoutePoint **geometry,
+                                    uint32_t *count,
+                                    uint32_t *capacity,
+                                    double lat,
+                                    double lon)
+{
+    if (!geometry || !count || !capacity) return false;
+
+    if (*count > 0U) {
+        const OpenRideRoutePoint *last = &(*geometry)[*count - 1U];
+        if (fabs(last->lat - lat) < 1e-10
+            && fabs(last->lon - lon) < 1e-10) {
+            return true;
+        }
+    }
+
+    if (*count == *capacity) {
+        uint32_t new_capacity = *capacity == 0U ? 256U : *capacity * 2U;
+        if (new_capacity < *capacity) return false;
+        OpenRideRoutePoint *new_geometry =
+            realloc(*geometry, (size_t)new_capacity * sizeof(**geometry));
+        if (!new_geometry) return false;
+        *geometry = new_geometry;
+        *capacity = new_capacity;
+    }
+
+    (*geometry)[*count] = (OpenRideRoutePoint){lat, lon};
+    ++(*count);
+    return true;
+}
+
+static bool assemble_multi_hop_route(
+    const OpenRideRoutingWorldBoundaryPlan *boundaries,
+    uint32_t boundary_count,
+    const uint32_t *chosen,
+    const OpenRideRoute *final_segment,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    OpenRideRoute *route,
+    char *error,
+    size_t error_size)
+{
+    if (!boundaries || boundary_count == 0U || !chosen
+        || !final_segment || !route
+        || !final_segment->geometry
+        || final_segment->geometry_count == 0U) {
+        set_error(error, error_size, "invalid multi-hop route assembly");
+        return false;
+    }
+
+    OpenRideRoutePoint *geometry = NULL;
+    uint32_t geometry_count = 0U;
+    uint32_t geometry_capacity = 0U;
+    double distance_m = 0.0;
+    double estimated_time_s = 0.0;
+    double weighted_cost_s = 0.0;
+
+    if (!dynamic_geometry_append(&geometry,
+                                 &geometry_count,
+                                 &geometry_capacity,
+                                 start_lat,
+                                 start_lon)) {
+        set_error(error, error_size, "unable to allocate multi-hop geometry");
+        return false;
+    }
+
+    const OpenRideRoute *first_segment =
+        &boundaries[0].segments[chosen[0]];
+    if (!first_segment->geometry || first_segment->geometry_count == 0U) {
+        free(geometry);
+        set_error(error, error_size, "multi-hop first segment has no geometry");
+        return false;
+    }
+
+    const double start_link_m =
+        geo_distance_m(start_lat,
+                       start_lon,
+                       first_segment->geometry[0].lat,
+                       first_segment->geometry[0].lon);
+
+    for (uint32_t boundary_index = 0U;
+         boundary_index < boundary_count;
+         ++boundary_index) {
+        const OpenRideRoute *segment =
+            &boundaries[boundary_index].segments[chosen[boundary_index]];
+        if (!segment->geometry || segment->geometry_count == 0U) {
+            free(geometry);
+            set_error(error, error_size, "multi-hop selected segment is empty");
+            return false;
+        }
+
+        for (uint32_t i = 0U; i < segment->geometry_count; ++i) {
+            if (!dynamic_geometry_append(&geometry,
+                                         &geometry_count,
+                                         &geometry_capacity,
+                                         segment->geometry[i].lat,
+                                         segment->geometry[i].lon)) {
+                free(geometry);
+                set_error(error, error_size,
+                          "unable to grow multi-hop route geometry");
+                return false;
+            }
+        }
+
+        distance_m += segment->distance_m;
+        estimated_time_s += segment->estimated_time_s;
+        weighted_cost_s += segment->weighted_cost_s;
+    }
+
+    for (uint32_t i = 0U; i < final_segment->geometry_count; ++i) {
+        if (!dynamic_geometry_append(&geometry,
+                                     &geometry_count,
+                                     &geometry_capacity,
+                                     final_segment->geometry[i].lat,
+                                     final_segment->geometry[i].lon)) {
+            free(geometry);
+            set_error(error, error_size,
+                      "unable to append final multi-hop segment");
+            return false;
+        }
+    }
+
+    const OpenRideRoutePoint *last =
+        &final_segment->geometry[final_segment->geometry_count - 1U];
+    const double destination_link_m =
+        geo_distance_m(last->lat,
+                       last->lon,
+                       destination_lat,
+                       destination_lon);
+
+    if (!dynamic_geometry_append(&geometry,
+                                 &geometry_count,
+                                 &geometry_capacity,
+                                 destination_lat,
+                                 destination_lon)) {
+        free(geometry);
+        set_error(error, error_size, "unable to finalize multi-hop geometry");
+        return false;
+    }
+
+    distance_m += final_segment->distance_m;
+    estimated_time_s += final_segment->estimated_time_s;
+    weighted_cost_s += final_segment->weighted_cost_s;
+
+    const double endpoint_time_s =
+        (start_link_m + destination_link_m) / (50.0 / 3.6);
+
+    openride_route_destroy(route);
+    route->nodes = NULL;
+    route->node_count = 0U;
+    route->geometry = geometry;
+    route->geometry_count = geometry_count;
+    route->distance_m = distance_m + start_link_m + destination_link_m;
+    route->estimated_time_s = estimated_time_s + endpoint_time_s;
+    route->weighted_cost_s = weighted_cost_s + endpoint_time_s;
+    set_error(error, error_size, "");
+    return true;
+}
+
+static bool calculate_multi_hop_installed(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
+    const OpenRideRoutingGraph *active_graph,
+    OpenRideRoutingWorldCache *cache,
+    const OpenRideRoutingWorldCorridorSummary *corridor,
+    double start_lat,
+    double start_lon,
+    double destination_lat,
+    double destination_lon,
+    double max_snap_distance_m,
+    OpenRideRoutingProfile profile,
+    OpenRideRoute *route,
+    OpenRideRoutingWorldResult *result,
+    char *error,
+    size_t error_size)
+{
+    if (!paths || !corridor || corridor->count < 3U
+        || corridor->count > OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS
+        || !route || !result) {
+        set_error(error, error_size, "invalid multi-hop routing request");
+        return false;
+    }
+
+    const uint32_t region_count = corridor->count;
+    const uint32_t boundary_count = region_count - 1U;
+    const OpenRideRegionDefinition
+        *regions[OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS] = {0};
+
+    for (uint32_t i = 0U; i < region_count; ++i) {
+        regions[i] = openride_region_find(corridor->region_ids[i]);
+        if (!regions[i]) {
+            set_error(error, error_size, "multi-hop corridor references unknown region");
+            return false;
+        }
+    }
+
+    /*
+     * The one-neighbor cache can otherwise retain a large unrelated graph.
+     * Candidate route geometries below replace the old second reconstruction
+     * pass, so only the sliding current/next graph pair is required.
+     */
+    if (cache) openride_routing_world_cache_destroy(cache);
+
+    OpenRideRoutingWorldBoundaryPlan
+        boundaries[OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS - 1U];
+    memset(boundaries, 0, sizeof(boundaries));
+
+    double frontier_costs[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    for (uint32_t i = 0U; i < OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES; ++i) {
+        frontier_costs[i] = INFINITY;
+    }
+
+    OpenRideRoutingWorldLoadedGraph current;
+    memset(&current, 0, sizeof(current));
+    if (!load_region_graph(paths,
+                           regions[0],
+                           active_region,
+                           active_graph,
+                           NULL,
+                           &current,
+                           error,
+                           error_size)) {
+        return false;
+    }
+
+    double start_distance = INFINITY;
+    const OpenRideRoutingNodeId start_node =
+        openride_routing_graph_nearest_node(current.graph,
+                                            start_lat,
+                                            start_lon,
+                                            &start_distance);
+    if (start_node == OPENRIDE_ROUTING_NODE_NONE
+        || start_distance > max_snap_distance_m) {
+        loaded_graph_destroy(&current);
+        set_error(error, error_size, "multi-hop start is too far from a road");
+        return false;
+    }
+
+    for (uint32_t boundary_index = 0U;
+         boundary_index < boundary_count;
+         ++boundary_index) {
+        OpenRideRoutingWorldLoadedGraph next;
+        memset(&next, 0, sizeof(next));
+        if (!load_region_graph(paths,
+                               regions[boundary_index + 1U],
+                               active_region,
+                               active_graph,
+                               NULL,
+                               &next,
+                               error,
+                               error_size)) {
+            loaded_graph_destroy(&current);
+            boundary_plans_destroy(boundaries, boundary_count);
+            return false;
+        }
+
+        OpenRideRoutingWorldBoundaryPlan *boundary =
+            &boundaries[boundary_index];
+        boundary->count = multi_hop_boundary_candidates(
+            paths,
+            regions[boundary_index],
+            current.graph,
+            regions[boundary_index + 1U],
+            next.graph,
+            start_lat,
+            start_lon,
+            destination_lat,
+            destination_lon,
+            boundary->candidates);
+
+        if (boundary->count == 0U) {
+            loaded_graph_destroy(&next);
+            loaded_graph_destroy(&current);
+            boundary_plans_destroy(boundaries, boundary_count);
+            set_error(error, error_size,
+                      "no routing gateway on multi-hop regional boundary");
+            return false;
+        }
+
+        OpenRideRoutingNodeId
+            sources[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        double source_costs[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        uint32_t source_candidate[
+            OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        uint32_t source_count = 0U;
+
+        if (boundary_index == 0U) {
+            sources[0] = start_node;
+            source_costs[0] = 0.0;
+            source_candidate[0] = 0U;
+            source_count = 1U;
+        } else {
+            const OpenRideRoutingWorldBoundaryPlan *previous =
+                &boundaries[boundary_index - 1U];
+            for (uint32_t i = 0U; i < previous->count; ++i) {
+                if (!isfinite(frontier_costs[i])) continue;
+                sources[source_count] =
+                    previous->candidates[i].destination_node;
+                source_costs[source_count] = frontier_costs[i];
+                source_candidate[source_count] = i;
+                ++source_count;
+            }
+        }
+
+        if (source_count == 0U) {
+            loaded_graph_destroy(&next);
+            loaded_graph_destroy(&current);
+            boundary_plans_destroy(boundaries, boundary_count);
+            set_error(error, error_size, "no reachable multi-hop gateway frontier");
+            return false;
+        }
+
+        OpenRideRoutingNodeId
+            targets[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        for (uint32_t i = 0U; i < boundary->count; ++i) {
+            targets[i] = boundary->candidates[i].start_node;
+        }
+
+        double target_costs[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        uint32_t target_origins[
+            OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        bool reachable[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+        memset(reachable, 0, sizeof(reachable));
+
+        if (!openride_routing_engine_calculate_frontier_routes(
+                current.graph,
+                sources,
+                source_costs,
+                source_count,
+                targets,
+                boundary->count,
+                profile,
+                target_costs,
+                target_origins,
+                boundary->segments,
+                reachable,
+                error,
+                error_size)) {
+            loaded_graph_destroy(&next);
+            loaded_graph_destroy(&current);
+            boundary_plans_destroy(boundaries, boundary_count);
+            return false;
+        }
+
+        bool any_reachable = false;
+        for (uint32_t i = 0U; i < boundary->count; ++i) {
+            frontier_costs[i] = INFINITY;
+            boundary->predecessor[i] = UINT32_MAX;
+            if (!reachable[i]
+                || target_origins[i] >= source_count
+                || !isfinite(target_costs[i])) {
+                openride_route_destroy(&boundary->segments[i]);
+                continue;
+            }
+
+            frontier_costs[i] = target_costs[i];
+            boundary->predecessor[i] =
+                boundary_index == 0U
+                    ? 0U
+                    : source_candidate[target_origins[i]];
+            any_reachable = true;
+        }
+        for (uint32_t i = boundary->count;
+             i < OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES;
+             ++i) {
+            frontier_costs[i] = INFINITY;
+        }
+
+        if (!any_reachable) {
+            loaded_graph_destroy(&next);
+            loaded_graph_destroy(&current);
+            boundary_plans_destroy(boundaries, boundary_count);
+            set_error(error, error_size,
+                      "multi-hop boundary gateways are unreachable");
+            return false;
+        }
+
+        loaded_graph_destroy(&current);
+        loaded_graph_move(&current, &next);
+    }
+
+    double destination_distance = INFINITY;
+    const OpenRideRoutingNodeId destination_node =
+        openride_routing_graph_nearest_node(current.graph,
+                                            destination_lat,
+                                            destination_lon,
+                                            &destination_distance);
+    if (destination_node == OPENRIDE_ROUTING_NODE_NONE
+        || destination_distance > max_snap_distance_m) {
+        loaded_graph_destroy(&current);
+        boundary_plans_destroy(boundaries, boundary_count);
+        set_error(error, error_size,
+                  "multi-hop destination is too far from a road");
+        return false;
+    }
+
+    const OpenRideRoutingWorldBoundaryPlan *last_boundary =
+        &boundaries[boundary_count - 1U];
+    OpenRideRoutingNodeId
+        final_sources[OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    double final_source_costs[
+        OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    uint32_t final_source_candidate[
+        OPENRIDE_ROUTING_WORLD_MAX_GATEWAY_CANDIDATES];
+    uint32_t final_source_count = 0U;
+
+    for (uint32_t i = 0U; i < last_boundary->count; ++i) {
+        if (!isfinite(frontier_costs[i])) continue;
+        final_sources[final_source_count] =
+            last_boundary->candidates[i].destination_node;
+        final_source_costs[final_source_count] = frontier_costs[i];
+        final_source_candidate[final_source_count] = i;
+        ++final_source_count;
+    }
+
+    if (final_source_count == 0U) {
+        loaded_graph_destroy(&current);
+        boundary_plans_destroy(boundaries, boundary_count);
+        set_error(error, error_size, "no final multi-hop frontier");
+        return false;
+    }
+
+    const OpenRideRoutingNodeId final_target[1] = {destination_node};
+    double final_cost[1] = {INFINITY};
+    uint32_t final_origin[1] = {UINT32_MAX};
+    OpenRideRoute final_segment[1] = {{0}};
+    bool final_reachable[1] = {false};
+
+    if (!openride_routing_engine_calculate_frontier_routes(
+            current.graph,
+            final_sources,
+            final_source_costs,
+            final_source_count,
+            final_target,
+            1U,
+            profile,
+            final_cost,
+            final_origin,
+            final_segment,
+            final_reachable,
+            error,
+            error_size)) {
+        loaded_graph_destroy(&current);
+        boundary_plans_destroy(boundaries, boundary_count);
+        return false;
+    }
+
+    loaded_graph_destroy(&current);
+
+    if (!final_reachable[0]
+        || final_origin[0] >= final_source_count
+        || !isfinite(final_cost[0])) {
+        openride_route_destroy(&final_segment[0]);
+        boundary_plans_destroy(boundaries, boundary_count);
+        set_error(error, error_size,
+                  "destination is unreachable from multi-hop frontier");
+        return false;
+    }
+
+    uint32_t chosen[OPENRIDE_ROUTING_WORLD_MAX_CORRIDOR_REGIONS - 1U];
+    memset(chosen, 0, sizeof(chosen));
+    chosen[boundary_count - 1U] =
+        final_source_candidate[final_origin[0]];
+
+    for (uint32_t boundary_index = boundary_count - 1U;
+         boundary_index > 0U;
+         --boundary_index) {
+        const uint32_t predecessor =
+            boundaries[boundary_index]
+                .predecessor[chosen[boundary_index]];
+        if (predecessor == UINT32_MAX
+            || predecessor >= boundaries[boundary_index - 1U].count) {
+            openride_route_destroy(&final_segment[0]);
+            boundary_plans_destroy(boundaries, boundary_count);
+            set_error(error, error_size,
+                      "unable to reconstruct multi-hop gateway sequence");
+            return false;
+        }
+        chosen[boundary_index - 1U] = predecessor;
+    }
+
+    const bool assembled =
+        assemble_multi_hop_route(boundaries,
+                                 boundary_count,
+                                 chosen,
+                                 &final_segment[0],
+                                 start_lat,
+                                 start_lon,
+                                 destination_lat,
+                                 destination_lon,
+                                 route,
+                                 error,
+                                 error_size);
+    openride_route_destroy(&final_segment[0]);
+    if (!assembled) {
+        boundary_plans_destroy(boundaries, boundary_count);
+        return false;
+    }
+
+    result->multi_hop = true;
+    result->routed_region_count = region_count;
+    result->shared_gateway_count = 0U;
+    for (uint32_t i = 0U; i < boundary_count; ++i) {
+        result->shared_gateway_count += boundaries[i].count;
+    }
+    result->attempted_gateways = boundary_count;
+    result->gateway_lat = boundaries[0].candidates[chosen[0]].lat;
+    result->gateway_lon = boundaries[0].candidates[chosen[0]].lon;
+
+    boundary_plans_destroy(boundaries, boundary_count);
+    set_error(error, error_size, "");
+    return true;
+}
+
 bool openride_routing_world_calculate_installed_cached(
     const OpenRidePlatformPaths *paths,
     const OpenRideRegionDefinition *active_region,
@@ -1127,16 +1723,30 @@ bool openride_routing_world_calculate_installed_cached(
     }
 
     /*
-     * RegionNetwork is now authoritative for corridor selection. Direct
-     * routing remains implemented for one or two regions. Corridors with 3+
-     * installed regions are surfaced distinctly so the next milestone can
-     * execute them sequentially rather than incorrectly trying a direct
-     * start/destination graph hand-off.
+     * RegionNetwork is authoritative for corridor selection. For 3+ installed
+     * regions, resolve the exact gateway sequence while each graph is resident
+     * and retain candidate geometries for final backtracking. This avoids the
+     * old second graph-loading / A* reconstruction pass.
      */
     if (local_result.recommended_corridor.count > 2U) {
+        const bool ok = calculate_multi_hop_installed(
+            paths,
+            active_region,
+            active_graph,
+            cache,
+            &local_result.recommended_corridor,
+            start_lat,
+            start_lon,
+            destination_lat,
+            destination_lon,
+            max_snap_distance_m,
+            profile,
+            route,
+            &local_result,
+            error,
+            error_size);
         if (result) *result = local_result;
-        set_error(error, error_size, "multi-hop regional corridor ready");
-        return false;
+        return ok;
     }
 
     OpenRideRoutingWorldLoadedGraph start_loaded;

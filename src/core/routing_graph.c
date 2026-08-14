@@ -36,8 +36,32 @@ struct OpenRideRoutingGraphBuilder {
 
 _Static_assert(sizeof(OpenRideRoutingNode) == 16U,
                "OpenRideRoutingNode must stay compact");
+_Static_assert(offsetof(OpenRideRoutingNode, lat_e7) == 0U,
+               "OpenRideRoutingNode disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingNode, lon_e7) == 4U,
+               "OpenRideRoutingNode disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingNode, first_edge) == 8U,
+               "OpenRideRoutingNode disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingNode, edge_count) == 12U,
+               "OpenRideRoutingNode disk layout changed");
+
 _Static_assert(sizeof(OpenRideRoutingEdge) == 16U,
                "OpenRideRoutingEdge must stay compact");
+_Static_assert(offsetof(OpenRideRoutingEdge, target) == 0U,
+               "OpenRideRoutingEdge disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingEdge, length_cm) == 4U,
+               "OpenRideRoutingEdge disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingEdge, flags) == 8U,
+               "OpenRideRoutingEdge disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingEdge, road_class) == 12U,
+               "OpenRideRoutingEdge disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingEdge, surface) == 13U,
+               "OpenRideRoutingEdge disk layout changed");
+_Static_assert(offsetof(OpenRideRoutingEdge, max_speed_kph) == 14U,
+               "OpenRideRoutingEdge disk layout changed");
+
+_Static_assert(sizeof(OpenRideRoutingSegment) == 8U,
+               "OpenRideRoutingSegment disk layout changed");
 
 static void set_error(char *error, size_t error_size, const char *message)
 {
@@ -179,6 +203,27 @@ static bool read_u16_le(FILE *file, uint16_t *value)
     unsigned char bytes[2];
     if (!read_exact(file, bytes, sizeof(bytes))) return false;
     *value = (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8U));
+    return true;
+}
+
+static bool host_is_little_endian(void)
+{
+    const uint16_t value = 1U;
+    return *((const unsigned char *)&value) == 1U;
+}
+
+static bool read_u32_array_le(FILE *file, uint32_t *values, size_t count)
+{
+    if (count == 0U) return true;
+    if (!file || !values || count > SIZE_MAX / sizeof(*values)) return false;
+
+    if (host_is_little_endian()) {
+        return read_exact(file, values, count * sizeof(*values));
+    }
+
+    for (size_t i = 0U; i < count; ++i) {
+        if (!read_u32_le(file, &values[i])) return false;
+    }
     return true;
 }
 
@@ -556,13 +601,15 @@ static bool read_spatial_index(FILE *file,
         if (!index.node_ids) ok = false;
     }
 
-    if (index.cell_count > 0U) {
-        for (uint32_t i = 0U; ok && i <= index.cell_count; ++i) {
-            ok = read_u32_le(file, &index.cell_offsets[i]);
-        }
+    if (ok && index.cell_count > 0U) {
+        ok = read_u32_array_le(file,
+                               index.cell_offsets,
+                               (size_t)index.cell_count + 1U);
     }
-    for (uint32_t i = 0U; ok && i < graph->node_count; ++i) {
-        ok = read_u32_le(file, &index.node_ids[i]);
+    if (ok && graph->node_count > 0U) {
+        ok = read_u32_array_le(file,
+                               index.node_ids,
+                               graph->node_count);
     }
 
     if (!ok) {
@@ -641,15 +688,28 @@ static bool read_segment_index(FILE *file,
         if (!index.segment_ids) ok = false;
     }
 
-    for (uint32_t i = 0U; ok && i < index.segment_count; ++i) {
-        ok = read_u32_le(file, &index.segments[i].a)
-          && read_u32_le(file, &index.segments[i].b);
+    if (ok && index.segment_count > 0U) {
+        if (host_is_little_endian()) {
+            ok = read_exact(file,
+                            index.segments,
+                            (size_t)index.segment_count
+                                * sizeof(*index.segments));
+        } else {
+            for (uint32_t i = 0U; ok && i < index.segment_count; ++i) {
+                ok = read_u32_le(file, &index.segments[i].a)
+                  && read_u32_le(file, &index.segments[i].b);
+            }
+        }
     }
-    for (uint32_t i = 0U; ok && i <= cell_count; ++i) {
-        ok = read_u32_le(file, &index.cell_offsets[i]);
+    if (ok && cell_count > 0U) {
+        ok = read_u32_array_le(file,
+                               index.cell_offsets,
+                               (size_t)cell_count + 1U);
     }
-    for (uint32_t i = 0U; ok && i < index.ref_count; ++i) {
-        ok = read_u32_le(file, &index.segment_ids[i]);
+    if (ok && index.ref_count > 0U) {
+        ok = read_u32_array_le(file,
+                               index.segment_ids,
+                               index.ref_count);
     }
 
     if (!ok) {
@@ -788,28 +848,46 @@ bool openride_routing_graph_load(OpenRideRoutingGraph *graph,
         if (!loaded.edges) ok = false;
     }
 
-    for (uint32_t i = 0U; ok && i < node_count; ++i) {
-        uint32_t lat_raw = 0U;
-        uint32_t lon_raw = 0U;
-        OpenRideRoutingNode *node = &loaded.nodes[i];
-        ok = read_u32_le(file, &lat_raw)
-          && read_u32_le(file, &lon_raw)
-          && read_u32_le(file, &node->first_edge)
-          && read_u32_le(file, &node->edge_count);
-        node->lat_e7 = (int32_t)lat_raw;
-        node->lon_e7 = (int32_t)lon_raw;
+    /*
+     * v1-v3 records deliberately match the compact in-memory structs.
+     * On OpenRide's little-endian targets, use a handful of large reads
+     * instead of millions of per-field decoding calls. Keep the portable
+     * decoder as the big-endian fallback.
+     */
+    if (ok && node_count > 0U && host_is_little_endian()) {
+        ok = read_exact(file,
+                        loaded.nodes,
+                        (size_t)node_count * sizeof(*loaded.nodes));
+    } else {
+        for (uint32_t i = 0U; ok && i < node_count; ++i) {
+            uint32_t lat_raw = 0U;
+            uint32_t lon_raw = 0U;
+            OpenRideRoutingNode *node = &loaded.nodes[i];
+            ok = read_u32_le(file, &lat_raw)
+              && read_u32_le(file, &lon_raw)
+              && read_u32_le(file, &node->first_edge)
+              && read_u32_le(file, &node->edge_count);
+            node->lat_e7 = (int32_t)lat_raw;
+            node->lon_e7 = (int32_t)lon_raw;
+        }
     }
 
-    for (uint32_t i = 0U; ok && i < edge_count; ++i) {
-        OpenRideRoutingEdge *edge = &loaded.edges[i];
-        unsigned char class_and_surface[2];
-        ok = read_u32_le(file, &edge->target)
-          && read_u32_le(file, &edge->length_cm)
-          && read_u32_le(file, &edge->flags)
-          && read_exact(file, class_and_surface, sizeof(class_and_surface))
-          && read_u16_le(file, &edge->max_speed_kph);
-        edge->road_class = class_and_surface[0];
-        edge->surface = class_and_surface[1];
+    if (ok && edge_count > 0U && host_is_little_endian()) {
+        ok = read_exact(file,
+                        loaded.edges,
+                        (size_t)edge_count * sizeof(*loaded.edges));
+    } else {
+        for (uint32_t i = 0U; ok && i < edge_count; ++i) {
+            OpenRideRoutingEdge *edge = &loaded.edges[i];
+            unsigned char class_and_surface[2];
+            ok = read_u32_le(file, &edge->target)
+              && read_u32_le(file, &edge->length_cm)
+              && read_u32_le(file, &edge->flags)
+              && read_exact(file, class_and_surface, sizeof(class_and_surface))
+              && read_u16_le(file, &edge->max_speed_kph);
+            edge->road_class = class_and_surface[0];
+            edge->surface = class_and_surface[1];
+        }
     }
 
     if (ok && version >= OPENRIDE_GRAPH_V2_VERSION) {

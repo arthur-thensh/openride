@@ -54,6 +54,28 @@ bool openride_routing_engine_calculate(const OpenRideRoutingGraph *graph,
                                        char *error,
                                        size_t error_size);
 
+/*
+ * Exact routes from an accumulated multi-source frontier to several targets.
+ *
+ * target_costs contain total accumulated weighted seconds. target_routes contain
+ * only the regional source->target segment and are geometry-first (nodes freed
+ * before return). target_source_indices identifies the winning source entry.
+ */
+bool openride_routing_engine_calculate_frontier_routes(
+    const OpenRideRoutingGraph *graph,
+    const OpenRideRoutingNodeId *sources,
+    const double *source_costs,
+    uint32_t source_count,
+    const OpenRideRoutingNodeId *targets,
+    uint32_t target_count,
+    OpenRideRoutingProfile profile,
+    double *target_costs,
+    uint32_t *target_source_indices,
+    OpenRideRoute *target_routes,
+    bool *reachable,
+    char *error,
+    size_t error_size);
+
 OpenRideSnappedRoutingRequest openride_snapped_routing_request_default(void);
 
 bool openride_routing_engine_calculate_snapped(

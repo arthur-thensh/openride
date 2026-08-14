@@ -24,6 +24,8 @@ typedef struct OpenRideRoutingWorldCorridorSummary {
 
 typedef struct OpenRideRoutingWorldResult {
     bool multi_region;
+    bool multi_hop;
+    uint32_t routed_region_count;
     char start_region_id[OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
     char destination_region_id[OPENRIDE_ROUTING_WORLD_REGION_ID_SIZE];
 
@@ -99,8 +101,10 @@ bool openride_routing_world_calculate_graph_pair(
  * Resolve endpoints from installed .poly coverage, reuse the active graph when
  * possible, and load only the additional .orgraph needed by the request.
  *
- * v0.23 supports a single installed region or a direct hand-off between two
- * adjacent installed regions.
+ * v0.23 supports single-region, direct adjacent-region and sequential
+ * multi-hop routing across an installed RegionNetwork corridor. Multi-hop
+ * resolves exact gateway transitions in one graph pass and retains only the
+ * candidate route geometries needed for final backtracking.
  */
 bool openride_routing_world_calculate_installed(
     const OpenRidePlatformPaths *paths,

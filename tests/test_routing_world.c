@@ -1,9 +1,13 @@
 #include "openride/routing_world.h"
+#include "openride/routing_gateway_index.h"
 
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static OpenRideRoutingGraph build_left(void)
 {
@@ -147,9 +151,242 @@ static void test_region_planning(void)
     }
 }
 
+static OpenRideRoutingGraph build_test_graph(const double (*points)[2],
+                                                 uint32_t point_count)
+{
+    OpenRideRoutingGraph graph = {0};
+    OpenRideRoutingGraphBuilder *builder =
+        openride_routing_graph_builder_create();
+    assert(builder != NULL);
+
+    OpenRideRoutingNodeId nodes[8];
+    assert(point_count >= 2U && point_count <= 8U);
+    for (uint32_t i = 0U; i < point_count; ++i) {
+        nodes[i] = openride_routing_graph_builder_add_node(
+            builder, points[i][0], points[i][1]);
+        assert(nodes[i] != OPENRIDE_ROUTING_NODE_NONE);
+    }
+
+    OpenRideRoutingEdgeAttributes road =
+        openride_routing_edge_attributes_default();
+    road.length_m = 1000.0;
+    road.road_class = OPENRIDE_ROAD_PRIMARY;
+    road.surface = OPENRIDE_SURFACE_ASPHALT;
+    road.max_speed_kph = 80U;
+
+    for (uint32_t i = 1U; i < point_count; ++i) {
+        assert(openride_routing_graph_builder_add_bidirectional_edge(
+            builder, nodes[i - 1U], nodes[i], &road));
+    }
+
+    char error[256] = {0};
+    assert(openride_routing_graph_builder_build(
+        builder, &graph, error, sizeof(error)));
+    openride_routing_graph_builder_destroy(builder);
+    return graph;
+}
+
+static void touch_file(const char *path)
+{
+    FILE *file = fopen(path, "wb");
+    assert(file != NULL);
+    fclose(file);
+}
+
+static void write_box_poly(const char *path,
+                           const char *name,
+                           double west,
+                           double south,
+                           double east,
+                           double north)
+{
+    FILE *file = fopen(path, "wb");
+    assert(file != NULL);
+    fprintf(file,
+            "%s\n"
+            "1\n"
+            "  %.8f %.8f\n"
+            "  %.8f %.8f\n"
+            "  %.8f %.8f\n"
+            "  %.8f %.8f\n"
+            "  %.8f %.8f\n"
+            "END\n"
+            "END\n",
+            name,
+            west, south,
+            east, south,
+            east, north,
+            west, north,
+            west, south);
+    fclose(file);
+}
+
+static void install_synthetic_region(
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *region,
+    const OpenRideRoutingGraph *graph,
+    double west,
+    double south,
+    double east,
+    double north)
+{
+    OpenRideRegionStatus status;
+    char error[256] = {0};
+    assert(openride_region_get_status(
+        paths, region, &status, error, sizeof(error)));
+    assert(openride_routing_graph_save(
+        graph, status.routing_path, error, sizeof(error)));
+    touch_file(status.ormap_path);
+    touch_file(status.search_path);
+    write_box_poly(status.poly_path,
+                   region->id,
+                   west,
+                   south,
+                   east,
+                   north);
+}
+
+static void test_installed_multi_hop(void)
+{
+    const OpenRideRegionDefinition *npdc =
+        openride_region_find("nord-pas-de-calais");
+    const OpenRideRegionDefinition *picardie =
+        openride_region_find("picardie");
+    const OpenRideRegionDefinition *haute_normandie =
+        openride_region_find("haute-normandie");
+    assert(npdc && picardie && haute_normandie);
+
+    const double left_points[][2] = {
+        {50.0000, 2.9000},
+        {50.0000, 3.0000}
+    };
+    const double middle_points[][2] = {
+        {50.0000, 3.0000},
+        {49.7500, 2.0000},
+        {49.5000, 1.2000}
+    };
+    const double right_points[][2] = {
+        {49.5000, 1.2000},
+        {49.4000, 1.0000}
+    };
+
+    OpenRideRoutingGraph left =
+        build_test_graph(left_points, 2U);
+    OpenRideRoutingGraph middle =
+        build_test_graph(middle_points, 3U);
+    OpenRideRoutingGraph right =
+        build_test_graph(right_points, 2U);
+
+    char root[256];
+    snprintf(root,
+             sizeof(root),
+             "/tmp/openride-routing-world-%ld",
+             (long)getpid());
+    char command[320];
+    snprintf(command, sizeof(command), "rm -rf '%s'", root);
+    (void)system(command);
+    assert(mkdir(root, 0700) == 0);
+
+    OpenRidePlatformPaths paths;
+    char error[512] = {0};
+    assert(openride_platform_paths_init(&paths,
+                                        OPENRIDE_PLATFORM_DESKTOP,
+                                        root,
+                                        error,
+                                        sizeof(error)));
+    assert(openride_platform_paths_ensure_directories(
+        &paths, error, sizeof(error)));
+
+    install_synthetic_region(&paths,
+                             npdc,
+                             &left,
+                             2.70,
+                             49.85,
+                             3.10,
+                             50.15);
+    install_synthetic_region(&paths,
+                             picardie,
+                             &middle,
+                             1.10,
+                             49.40,
+                             3.10,
+                             50.10);
+    install_synthetic_region(&paths,
+                             haute_normandie,
+                             &right,
+                             0.80,
+                             49.25,
+                             1.40,
+                             49.60);
+
+    OpenRideRoutingWorldCache cache;
+    openride_routing_world_cache_init(&cache);
+    OpenRideRoute route = {0};
+    OpenRideRoutingWorldResult result = {0};
+
+    assert(openride_routing_world_calculate_installed_cached(
+        &paths,
+        npdc,
+        &left,
+        &cache,
+        50.0000,
+        2.9000,
+        49.4000,
+        1.0000,
+        5000.0,
+        OPENRIDE_ROUTING_PROFILE_FASTEST,
+        &route,
+        &result,
+        error,
+        sizeof(error)));
+
+    assert(result.multi_region);
+    assert(result.multi_hop);
+    assert(result.routed_region_count == 3U);
+    assert(result.recommended_corridor.count == 3U);
+    assert(!result.download_required);
+    assert(route.nodes == NULL);
+    assert(route.node_count == 0U);
+    assert(route.geometry != NULL);
+    assert(route.geometry_count >= 5U);
+    assert(fabs(route.geometry[0].lat - 50.0000) < 1e-8);
+    assert(fabs(route.geometry[0].lon - 2.9000) < 1e-8);
+    assert(fabs(route.geometry[route.geometry_count - 1U].lat - 49.4000)
+           < 1e-8);
+    assert(fabs(route.geometry[route.geometry_count - 1U].lon - 1.0000)
+           < 1e-8);
+    assert(route.distance_m > 3999.0 && route.distance_m < 4001.0);
+
+    char gateway_path[512];
+    assert(openride_routing_gateway_index_pair_path(
+        gateway_path,
+        sizeof(gateway_path),
+        paths.routing_dir,
+        npdc->id,
+        picardie->id));
+    assert(openride_platform_file_exists(gateway_path));
+    assert(openride_routing_gateway_index_pair_path(
+        gateway_path,
+        sizeof(gateway_path),
+        paths.routing_dir,
+        picardie->id,
+        haute_normandie->id));
+    assert(openride_platform_file_exists(gateway_path));
+
+    openride_route_destroy(&route);
+    openride_routing_world_cache_destroy(&cache);
+    openride_routing_graph_destroy(&left);
+    openride_routing_graph_destroy(&middle);
+    openride_routing_graph_destroy(&right);
+
+    snprintf(command, sizeof(command), "rm -rf '%s'", root);
+    (void)system(command);
+}
+
 int main(void)
 {
     test_region_planning();
+    test_installed_multi_hop();
 
     OpenRideRoutingGraph left = build_left();
     OpenRideRoutingGraph right = build_right();

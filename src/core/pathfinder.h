@@ -38,4 +38,33 @@ bool openride_pathfinder_find(const OpenRideRoutingGraph *graph,
                               char *error,
                               size_t error_size);
 
+/*
+ * Exact multi-source frontier with path reconstruction.
+ *
+ * The implementation uses an admissible target-set A* lower bound when a
+ * heuristic callback is available, and falls back to Dijkstra otherwise.
+ * Each source starts with its own accumulated cost. For every target, return
+ * the minimum accumulated cost, the winning source index and the exact path
+ * from that source to the target. This lets RoutingWorld keep the selected
+ * candidate geometries while the regional graph is already resident, avoiding
+ * a second graph-loading / A* reconstruction pass.
+ *
+ * target_paths entries must be zero-initialized by the caller.
+ * Unreachable targets are not an API error: reachable[i] remains false.
+ */
+bool openride_pathfinder_find_frontier_paths(
+    const OpenRideRoutingGraph *graph,
+    const OpenRideRoutingNodeId *sources,
+    const double *source_costs,
+    uint32_t source_count,
+    const OpenRideRoutingNodeId *targets,
+    uint32_t target_count,
+    const OpenRidePathfinderCallbacks *callbacks,
+    double *target_costs,
+    uint32_t *target_source_indices,
+    OpenRidePathfinderResult *target_paths,
+    bool *reachable,
+    char *error,
+    size_t error_size);
+
 #endif
