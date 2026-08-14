@@ -1,5 +1,6 @@
 #include "openride/place_world.h"
 
+#include "openride/france_lite.h"
 #include "openride/region_manager.h"
 
 #include <stdio.h>
@@ -162,9 +163,29 @@ static bool same_place(const OpenRidePlaceSearchResult *a,
     if (a->osm_id == b->osm_id && a->lat == b->lat && a->lon == b->lon) {
         return true;
     }
-    return a->lat == b->lat
+    if (a->lat == b->lat
         && a->lon == b->lon
-        && strcmp(a->name, b->name) == 0;
+        && strcmp(a->name, b->name) == 0) {
+        return true;
+    }
+
+    if ((a->bundled_lite || b->bundled_lite)
+        && a->region_id[0] != '\0'
+        && b->region_id[0] != '\0'
+        && strcmp(a->region_id, b->region_id) == 0) {
+        char normalized_a[192] = {0};
+        char normalized_b[192] = {0};
+        if (openride_place_normalize(a->name,
+                                     normalized_a,
+                                     sizeof(normalized_a))
+            && openride_place_normalize(b->name,
+                                        normalized_b,
+                                        sizeof(normalized_b))
+            && strcmp(normalized_a, normalized_b) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static int compare_candidates(const void *left, const void *right)
@@ -198,7 +219,7 @@ bool openride_place_world_search(
         set_error(error, error_size, "invalid PlaceWorld search arguments");
         return false;
     }
-    if (max_results == 0U || world->count == 0U) {
+    if (max_results == 0U) {
         set_error(error, error_size, "");
         return true;
     }
@@ -212,7 +233,7 @@ bool openride_place_world_search(
         return true;
     }
 
-    const size_t capacity = world->count * (size_t)max_results;
+    const size_t capacity = (world->count + 1U) * (size_t)max_results;
     OpenRidePlaceWorldCandidate *candidates =
         calloc(capacity, sizeof(*candidates));
     if (!candidates) {
@@ -253,6 +274,12 @@ bool openride_place_world_search(
         }
 
         for (uint32_t i = 0U; i < local_count; ++i) {
+            snprintf(local[i].region_id,
+                     sizeof(local[i].region_id),
+                     "%s",
+                     world->entries[r].region->id);
+            local[i].bundled_lite = false;
+
             bool duplicate = false;
             for (size_t j = 0U; j < candidate_count; ++j) {
                 if (same_place(&candidates[j].place, &local[i])) {
@@ -272,6 +299,54 @@ bool openride_place_world_search(
         }
         free(local);
     }
+
+    OpenRidePlaceSearchResult *lite =
+        calloc(max_results, sizeof(*lite));
+    if (!lite) {
+        free(candidates);
+        set_error(error,
+                  error_size,
+                  "unable to allocate France-lite search results");
+        return false;
+    }
+
+    uint32_t lite_count = 0U;
+    char lite_error[192] = {0};
+    if (!openride_france_lite_search(query,
+                                     lite,
+                                     max_results,
+                                     &lite_count,
+                                     lite_error,
+                                     sizeof(lite_error))) {
+        free(lite);
+        free(candidates);
+        set_error(error,
+                  error_size,
+                  lite_error[0]
+                      ? lite_error
+                      : "France-lite search failed");
+        return false;
+    }
+
+    for (uint32_t i = 0U; i < lite_count; ++i) {
+        bool duplicate = false;
+        for (size_t j = 0U; j < candidate_count; ++j) {
+            if (same_place(&candidates[j].place, &lite[i])) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate || candidate_count >= capacity) continue;
+
+        OpenRidePlaceWorldCandidate *candidate =
+            &candidates[candidate_count++];
+        candidate->place = lite[i];
+        candidate->match_class = match_class(
+            normalized_query,
+            lite[i].name,
+            &candidate->normalized_name_length);
+    }
+    free(lite);
 
     qsort(candidates,
           candidate_count,

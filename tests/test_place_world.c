@@ -22,6 +22,26 @@ int main(int argc, char **argv)
                                                        error,
                                                        sizeof(error)));
 
+    OpenRidePlaceWorld *empty_world =
+        openride_place_world_create(&paths, error, sizeof(error));
+    assert(empty_world != NULL);
+    assert(openride_place_world_region_count(empty_world) == 0U);
+
+    OpenRidePlaceSearchResult lite_results[8];
+    uint32_t lite_count = 0U;
+    assert(openride_place_world_search(empty_world,
+                                       "bordeaux",
+                                       lite_results,
+                                       8U,
+                                       &lite_count,
+                                       error,
+                                       sizeof(error)));
+    assert(lite_count > 0U);
+    assert(strcmp(lite_results[0].name, "Bordeaux") == 0);
+    assert(strcmp(lite_results[0].region_id, "aquitaine") == 0);
+    assert(lite_results[0].bundled_lite);
+    openride_place_world_destroy(empty_world);
+
     const OpenRideRegionDefinition *a = openride_region_at(0U);
     const OpenRideRegionDefinition *b = openride_region_at(1U);
     assert(a != NULL);
@@ -70,6 +90,8 @@ int main(int argc, char **argv)
                                        sizeof(error)));
     assert(count == 1U);
     assert(strcmp(results[0].name, "Étaples Test") == 0);
+    assert(results[0].region_id[0] != '\0');
+    assert(!results[0].bundled_lite);
 
     assert(openride_place_world_search(world,
                                        "camping",

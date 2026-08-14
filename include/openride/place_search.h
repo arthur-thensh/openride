@@ -26,6 +26,8 @@ typedef struct OpenRidePlaceSearchResult {
     OpenRidePlaceKind kind;
     int rank;
     char name[128];
+    char region_id[64];
+    bool bundled_lite;
 } OpenRidePlaceSearchResult;
 
 typedef struct OpenRidePlaceIndex OpenRidePlaceIndex;

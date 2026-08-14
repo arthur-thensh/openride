@@ -1776,11 +1776,18 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
                          layout.text_scale,
                          name);
 
-        char kind[64];
+        char kind[96];
+        const OpenRideRegionDefinition *result_region =
+            results[i].region_id[0] != '\0'
+                ? openride_region_find(results[i].region_id)
+                : NULL;
         snprintf(kind,
                  sizeof(kind),
-                 "%s",
-                 openride_place_kind_name(results[i].kind));
+                 "%s%s%s%s",
+                 openride_place_kind_name(results[i].kind),
+                 result_region ? " - " : "",
+                 result_region ? result_region->name : "",
+                 results[i].bundled_lite ? " - France" : "");
         SDL_SetRenderDrawColor(renderer, 166, 177, 186, 255);
         draw_scaled_text(renderer,
                          row->x + 12.0f * layout.ui_scale,
@@ -1845,14 +1852,20 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
             SDL_SetRenderDrawColor(renderer, 42, 82, 112, 220);
             SDL_RenderFillRect(renderer, &highlight);
         }
+        const OpenRideRegionDefinition *result_region =
+            results[i].region_id[0] != '\0'
+                ? openride_region_find(results[i].region_id)
+                : NULL;
         SDL_SetRenderDrawColor(renderer, 238, 241, 243, 255);
         SDL_RenderDebugTextFormat(renderer,
                                   x + 16.0f,
                                   row_y + 3.0f,
-                                  "%c %-34.34s  [%s]",
+                                  "%c %-30.30s  [%s%s%s]",
                                   i == selected_result ? '>' : ' ',
                                   results[i].name,
-                                  openride_place_kind_name(results[i].kind));
+                                  openride_place_kind_name(results[i].kind),
+                                  result_region ? " - " : "",
+                                  result_region ? result_region->name : "");
     }
 #endif
 }
@@ -2038,9 +2051,9 @@ static void open_place_search(SDL_Window *window,
                               size_t status_size)
 {
     if (!active || !query || !result_count || !selected) return;
-    if (!place_world || openride_place_world_region_count(place_world) == 0U) {
+    if (!place_world) {
         snprintf(status, status_size,
-                 "aucun index de recherche regional installe");
+                 "recherche hors ligne indisponible");
         return;
     }
     *active = true;
@@ -7541,8 +7554,7 @@ int main(int argc, char **argv)
                        width);
         draw_place_search_overlay(renderer,
                                   place_search_active,
-                                  place_world
-                                      && openride_place_world_region_count(place_world) > 0U,
+                                  place_world != NULL,
                                   place_search_query,
                                   place_search_results,
                                   place_search_result_count,
