@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.24.0 LANGUAGES C)
+project(OpenRide VERSION 0.25.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -336,6 +336,17 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_gps_simulator PRIVATE openride_core)
     add_test(NAME gps_simulator COMMAND test_gps_simulator)
+
+    add_executable(test_navigation_scenarios
+        tests/test_navigation_scenarios.c
+        tests/support/navigation_scenario.c
+    )
+    target_include_directories(test_navigation_scenarios
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/support
+    )
+    target_link_libraries(test_navigation_scenarios PRIVATE openride_core)
+    add_test(NAME navigation_scenarios COMMAND test_navigation_scenarios)
 
     add_executable(test_navigation_instructions
         tests/test_navigation_instructions.c
