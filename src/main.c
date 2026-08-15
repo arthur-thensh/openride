@@ -8399,13 +8399,15 @@ int main(int argc, char **argv)
                      road_debug.batches);
             snprintf(area_line,
                      sizeof(area_line),
-                     "A %.1fms AL%.1f AT%u AG%u AB%u AP%u",
+                     "A%.1f L%.1f T%u G%u B%u P%u D%u X%u",
                      area_debug.areas_ms,
                      area_debug.load_ms,
                      area_debug.tiles_visited,
                      area_debug.triangles_drawn,
                      area_debug.batches,
-                     area_debug.mask_prewarm_loads);
+                     area_debug.prewarm_loads,
+                     area_debug.draw_loads,
+                     area_debug.deferred_loads);
             float badge_width = 330.0f * ui_scale;
             const float max_badge_width = (float)safe.w - 2.0f * margin;
             if (badge_width > max_badge_width) badge_width = max_badge_width;
