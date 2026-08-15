@@ -52,9 +52,13 @@ OpenRideUIToolbarLayout openride_ui_toolbar_layout(const OpenRideUIContext *ui)
 }
 
 OpenRideToolbarAction openride_ui_toolbar_hit_test(const OpenRideUIContext *ui,
-                                                   double x,
-                                                   double y)
+                                                   double x_px,
+                                                   double y_px)
 {
+    if (!ui) return OPENRIDE_TOOLBAR_NONE;
+    const double scale = ui->scale > 0.0f ? (double)ui->scale : 1.0;
+    const double x = x_px / scale;
+    const double y = y_px / scale;
     const OpenRideUIToolbarLayout layout = openride_ui_toolbar_layout(ui);
     for (uint32_t i = 0U; i < OPENRIDE_UI_TOOLBAR_ITEMS; ++i) {
         if (openride_ui_point_in_rect(x, y, layout.items[i])) {
