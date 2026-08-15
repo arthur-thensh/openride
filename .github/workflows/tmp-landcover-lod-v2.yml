@@ -1,0 +1,54 @@
+name: Temporary landcover LOD v2
+
+"on":
+  push:
+    branches:
+      - "agent/ormap-landcover-lod-v2"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: "agent/ormap-landcover-lod-v2"
+          fetch-depth: 0
+
+      - name: Apply LOD v2 patch
+        run: python3 .github/tmp/apply_landcover_lod_v2.py
+
+      - name: Remove temporary helpers and commit candidate
+        run: |
+          git rm .github/workflows/tmp-landcover-lod-v2.yml
+          git rm .github/tmp/apply_landcover_lod_v2.py
+          git config user.name "OpenRide CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add include/openride/ormap.h src/map/ormap_builder_v4.c src/map/ormap_renderer_v4.c src/tools/ormap_import_main.c tests/test_ormap.c
+          git commit -m "Map: add generalized landcover LODs"
+
+      - name: Install desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build libsqlite3-dev zlib1g-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+          ./scripts/bootstrap_sdl.sh
+
+      - name: Build and test
+        run: |
+          sed -i '/cos=openride_ormap_cached_cos/d' CMakeLists.txt
+          sed -i '/sin=openride_ormap_cached_sin/d' CMakeLists.txt
+          cmake -S . -B build -G Ninja -DOPENRIDE_BUILD_TESTS=ON
+          cmake --build build
+          ctest --test-dir build --output-on-failure -E '^mbtiles$'
+          git restore CMakeLists.txt
+          test -z "$(git status --porcelain)"
+
+      - name: Push validated commit
+        run: git push origin HEAD:agent/ormap-landcover-lod-v2
