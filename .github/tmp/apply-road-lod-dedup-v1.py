@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -148,20 +149,22 @@ func = replace_once(
     """            const int qx = wrap_x(tx, count);\n            ++renderer->road_debug.tiles_visited;\n            OpenRideORMapRoadCacheEntry *entry =\n""",
     "count road tile visits",
 )
-count_ok = func.count("                        bool ok = true;\n")
-if count_ok != 2:
-    raise SystemExit(f"segment draw sites: expected two matches, got {count_ok}")
-func = func.replace(
-    "                        bool ok = true;\n",
-    "                        ++renderer->road_debug.segments_drawn;\n                        bool ok = true;\n",
+func, segment_sites = re.subn(
+    r"^(\s*)bool ok = true;$",
+    r"\1++renderer->road_debug.segments_drawn;\n\1bool ok = true;",
+    func,
+    flags=re.MULTILINE,
 )
-count_return = func.count("                            geometry_batch_flush(renderer, &batch);\n                            return;\n")
-if count_return != 2:
-    raise SystemExit(f"road early returns: expected two matches, got {count_return}")
-func = func.replace(
-    "                            geometry_batch_flush(renderer, &batch);\n                            return;\n",
-    "                            geometry_batch_flush(renderer, &batch);\n                            renderer->road_debug_active = previous_road_debug_active;\n                            return;\n",
+if segment_sites != 2:
+    raise SystemExit(f"segment draw sites: expected two matches, got {segment_sites}")
+func, early_returns = re.subn(
+    r"^(\s*)geometry_batch_flush\(renderer, &batch\);\n\1return;$",
+    r"\1geometry_batch_flush(renderer, &batch);\n\1renderer->road_debug_active = previous_road_debug_active;\n\1return;",
+    func,
+    flags=re.MULTILINE,
 )
+if early_returns != 2:
+    raise SystemExit(f"road early returns: expected two matches, got {early_returns}")
 end_block = """    geometry_batch_flush(renderer, &batch);\n}\n\n"""
 if not func.endswith(end_block):
     raise SystemExit("draw_road_pass final flush block not found")
