@@ -2104,7 +2104,8 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
     OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
     OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION
+    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION,
+    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED
 } OpenRideMobilePanelAction;
 
 typedef struct OpenRideMobilePanelHit {
@@ -2288,7 +2289,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 7U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 8U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
 
@@ -2351,14 +2352,15 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
             };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
-            static const OpenRideMobilePanelAction actions[7] = {
+            static const OpenRideMobilePanelAction actions[8] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION,
-                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION
+                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION,
+                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED
             };
             hit.action = actions[i];
         } else {
@@ -2384,6 +2386,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                                   bool voice_enabled,
                                   bool simulated_gps_active,
                                   bool simulated_gps_deviation,
+                                  double simulated_gps_time_scale,
                                   const OpenRideRegionDefinition *region,
                                   const OpenRideRegionStatus *region_status,
                                   bool region_is_active,
@@ -2415,7 +2418,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 7U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 8U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
 
@@ -2636,7 +2639,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
         mobile_draw_panel_title(renderer, &layout, "PARAMETRES", "Touche une ligne pour modifier");
-        char labels[7][96];
+        char labels[8][96];
         snprintf(labels[0], sizeof(labels[0]), "Style carte : %s", openride_map_style_name(map_style));
         snprintf(labels[1], sizeof(labels[1]), "Profil routage : %s", openride_routing_profile_name(profile));
         snprintf(labels[2], sizeof(labels[2]), "Suivi GPS : %s", follow_gps ? "OUI" : "NON");
@@ -2651,7 +2654,11 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                      : simulated_gps_active
                          ? "DECLENCHER"
                          : "GPS SIMULE REQUIS");
-        for (uint32_t i = 0U; i < 7U; ++i) {
+        snprintf(labels[7],
+                 sizeof(labels[7]),
+                 "Vitesse simulation [DEV] : x%.0f",
+                 simulated_gps_time_scale);
+        for (uint32_t i = 0U; i < 8U; ++i) {
             mobile_draw_button(renderer,
                                &layout.rows[i],
                                labels[i],
@@ -2778,6 +2785,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            bool voice_enabled,
                            bool simulated_gps_active,
                            bool simulated_gps_deviation,
+                           double simulated_gps_time_scale,
                            const OpenRideRegionDefinition *region,
                            const OpenRideRegionStatus *region_status,
                            bool region_is_active,
@@ -2806,6 +2814,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           voice_enabled,
                           simulated_gps_active,
                           simulated_gps_deviation,
+                          simulated_gps_time_scale,
                           region,
                           region_status,
                           region_is_active,
@@ -2821,6 +2830,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
 #endif
     (void)simulated_gps_active;
     (void)simulated_gps_deviation;
+    (void)simulated_gps_time_scale;
     const float w = 580.0f;
     const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
     const float actual_w = viewport_width > (int)w ? w : (float)viewport_width - 16.0f;
@@ -3723,6 +3733,7 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
                                bool auto_reroute,
                                bool simulated_gps,
                                bool simulated_gps_deviation,
+                               double simulated_gps_time_scale,
                                int viewport_width,
                                int viewport_height)
 {
@@ -3825,11 +3836,15 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
     }
 
     char gps_text[64];
-    const char *simulation_prefix = simulated_gps_deviation
-        ? "SIM DEV +80m | "
-        : simulated_gps
-            ? "SIM DEV | "
-            : "";
+    char simulation_prefix[32] = {0};
+    if (simulated_gps) {
+        snprintf(simulation_prefix,
+                 sizeof(simulation_prefix),
+                 simulated_gps_deviation
+                     ? "SIM x%.0f DEV +80m | "
+                     : "SIM x%.0f DEV | ",
+                 simulated_gps_time_scale);
+    }
     if (drive->gps_quality == OPENRIDE_GPS_GOOD || drive->gps_quality == OPENRIDE_GPS_FAIR) {
         snprintf(gps_text,
                  sizeof(gps_text),
@@ -6053,7 +6068,7 @@ int main(int argc, char **argv)
                                     snprintf(route_status,
                                              sizeof(route_status),
                                              "SIMULATION GPS [DEV] x%.0f",
-                                             OPENRIDE_ANDROID_GPS_SIMULATION_TIME_SCALE);
+                                             simulated_location_context.time_scale);
                                 } else {
                                     snprintf(route_status,
                                              sizeof(route_status),
@@ -6092,6 +6107,21 @@ int main(int argc, char **argv)
                                          sizeof(route_status),
                                          "DEV +80 m: attente hors itineraire / recalcul");
                             }
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED) {
+                            const double current =
+                                simulated_location_context.time_scale;
+                            const double next =
+                                current < 1.5 ? 2.0
+                                : current < 3.5 ? 5.0
+                                : 1.0;
+                            openride_simulated_location_provider_set_time_scale(
+                                &simulated_location_context,
+                                next);
+                            snprintf(route_status,
+                                     sizeof(route_status),
+                                     "vitesse simulation [DEV] x%.0f",
+                                     simulated_location_context.time_scale);
                         }
                         break;
                     }
@@ -7914,6 +7944,7 @@ int main(int argc, char **argv)
                                auto_reroute,
                                simulated_gps_active,
                                simulator_deviation,
+                               simulated_location_context.time_scale,
                                width,
                                height);
         }
@@ -7933,9 +7964,11 @@ int main(int argc, char **argv)
 #ifdef __ANDROID__
                        simulated_gps_active,
                        simulator_deviation,
+                       simulated_location_context.time_scale,
 #else
                        false,
                        false,
+                       1.0,
 #endif
                        region,
                        &region_status,

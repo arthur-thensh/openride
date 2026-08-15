@@ -17,4 +17,8 @@ void openride_simulated_location_provider_init(
     double time_scale,
     double accuracy_m);
 
+void openride_simulated_location_provider_set_time_scale(
+    OpenRideSimulatedLocationContext *context,
+    double time_scale);
+
 #endif

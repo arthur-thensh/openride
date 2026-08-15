@@ -57,6 +57,16 @@ static bool simulated_location_poll(void *userdata,
     return true;
 }
 
+void openride_simulated_location_provider_set_time_scale(
+    OpenRideSimulatedLocationContext *context,
+    double time_scale)
+{
+    if (!context) return;
+    if (!isfinite(time_scale) || time_scale <= 0.0) time_scale = 1.0;
+    if (time_scale > 20.0) time_scale = 20.0;
+    context->time_scale = time_scale;
+}
+
 void openride_simulated_location_provider_init(
     OpenRideLocationProvider *provider,
     OpenRideSimulatedLocationContext *context,
@@ -68,9 +78,7 @@ void openride_simulated_location_provider_init(
 
     memset(context, 0, sizeof(*context));
     context->simulator = simulator;
-    context->time_scale =
-        isfinite(time_scale) && time_scale > 0.0 ? time_scale : 1.0;
-    if (context->time_scale > 20.0) context->time_scale = 20.0;
+    openride_simulated_location_provider_set_time_scale(context, time_scale);
     context->accuracy_m =
         isfinite(accuracy_m) && accuracy_m >= 0.0 ? accuracy_m : 3.0;
 

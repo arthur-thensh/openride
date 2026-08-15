@@ -77,6 +77,7 @@ int main(void)
 
     assert(openride_location_provider_start(&simulated_provider));
     assert(simulator.active);
+    assert(fabs(simulated_context.time_scale - 2.0) < 1e-9);
 
     OpenRideLocationSample simulated_sample = {0};
     assert(openride_location_provider_poll(
@@ -85,6 +86,14 @@ int main(void)
     assert(fabs(simulated_sample.accuracy_m - 4.0) < 1e-9);
     assert(fabs(simulated_sample.speed_mps - 10.0) < 1e-9);
     assert(simulated_sample.lon > points[0].lon);
+    assert(simulator.position_m > 9.9 && simulator.position_m < 10.1);
+
+    openride_simulated_location_provider_set_time_scale(
+        &simulated_context, 5.0);
+    assert(fabs(simulated_context.time_scale - 5.0) < 1e-9);
+    assert(openride_location_provider_poll(
+        &simulated_provider, 0.1, &simulated_sample));
+    assert(simulator.position_m > 14.9 && simulator.position_m < 15.1);
 
     openride_location_provider_stop(&simulated_provider);
     assert(!simulator.active);
