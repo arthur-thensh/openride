@@ -160,6 +160,9 @@ static void geometry_batch_flush(OpenRideORMapRenderer *renderer,
     if (renderer->area_debug_active) {
         ++renderer->area_debug.batches;
     }
+    if (renderer->mask_debug_active) {
+        ++renderer->area_debug.mask_batches;
+    }
     SDL_RenderGeometry(renderer->renderer,
                        NULL,
                        renderer->area_vertices,
@@ -507,6 +510,130 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
     return victim;
 }
 
+static bool mask_bit(const unsigned char *bits, uint32_t index)
+{
+    return bits && (bits[index >> 3U] & (unsigned char)(1U << (index & 7U))) != 0U;
+}
+
+static bool mask_rects_compile(const OpenRideORMapMaskTile *tile,
+                               const unsigned char *bits,
+                               OpenRideMaskRect **rects_out,
+                               uint32_t *count_out)
+{
+    if (!rects_out || !count_out) return false;
+    *rects_out = NULL;
+    *count_out = 0U;
+    if (!tile || !bits || tile->grid_size == 0U) return true;
+
+    const uint32_t grid = tile->grid_size;
+    const uint32_t max_runs_per_row = (grid + 1U) / 2U;
+    const uint32_t max_rects = grid * max_runs_per_row;
+    OpenRideMaskRect *rects = malloc((size_t)max_rects * sizeof(*rects));
+    if (!rects) return false;
+
+    uint32_t previous[128];
+    uint32_t previous_count = 0U;
+    uint32_t rect_count = 0U;
+
+    for (uint32_t y = 0U; y < grid; ++y) {
+        uint32_t current[128];
+        uint32_t current_count = 0U;
+        uint32_t x = 0U;
+
+        while (x < grid) {
+            while (x < grid && !mask_bit(bits, y * grid + x)) ++x;
+            if (x >= grid) break;
+            const uint32_t start = x;
+            while (x < grid && mask_bit(bits, y * grid + x)) ++x;
+            const uint32_t end = x;
+
+            uint32_t rect_index = UINT32_MAX;
+            for (uint32_t p = 0U; p < previous_count; ++p) {
+                OpenRideMaskRect *candidate = &rects[previous[p]];
+                if ((uint32_t)candidate->x0 == start
+                    && (uint32_t)candidate->x1 == end
+                    && (uint32_t)candidate->y1 == y) {
+                    rect_index = previous[p];
+                    candidate->y1 = (uint8_t)(y + 1U);
+                    break;
+                }
+            }
+
+            if (rect_index == UINT32_MAX) {
+                if (rect_count >= max_rects) {
+                    free(rects);
+                    return false;
+                }
+                rect_index = rect_count++;
+                rects[rect_index] = (OpenRideMaskRect){
+                    .x0 = (uint8_t)start,
+                    .y0 = (uint8_t)y,
+                    .x1 = (uint8_t)end,
+                    .y1 = (uint8_t)(y + 1U)
+                };
+            }
+            current[current_count++] = rect_index;
+        }
+
+        memcpy(previous, current, (size_t)current_count * sizeof(*current));
+        previous_count = current_count;
+    }
+
+    if (rect_count == 0U) {
+        free(rects);
+        return true;
+    }
+
+    OpenRideMaskRect *shrunk = realloc(rects, (size_t)rect_count * sizeof(*rects));
+    if (shrunk) rects = shrunk;
+    *rects_out = rects;
+    *count_out = rect_count;
+    return true;
+}
+
+static void mask_cache_entry_destroy(OpenRideORMapMaskCacheEntry *entry)
+{
+    if (!entry) return;
+    if (entry->occupied) openride_ormap_mask_tile_destroy(&entry->tile);
+    free(entry->builtup_rects);
+    free(entry->water_rects);
+    free(entry->forest_rects);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static bool mask_cache_compile_geometry(OpenRideORMapMaskCacheEntry *entry)
+{
+    if (!entry) return false;
+
+    OpenRideMaskRect *builtup = NULL;
+    OpenRideMaskRect *water = NULL;
+    OpenRideMaskRect *forest = NULL;
+    uint32_t builtup_count = 0U;
+    uint32_t water_count = 0U;
+    uint32_t forest_count = 0U;
+
+    if (!mask_rects_compile(&entry->tile, entry->tile.builtup,
+                            &builtup, &builtup_count)
+        || !mask_rects_compile(&entry->tile, entry->tile.water,
+                               &water, &water_count)
+        || !mask_rects_compile(&entry->tile, entry->tile.forest,
+                               &forest, &forest_count)) {
+        free(builtup);
+        free(water);
+        free(forest);
+        return false;
+    }
+
+    entry->builtup_rects = builtup;
+    entry->builtup_rect_count = builtup_count;
+    entry->water_rects = water;
+    entry->water_rect_count = water_count;
+    entry->forest_rects = forest;
+    entry->forest_rect_count = forest_count;
+    entry->geometry_compiled = true;
+    return true;
+}
+
 static bool mask_cache_contains(const OpenRideORMapRenderer *renderer,
                                 int zoom,
                                 int x,
@@ -539,6 +666,7 @@ static OpenRideORMapMaskCacheEntry *mask_cache_slot(OpenRideORMapRenderer *rende
         OpenRideORMapMaskCacheEntry *entry = &renderer->masks[base + i];
         if (entry->occupied && entry->zoom == zoom && entry->x == x && entry->y == y) {
             entry->last_used = renderer->frame_counter;
+            if (renderer->area_debug_active) ++renderer->area_debug.mask_cache_hits;
             return entry;
         }
         if (!entry->occupied && !victim) victim = entry;
@@ -547,6 +675,7 @@ static OpenRideORMapMaskCacheEntry *mask_cache_slot(OpenRideORMapRenderer *rende
         }
     }
 
+    if (renderer->area_debug_active) ++renderer->area_debug.mask_cache_misses;
     if (budgeted_draw_load && !prewarm) {
         if (renderer->area_draw_load_budget_remaining == 0U) {
             ++renderer->area_debug.deferred_loads;
@@ -562,27 +691,41 @@ static OpenRideORMapMaskCacheEntry *mask_cache_slot(OpenRideORMapRenderer *rende
             return NULL;
         }
     }
-    if (victim->occupied) openride_ormap_mask_tile_destroy(&victim->tile);
-    memset(victim, 0, sizeof(*victim));
+    mask_cache_entry_destroy(victim);
     victim->occupied = true;
     victim->zoom = zoom;
     victim->x = x;
     victim->y = y;
     victim->last_used = renderer->frame_counter;
+
     const uint64_t load_started = SDL_GetTicksNS();
     char error[160] = {0};
-    if (!openride_ormap_load_mask_tile(renderer->map,
-                                       zoom,
-                                       x,
-                                       y,
-                                       &victim->tile,
-                                       error,
-                                       sizeof(error))) {
-        /* Missing mask tile is expected in rural areas. */
-    }
+    (void)openride_ormap_load_mask_tile(renderer->map,
+                                        zoom,
+                                        x,
+                                        y,
+                                        &victim->tile,
+                                        error,
+                                        sizeof(error));
+    const uint64_t load_finished = SDL_GetTicksNS();
+
+    const uint64_t compile_started = load_finished;
+    const bool compiled = mask_cache_compile_geometry(victim);
+    const uint64_t compile_finished = SDL_GetTicksNS();
+
     if (renderer->area_debug_active) {
         renderer->area_debug.load_ms +=
-            (double)(SDL_GetTicksNS() - load_started) / 1000000.0;
+            (double)(load_finished - load_started) / 1000000.0;
+        renderer->area_debug.mask_compile_ms +=
+            (double)(compile_finished - compile_started) / 1000000.0;
+        if (compiled) {
+            renderer->area_debug.mask_compile_rects +=
+                victim->builtup_rect_count
+                + victim->water_rect_count
+                + victim->forest_rect_count;
+        } else {
+            ++renderer->area_debug.mask_compile_failures;
+        }
         if (prewarm) ++renderer->area_debug.prewarm_loads;
         else ++renderer->area_debug.draw_loads;
     }
@@ -885,11 +1028,6 @@ static bool geometry_batch_rotated_rect(OpenRideORMapRenderer *renderer,
     return geometry_batch_quad(renderer, batch, x, y, color);
 }
 
-static bool mask_bit(const unsigned char *bits, uint32_t index)
-{
-    return bits && (bits[index >> 3U] & (unsigned char)(1U << (index & 7U))) != 0U;
-}
-
 static OpenRideMapColor forest_color(OpenRideMapStyle style)
 {
     if (style == OPENRIDE_MAP_STYLE_TOPO) return (OpenRideMapColor){180, 203, 170, 210};
@@ -919,6 +1057,7 @@ static bool draw_mask_layer(OpenRideORMapRenderer *renderer,
             if (x >= grid) break;
             const uint32_t start = x;
             while (x < grid && mask_bit(bits, y * grid + x)) ++x;
+            ++renderer->area_debug.mask_rects;
             if (!geometry_batch_rotated_rect(renderer,
                                              batch,
                                              camera,
@@ -936,6 +1075,66 @@ static bool draw_mask_layer(OpenRideORMapRenderer *renderer,
     return true;
 }
 
+
+static bool draw_compiled_mask_layer(OpenRideORMapRenderer *renderer,
+                                     GeometryBatch *batch,
+                                     const OpenRideMapCamera *camera,
+                                     int width,
+                                     int height,
+                                     double tile_size,
+                                     double tile_left,
+                                     double tile_top,
+                                     const OpenRideORMapMaskTile *tile,
+                                     const OpenRideMaskRect *rects,
+                                     uint32_t rect_count,
+                                     OpenRideMapColor color)
+{
+    if (!tile || tile->grid_size == 0U || rect_count == 0U) return true;
+    const double cell = tile_size / (double)tile->grid_size;
+    for (uint32_t i = 0U; i < rect_count; ++i) {
+        const OpenRideMaskRect *rect = &rects[i];
+        ++renderer->area_debug.mask_rects;
+        if (!geometry_batch_rotated_rect(renderer,
+                                         batch,
+                                         camera,
+                                         width,
+                                         height,
+                                         (float)(tile_left + rect->x0 * cell),
+                                         (float)(tile_top + rect->y0 * cell),
+                                         (float)(tile_left + rect->x1 * cell + 0.5),
+                                         (float)(tile_top + rect->y1 * cell + 0.5),
+                                         color)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool draw_cached_mask_layer(OpenRideORMapRenderer *renderer,
+                                   GeometryBatch *batch,
+                                   const OpenRideMapCamera *camera,
+                                   int width,
+                                   int height,
+                                   double tile_size,
+                                   double tile_left,
+                                   double tile_top,
+                                   const OpenRideORMapMaskCacheEntry *entry,
+                                   const unsigned char *bits,
+                                   const OpenRideMaskRect *rects,
+                                   uint32_t rect_count,
+                                   OpenRideMapColor color)
+{
+    if (!entry) return true;
+    if (entry->geometry_compiled) {
+        return draw_compiled_mask_layer(renderer, batch, camera, width, height,
+                                        tile_size, tile_left, tile_top,
+                                        &entry->tile, rects, rect_count, color);
+    }
+    return draw_mask_layer(renderer, batch, camera, width, height,
+                           tile_size, tile_left, tile_top,
+                           &entry->tile, bits, color);
+}
+
 static void draw_masks(OpenRideORMapRenderer *renderer,
                        const OpenRideMapCamera *camera,
                        int width,
@@ -943,7 +1142,9 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
 {
     const uint64_t masks_started = SDL_GetTicksNS();
     const bool previous_area_debug_active = renderer->area_debug_active;
+    const bool previous_mask_debug_active = renderer->mask_debug_active;
     renderer->area_debug_active = true;
+    renderer->mask_debug_active = true;
 
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     const bool v4 = metadata && metadata->format_version >= 4;
@@ -1008,6 +1209,7 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
     if (!draw_forest && !draw_builtup_overview && !draw_legacy_masks) {
         renderer->area_debug.areas_ms +=
             (double)(SDL_GetTicksNS() - masks_started) / 1000000.0;
+        renderer->mask_debug_active = previous_mask_debug_active;
         renderer->area_debug_active = previous_area_debug_active;
         return;
     }
@@ -1049,22 +1251,27 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
             ++renderer->area_debug.tiles_visited;
             OpenRideORMapMaskCacheEntry *entry = mask_cache_slot(renderer, zoom, qx, ty, false, true);
             if (!entry) continue;
+            ++renderer->area_debug.mask_tiles;
             const double left = width * 0.5 + tx * tile_size - center_x;
             const double top = height * 0.5 + ty * tile_size - center_y;
 
             if (draw_forest && entry->tile.forest && forest.a > 0U) {
-                if (!draw_mask_layer(renderer, &batch, camera, width, height,
-                                     tile_size, left, top, &entry->tile,
-                                     entry->tile.forest, forest)) {
+                if (!draw_cached_mask_layer(renderer, &batch, camera, width, height,
+                                            tile_size, left, top, entry,
+                                            entry->tile.forest,
+                                            entry->forest_rects,
+                                            entry->forest_rect_count, forest)) {
                     geometry_batch_flush(renderer, &batch);
                     goto masks_done;
                 }
             }
 
             if (draw_builtup_overview && entry->tile.builtup && builtup.a > 0U) {
-                if (!draw_mask_layer(renderer, &batch, camera, width, height,
-                                     tile_size, left, top, &entry->tile,
-                                     entry->tile.builtup, builtup)) {
+                if (!draw_cached_mask_layer(renderer, &batch, camera, width, height,
+                                            tile_size, left, top, entry,
+                                            entry->tile.builtup,
+                                            entry->builtup_rects,
+                                            entry->builtup_rect_count, builtup)) {
                     geometry_batch_flush(renderer, &batch);
                     goto masks_done;
                 }
@@ -1073,16 +1280,20 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
             /* v1/v2 stored filled water/built-up areas only as semantic cells. */
             if (draw_legacy_masks) {
                 if (entry->tile.builtup && builtup.a > 0U
-                    && !draw_mask_layer(renderer, &batch, camera, width, height,
-                                        tile_size, left, top, &entry->tile,
-                                        entry->tile.builtup, builtup)) {
+                    && !draw_cached_mask_layer(renderer, &batch, camera, width, height,
+                                               tile_size, left, top, entry,
+                                               entry->tile.builtup,
+                                               entry->builtup_rects,
+                                               entry->builtup_rect_count, builtup)) {
                     geometry_batch_flush(renderer, &batch);
                     goto masks_done;
                 }
                 if (entry->tile.water && water.a > 0U
-                    && !draw_mask_layer(renderer, &batch, camera, width, height,
-                                        tile_size, left, top, &entry->tile,
-                                        entry->tile.water, water)) {
+                    && !draw_cached_mask_layer(renderer, &batch, camera, width, height,
+                                               tile_size, left, top, entry,
+                                               entry->tile.water,
+                                               entry->water_rects,
+                                               entry->water_rect_count, water)) {
                     geometry_batch_flush(renderer, &batch);
                     goto masks_done;
                 }
@@ -1094,6 +1305,7 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
 masks_done:
     renderer->area_debug.areas_ms +=
         (double)(SDL_GetTicksNS() - masks_started) / 1000000.0;
+    renderer->mask_debug_active = previous_mask_debug_active;
     renderer->area_debug_active = previous_area_debug_active;
 }
 
@@ -2338,7 +2550,7 @@ void openride_ormap_renderer_destroy(OpenRideORMapRenderer *renderer)
         road_cache_entry_destroy(&renderer->roads[i]);
     }
     for (size_t i = 0U; i < OPENRIDE_ORMAP_MASK_CACHE_CAPACITY; ++i) {
-        if (renderer->masks[i].occupied) openride_ormap_mask_tile_destroy(&renderer->masks[i].tile);
+        mask_cache_entry_destroy(&renderer->masks[i]);
     }
     for (size_t i = 0U; i < OPENRIDE_ORMAP_WATER_CACHE_CAPACITY; ++i) {
         if (renderer->waters[i].occupied) openride_ormap_water_tile_destroy(&renderer->waters[i].tile);
@@ -2369,6 +2581,7 @@ void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer)
     renderer->area_draw_load_budget_remaining = ORMAP_AREA_DRAW_LOAD_BUDGET;
     renderer->road_debug_active = false;
     renderer->area_debug_active = false;
+    renderer->mask_debug_active = false;
     renderer->area_detail_ready = false;
 }
 

@@ -125,12 +125,20 @@ static void map_world_accumulate_area_debug(
     if (!dst || !src) return;
     dst->areas_ms += src->areas_ms;
     dst->load_ms += src->load_ms;
+    dst->mask_compile_ms += src->mask_compile_ms;
     dst->tiles_visited += src->tiles_visited;
     dst->triangles_drawn += src->triangles_drawn;
     dst->batches += src->batches;
     dst->prewarm_loads += src->prewarm_loads;
     dst->draw_loads += src->draw_loads;
     dst->deferred_loads += src->deferred_loads;
+    dst->mask_tiles += src->mask_tiles;
+    dst->mask_rects += src->mask_rects;
+    dst->mask_batches += src->mask_batches;
+    dst->mask_compile_rects += src->mask_compile_rects;
+    dst->mask_cache_hits += src->mask_cache_hits;
+    dst->mask_cache_misses += src->mask_cache_misses;
+    dst->mask_compile_failures += src->mask_compile_failures;
 }
 
 void openride_map_world_debug_begin_frame(OpenRideMapWorld *world)

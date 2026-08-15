@@ -39,13 +39,27 @@ typedef struct OpenRideORMapRoadCacheEntry {
     uint32_t class_offsets[OPENRIDE_ROAD_OTHER + 2];
 } OpenRideORMapRoadCacheEntry;
 
+typedef struct OpenRideMaskRect {
+    uint8_t x0;
+    uint8_t y0;
+    uint8_t x1;
+    uint8_t y1;
+} OpenRideMaskRect;
+
 typedef struct OpenRideORMapMaskCacheEntry {
     bool occupied;
+    bool geometry_compiled;
     int zoom;
     int x;
     int y;
     uint64_t last_used;
     OpenRideORMapMaskTile tile;
+    OpenRideMaskRect *builtup_rects;
+    uint32_t builtup_rect_count;
+    OpenRideMaskRect *water_rects;
+    uint32_t water_rect_count;
+    OpenRideMaskRect *forest_rects;
+    uint32_t forest_rect_count;
 } OpenRideORMapMaskCacheEntry;
 
 typedef struct OpenRideORMapWaterCacheEntry {
@@ -83,12 +97,20 @@ typedef struct OpenRideORMapRoadDebugStats {
 typedef struct OpenRideORMapAreaDebugStats {
     double areas_ms;
     double load_ms;
+    double mask_compile_ms;
     uint32_t tiles_visited;
     uint32_t triangles_drawn;
     uint32_t batches;
     uint32_t prewarm_loads;
     uint32_t draw_loads;
     uint32_t deferred_loads;
+    uint32_t mask_tiles;
+    uint32_t mask_rects;
+    uint32_t mask_batches;
+    uint32_t mask_compile_rects;
+    uint32_t mask_cache_hits;
+    uint32_t mask_cache_misses;
+    uint32_t mask_compile_failures;
 } OpenRideORMapAreaDebugStats;
 
 typedef struct OpenRideORMapRenderer {
@@ -102,6 +124,7 @@ typedef struct OpenRideORMapRenderer {
     uint32_t area_draw_load_budget_remaining;
     bool road_debug_active;
     bool area_debug_active;
+    bool mask_debug_active;
     bool area_detail_ready;
     double road_previous_camera_zoom;
     bool road_has_previous_camera_zoom;
