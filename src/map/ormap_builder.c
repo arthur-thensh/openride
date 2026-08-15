@@ -400,23 +400,17 @@ static double mercator_y(double lat)
 
 static bool road_visible_at_zoom(OpenRideRoadClass road_class, int zoom)
 {
-    if (zoom <= 10) {
+    if (zoom <= OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM) {
         return road_class == OPENRIDE_ROAD_MOTORWAY
-            || road_class == OPENRIDE_ROAD_TRUNK
-            || road_class == OPENRIDE_ROAD_PRIMARY;
+            || road_class == OPENRIDE_ROAD_TRUNK;
     }
-    if (zoom == 11) {
-        return road_class <= OPENRIDE_ROAD_SECONDARY
-            && road_class >= OPENRIDE_ROAD_MOTORWAY;
+    if (zoom <= OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM) {
+        return road_class >= OPENRIDE_ROAD_MOTORWAY
+            && road_class <= OPENRIDE_ROAD_PRIMARY;
     }
-    if (zoom == 12) {
-        return road_class <= OPENRIDE_ROAD_TERTIARY
-            && road_class >= OPENRIDE_ROAD_MOTORWAY;
-    }
-    if (zoom == 13) {
-        return road_class != OPENRIDE_ROAD_TRACK
-            && road_class != OPENRIDE_ROAD_PATH
-            && road_class != OPENRIDE_ROAD_UNKNOWN;
+    if (zoom <= OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM) {
+        return road_class >= OPENRIDE_ROAD_MOTORWAY
+            && road_class <= OPENRIDE_ROAD_TERTIARY;
     }
     return road_class != OPENRIDE_ROAD_UNKNOWN;
 }
@@ -956,6 +950,20 @@ static bool collect_area_ring(const double *latitudes,
     return triangulated;
 }
 
+static void count_road_record_for_lod(OpenRideORMapBuildStats *stats, int zoom)
+{
+    if (!stats) return;
+    if (zoom == OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM) {
+        ++stats->road_regional_records;
+    } else if (zoom == OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM) {
+        ++stats->road_overview_records;
+    } else if (zoom == OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM) {
+        ++stats->road_local_records;
+    } else if (zoom == OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM) {
+        ++stats->road_detail_records;
+    }
+}
+
 static bool collect_roads_at_zoom(const OpenRideRoutingGraph *graph,
                                   int zoom,
                                   RoadTileMap *tiles,
@@ -1015,6 +1023,7 @@ static bool collect_roads_at_zoom(const OpenRideRoutingGraph *graph,
                         return false;
                     }
                     ++stats->road_records_written;
+                    count_road_record_for_lod(stats, zoom);
                 }
             }
     }
@@ -1963,6 +1972,32 @@ static bool write_mask_tiles(sqlite3 *db,
     return ok;
 }
 
+static uint8_t label_lod_from_kind(int kind)
+{
+    switch (kind) {
+        case 1: /* city */
+            return OPENRIDE_ORMAP_LABEL_LOD_REGIONAL;
+        case 2: /* town */
+            return OPENRIDE_ORMAP_LABEL_LOD_OVERVIEW;
+        case 3: /* village */
+        case 5: /* suburb */
+            return OPENRIDE_ORMAP_LABEL_LOD_LOCAL;
+        case 4: /* hamlet */
+        case 6: /* quarter */
+        default:
+            return OPENRIDE_ORMAP_LABEL_LOD_DETAIL;
+    }
+}
+
+static void count_label_lod(OpenRideORMapBuildStats *stats, uint8_t lod)
+{
+    if (!stats) return;
+    if (lod == OPENRIDE_ORMAP_LABEL_LOD_REGIONAL) ++stats->label_regional_count;
+    else if (lod == OPENRIDE_ORMAP_LABEL_LOD_OVERVIEW) ++stats->label_overview_count;
+    else if (lod == OPENRIDE_ORMAP_LABEL_LOD_LOCAL) ++stats->label_local_count;
+    else ++stats->label_detail_count;
+}
+
 static bool copy_labels(sqlite3 *db,
                         const char *places_path,
                         OpenRideORMapBuildStats *stats,
@@ -1987,19 +2022,23 @@ static bool copy_labels(sqlite3 *db,
                                  &select,
                                  NULL) == SQLITE_OK
         && sqlite3_prepare_v2(db,
-                             "INSERT INTO labels(lat_e7,lon_e7,kind,rank,name) VALUES(?1,?2,?3,?4,?5)",
+                             "INSERT INTO labels(lat_e7,lon_e7,kind,rank,lod,name) "
+                             "VALUES(?1,?2,?3,?4,?5,?6)",
                              -1,
                              &insert,
                              NULL) == SQLITE_OK;
     if (!ok) set_error(error, error_size, "unable to prepare label copy");
     while (ok && sqlite3_step(select) == SQLITE_ROW) {
+        const int kind = sqlite3_column_int(select, 2);
+        const uint8_t lod = label_lod_from_kind(kind);
         sqlite3_reset(insert);
         sqlite3_bind_int(insert, 1, sqlite3_column_int(select, 0));
         sqlite3_bind_int(insert, 2, sqlite3_column_int(select, 1));
-        sqlite3_bind_int(insert, 3, sqlite3_column_int(select, 2));
+        sqlite3_bind_int(insert, 3, kind);
         sqlite3_bind_int(insert, 4, sqlite3_column_int(select, 3));
+        sqlite3_bind_int(insert, 5, lod);
         sqlite3_bind_text(insert,
-                          5,
+                          6,
                           (const char *)sqlite3_column_text(select, 4),
                           -1,
                           SQLITE_TRANSIENT);
@@ -2008,6 +2047,7 @@ static bool copy_labels(sqlite3 *db,
             set_error(error, error_size, sqlite3_errmsg(db));
         } else {
             ++stats->labels_written;
+            count_label_lod(stats, lod);
         }
     }
     if (select) sqlite3_finalize(select);
@@ -2250,14 +2290,21 @@ bool openride_ormap_build(const char *pbf_path,
             "CREATE TABLE water_tiles(zoom_level INTEGER NOT NULL,tile_column INTEGER NOT NULL,tile_row INTEGER NOT NULL,tile_data BLOB NOT NULL,PRIMARY KEY(zoom_level,tile_column,tile_row));"
             "CREATE TABLE area_tiles(zoom_level INTEGER NOT NULL,tile_column INTEGER NOT NULL,tile_row INTEGER NOT NULL,tile_data BLOB NOT NULL,PRIMARY KEY(zoom_level,tile_column,tile_row));"
             "CREATE TABLE mask_tiles(zoom_level INTEGER NOT NULL,tile_column INTEGER NOT NULL,tile_row INTEGER NOT NULL,tile_data BLOB NOT NULL,PRIMARY KEY(zoom_level,tile_column,tile_row));"
-            "CREATE TABLE labels(lat_e7 INTEGER NOT NULL,lon_e7 INTEGER NOT NULL,kind INTEGER NOT NULL,rank INTEGER NOT NULL,name TEXT NOT NULL);";
+            "CREATE TABLE labels(lat_e7 INTEGER NOT NULL,lon_e7 INTEGER NOT NULL,kind INTEGER NOT NULL,rank INTEGER NOT NULL,lod INTEGER NOT NULL,name TEXT NOT NULL);";
         ok = sqlite_exec(db, schema, error, error_size)
             && sqlite_exec(db, "BEGIN", error, error_size)
             && write_metadata(db, region_name, &graph, error, error_size);
 
-        for (int zoom = OPENRIDE_ORMAP_MIN_ROAD_ZOOM;
-             ok && zoom <= OPENRIDE_ORMAP_MAX_ROAD_ZOOM;
-             ++zoom) {
+        const int road_lods[] = {
+            OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM,
+            OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM,
+            OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM,
+            OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM
+        };
+        for (size_t road_lod = 0U;
+             ok && road_lod < sizeof(road_lods) / sizeof(road_lods[0]);
+             ++road_lod) {
+            const int zoom = road_lods[road_lod];
             RoadTileMap road_tiles = {0};
             ok = collect_roads_at_zoom(&graph, zoom, &road_tiles, &stats, error, error_size)
                 && write_road_tiles(db, &road_tiles, &stats, error, error_size);
@@ -2328,7 +2375,7 @@ bool openride_ormap_build(const char *pbf_path,
              * only duplicate large amounts of data and temporary storage on a
              * phone. Keep finalisation lightweight. */
             ok = sqlite_exec(db,
-                             "CREATE INDEX idx_labels_rank ON labels(rank DESC);",
+                             "CREATE INDEX idx_labels_lod_rank ON labels(lod,rank DESC);",
                              error,
                              error_size);
         }

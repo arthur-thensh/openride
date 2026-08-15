@@ -7,10 +7,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define OPENRIDE_ORMAP_FORMAT_VERSION 5U
-#define OPENRIDE_ORMAP_MIN_ROAD_ZOOM 10
+#define OPENRIDE_ORMAP_FORMAT_VERSION 6U
+/* v6 stores four semantic road LODs instead of regenerating every zoom. */
+#define OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM 8
+#define OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM 10
+#define OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM 12
+#define OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM 14
+#define OPENRIDE_ORMAP_MIN_ROAD_ZOOM OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM
 /* Road geometry is detailed enough at z14 and is scaled above that zoom. */
-#define OPENRIDE_ORMAP_ROAD_DATA_MAX_ZOOM 14
+#define OPENRIDE_ORMAP_ROAD_DATA_MAX_ZOOM OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM
 #define OPENRIDE_ORMAP_MAX_ZOOM 16
 /* z16 / 32 gives roughly 10-20 m semantic cells in northern France. */
 #define OPENRIDE_ORMAP_MASK_ZOOM 16
@@ -128,11 +133,19 @@ typedef struct OpenRideORMapMaskTile {
     size_t layer_bytes;
 } OpenRideORMapMaskTile;
 
+typedef enum OpenRideORMapLabelLOD {
+    OPENRIDE_ORMAP_LABEL_LOD_REGIONAL = 0,
+    OPENRIDE_ORMAP_LABEL_LOD_OVERVIEW = 1,
+    OPENRIDE_ORMAP_LABEL_LOD_LOCAL = 2,
+    OPENRIDE_ORMAP_LABEL_LOD_DETAIL = 3
+} OpenRideORMapLabelLOD;
+
 typedef struct OpenRideORMapLabel {
     int32_t lat_e7;
     int32_t lon_e7;
     int kind;
     int rank;
+    uint8_t lod;
     char name[96];
 } OpenRideORMapLabel;
 
@@ -152,6 +165,10 @@ typedef struct OpenRideORMapBuildStats {
     uint64_t routing_segments_seen;
     uint64_t road_records_written;
     uint64_t road_tiles_written;
+    uint64_t road_regional_records;
+    uint64_t road_overview_records;
+    uint64_t road_local_records;
+    uint64_t road_detail_records;
     uint64_t map_features_seen;
     uint64_t map_relations_seen;
     uint64_t multipolygon_relations;
@@ -173,6 +190,10 @@ typedef struct OpenRideORMapBuildStats {
     uint64_t area_polygons_skipped;
     uint64_t mask_tiles_written;
     uint64_t labels_written;
+    uint64_t label_regional_count;
+    uint64_t label_overview_count;
+    uint64_t label_local_count;
+    uint64_t label_detail_count;
 } OpenRideORMapBuildStats;
 
 OpenRideORMap *openride_ormap_open(const char *path,
