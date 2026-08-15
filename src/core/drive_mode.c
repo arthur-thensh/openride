@@ -98,18 +98,18 @@ double openride_drive_mode_target_zoom(double speed_mps, double maneuver_distanc
     const double speed_kph = fmax(0.0, speed_mps) * 3.6;
 
     /*
-     * Keep the rider closer to the road than the first Android DriveMode
-     * tuning. The look-ahead is handled separately so map scale can stay
-     * stable while the framing anticipates an upcoming maneuver.
+     * Keep the road and immediate navigation context dominant on a phone.
+     * The maneuver look-ahead is handled separately, so this scale can stay
+     * deliberately tighter without sacrificing forward anticipation.
      */
-    double zoom = 17.8;
+    double zoom = 18.0;
 
-    if (speed_kph >= 110.0) zoom = 15.2;
-    else if (speed_kph >= 90.0) zoom = 15.6;
-    else if (speed_kph >= 70.0) zoom = 16.0;
-    else if (speed_kph >= 50.0) zoom = 16.5;
-    else if (speed_kph >= 30.0) zoom = 17.0;
-    else if (speed_kph >= 15.0) zoom = 17.4;
+    if (speed_kph >= 110.0) zoom = 16.0;
+    else if (speed_kph >= 90.0) zoom = 16.4;
+    else if (speed_kph >= 70.0) zoom = 16.8;
+    else if (speed_kph >= 50.0) zoom = 17.2;
+    else if (speed_kph >= 30.0) zoom = 17.5;
+    else if (speed_kph >= 15.0) zoom = 17.8;
 
     if (isfinite(maneuver_distance_m)) {
         if (maneuver_distance_m < 90.0) zoom += 0.8;
@@ -117,7 +117,7 @@ double openride_drive_mode_target_zoom(double speed_mps, double maneuver_distanc
         else if (maneuver_distance_m < 500.0) zoom += 0.25;
     }
 
-    return clampd(zoom, 14.8, 18.0);
+    return clampd(zoom, 15.6, 18.0);
 }
 
 double openride_drive_mode_lookahead_m(double speed_mps)
