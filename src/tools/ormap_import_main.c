@@ -33,6 +33,10 @@ int main(int argc, char **argv)
     printf("  segments routiers : %" PRIu64 "\n", stats.routing_segments_seen);
     printf("  enregistrements    : %" PRIu64 "\n", stats.road_records_written);
     printf("  tuiles routes      : %" PRIu64 "\n", stats.road_tiles_written);
+    printf("  routes regional    : %" PRIu64 " segments\n", stats.road_regional_records);
+    printf("  routes overview    : %" PRIu64 " segments\n", stats.road_overview_records);
+    printf("  routes local       : %" PRIu64 " segments\n", stats.road_local_records);
+    printf("  routes detail      : %" PRIu64 " segments\n", stats.road_detail_records);
     printf("  relations OSM      : %" PRIu64 "\n", stats.map_relations_seen);
     printf("  multipolygones     : %" PRIu64 "\n", stats.multipolygon_relations);
     printf("  anneaux outer      : %" PRIu64 "\n", stats.multipolygon_outer_rings);
@@ -56,5 +60,9 @@ int main(int argc, char **argv)
     printf("  foret               : %" PRIu64 "\n", stats.forest_polygons);
     printf("  tuiles masques     : %" PRIu64 "\n", stats.mask_tiles_written);
     printf("  labels              : %" PRIu64 "\n", stats.labels_written);
+    printf("  labels regional    : %" PRIu64 "\n", stats.label_regional_count);
+    printf("  labels overview    : %" PRIu64 "\n", stats.label_overview_count);
+    printf("  labels local       : %" PRIu64 "\n", stats.label_local_count);
+    printf("  labels detail      : %" PRIu64 "\n", stats.label_detail_count);
     return 0;
 }

@@ -1,4 +1,5 @@
 #include "openride/ormap.h"
+#include "openride/place_search.h"
 
 #include <sqlite3.h>
 #include <zlib.h>
@@ -172,15 +173,29 @@ static bool load_metadata(OpenRideORMap *map, char *error, size_t error_size)
     return true;
 }
 
+static uint8_t label_lod_from_kind(int kind)
+{
+    switch ((OpenRidePlaceKind)kind) {
+        case OPENRIDE_PLACE_CITY:
+            return OPENRIDE_ORMAP_LABEL_LOD_REGIONAL;
+        case OPENRIDE_PLACE_TOWN:
+            return OPENRIDE_ORMAP_LABEL_LOD_OVERVIEW;
+        case OPENRIDE_PLACE_VILLAGE:
+        case OPENRIDE_PLACE_SUBURB:
+            return OPENRIDE_ORMAP_LABEL_LOD_LOCAL;
+        default:
+            return OPENRIDE_ORMAP_LABEL_LOD_DETAIL;
+    }
+}
+
 static bool load_labels(OpenRideORMap *map, char *error, size_t error_size)
 {
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(map->db,
-                                "SELECT lat_e7,lon_e7,kind,rank,name "
-                                "FROM labels ORDER BY rank DESC",
-                                -1,
-                                &stmt,
-                                NULL);
+    const bool has_lod = map->metadata.format_version >= 6;
+    const char *sql = has_lod
+        ? "SELECT lat_e7,lon_e7,kind,rank,name,lod FROM labels ORDER BY lod,rank DESC"
+        : "SELECT lat_e7,lon_e7,kind,rank,name FROM labels ORDER BY rank DESC";
+    int rc = sqlite3_prepare_v2(map->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         /* Labels are optional in format v1 so old test fixtures stay useful. */
         return true;
@@ -212,6 +227,12 @@ static bool load_labels(OpenRideORMap *map, char *error, size_t error_size)
         label->kind = sqlite3_column_int(stmt, 2);
         label->rank = sqlite3_column_int(stmt, 3);
         const char *name = (const char *)sqlite3_column_text(stmt, 4);
+        label->lod = has_lod
+            ? (uint8_t)sqlite3_column_int(stmt, 5)
+            : label_lod_from_kind(label->kind);
+        if (label->lod > OPENRIDE_ORMAP_LABEL_LOD_DETAIL) {
+            label->lod = OPENRIDE_ORMAP_LABEL_LOD_DETAIL;
+        }
         snprintf(label->name, sizeof(label->name), "%s", name ? name : "");
     }
     sqlite3_finalize(stmt);

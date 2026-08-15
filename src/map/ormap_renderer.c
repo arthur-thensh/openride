@@ -1033,18 +1033,21 @@ static double android_road_class_fade(double zoom, int road_class)
 
 static void apply_road_fades(double zoom,
                              int road_class,
+                             double level_fade,
                              OpenRideMapRoadPaint *paint)
 {
     if (!paint) return;
     const double fade =
         ormap_detail_handoff_fade(zoom)
-        * android_road_class_fade(zoom, road_class);
+        * android_road_class_fade(zoom, road_class)
+        * level_fade;
     ormap_scale_color_alpha(&paint->line, fade);
     ormap_scale_color_alpha(&paint->casing, fade);
 }
 
 static void build_road_paint_table(OpenRideORMapRenderer *renderer,
                                    double zoom,
+                                   double level_fade,
                                    RoadPaintTable *table)
 {
     memset(table, 0, sizeof(*table));
@@ -1065,6 +1068,7 @@ static void build_road_paint_table(OpenRideORMapRenderer *renderer,
             apply_road_fades(
                 zoom,
                 road_class,
+                level_fade,
                 &table->paints[road_class]);
         }
     }
@@ -1266,13 +1270,6 @@ static int android_road_data_zoom(const OpenRideORMapMetadata *metadata,
 
     int zoom = (int)floor(camera_zoom);
 #ifdef __ANDROID__
-    /*
-     * Mobile source-LOD hysteresis.
-     *
-     * The ORMap itself already contains progressively denser road datasets.
-     * Delaying the next data level by roughly 0.75 zoom prevents a large
-     * geometry jump while the extra road hierarchy is still visually small.
-     */
     const int min_zoom = metadata->min_zoom;
     if (camera_zoom < 11.75) {
         zoom = min_zoom;
@@ -1292,6 +1289,19 @@ static int android_road_data_zoom(const OpenRideORMapMetadata *metadata,
     return zoom;
 }
 
+static void draw_roads_legacy(OpenRideORMapRenderer *renderer,
+                              const OpenRideMapCamera *camera,
+                              int width,
+                              int height,
+                              const OpenRideORMapMetadata *metadata)
+{
+    const int zoom = android_road_data_zoom(metadata, camera->zoom);
+    RoadPaintTable paint_table;
+    build_road_paint_table(renderer, camera->zoom, 1.0, &paint_table);
+    draw_road_pass(renderer, camera, width, height, zoom, &paint_table, true);
+    draw_road_pass(renderer, camera, width, height, zoom, &paint_table, false);
+}
+
 static void draw_roads(OpenRideORMapRenderer *renderer,
                        const OpenRideMapCamera *camera,
                        int width,
@@ -1299,16 +1309,50 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
 {
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     if (!metadata) return;
-    const int zoom = android_road_data_zoom(metadata, camera->zoom);
+    if (metadata->format_version < 6) {
+        draw_roads_legacy(renderer, camera, width, height, metadata);
+        return;
+    }
 
-    RoadPaintTable paint_table;
-    build_road_paint_table(renderer, camera->zoom, &paint_table);
+    const double regional_to_overview =
+        ormap_zoom_smoothstep(camera->zoom, 10.55, 11.25);
+    const double overview_to_local =
+        ormap_zoom_smoothstep(camera->zoom, 11.85, 12.80);
+    const double local_to_detail =
+        ormap_zoom_smoothstep(camera->zoom, 13.40, 14.40);
 
-    /* Render all casings first, then all coloured road strokes. Besides being
-     * visually cleaner at crossings, each pass is submitted in large geometry
-     * batches instead of issuing several SDL line calls per OSM segment. */
-    draw_road_pass(renderer, camera, width, height, zoom, &paint_table, true);
-    draw_road_pass(renderer, camera, width, height, zoom, &paint_table, false);
+    const int zooms[4] = {
+        OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM,
+        OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM,
+        OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM,
+        OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM
+    };
+    const double fades[4] = {
+        1.0 - regional_to_overview,
+        regional_to_overview * (1.0 - overview_to_local),
+        overview_to_local * (1.0 - local_to_detail),
+        local_to_detail
+    };
+    RoadPaintTable tables[4];
+    for (int i = 0; i < 4; ++i) {
+        build_road_paint_table(renderer, camera->zoom, fades[i], &tables[i]);
+    }
+
+    /* Keep road hierarchy coherent through a LOD handoff: all casings are
+     * submitted before all coloured strokes, even when two datasets overlap. */
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool casing = pass == 0;
+        for (int i = 0; i < 4; ++i) {
+            if (fades[i] <= 0.001) continue;
+            draw_road_pass(renderer,
+                           camera,
+                           width,
+                           height,
+                           zooms[i],
+                           &tables[i],
+                           casing);
+        }
+    }
 }
 
 static const char *label_kind_name(int kind)
@@ -1378,6 +1422,22 @@ static double label_fade_factor(const char *kind, double zoom)
     return ormap_zoom_smoothstep(zoom, start, start + 0.65);
 }
 
+static double label_lod_fade(const OpenRideORMapLabel *label, double zoom)
+{
+    if (!label) return 0.0;
+    switch ((OpenRideORMapLabelLOD)label->lod) {
+        case OPENRIDE_ORMAP_LABEL_LOD_REGIONAL:
+            return ormap_zoom_smoothstep(zoom, 10.0, 10.55);
+        case OPENRIDE_ORMAP_LABEL_LOD_OVERVIEW:
+            return ormap_zoom_smoothstep(zoom, 10.55, 11.25);
+        case OPENRIDE_ORMAP_LABEL_LOD_LOCAL:
+            return ormap_zoom_smoothstep(zoom, 11.85, 12.80);
+        case OPENRIDE_ORMAP_LABEL_LOD_DETAIL:
+        default:
+            return ormap_zoom_smoothstep(zoom, 13.40, 14.10);
+    }
+}
+
 static OpenRidePointD label_world_to_screen(OpenRidePointD world,
                                                 OpenRidePointD center,
                                                 double world_size,
@@ -1413,6 +1473,7 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
     uint32_t count = 0U;
     const OpenRideORMapLabel *labels = openride_ormap_labels(renderer->map, &count);
     if (!labels || count == 0U) return;
+    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
 
     const OpenRidePointD center =
         openride_mercator_forward(camera->center_lat, camera->center_lon);
@@ -1486,9 +1547,11 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
 
         const bool persistent_region_reference =
             label_is_region_reference(labels, count, i);
-        const double label_fade = persistent_region_reference
-            ? detail_label_fade
-            : detail_label_fade * label_fade_factor(kind, camera->zoom);
+        const double label_fade = metadata && metadata->format_version >= 6
+            ? detail_label_fade * label_lod_fade(label, camera->zoom)
+            : (persistent_region_reference
+                ? detail_label_fade
+                : detail_label_fade * label_fade_factor(kind, camera->zoom));
         if (label_fade <= 0.0) continue;
 
         OpenRideMapColor label_halo = palette.label_halo;

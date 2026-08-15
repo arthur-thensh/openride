@@ -144,7 +144,10 @@ int main(int argc, char **argv)
 {
     assert(argc == 2);
     assert(OPENRIDE_ORMAP_AREA_GREEN == 3);
-    assert(OPENRIDE_ORMAP_FORMAT_VERSION == 5U);
+    assert(OPENRIDE_ORMAP_FORMAT_VERSION == 6U);
+    assert(OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM < OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM);
+    assert(OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM < OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM);
+    assert(OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM < OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM);
     assert(OPENRIDE_ORMAP_AREA_REGIONAL_ZOOM < OPENRIDE_ORMAP_AREA_OVERVIEW_ZOOM);
     assert(OPENRIDE_ORMAP_AREA_OVERVIEW_ZOOM < OPENRIDE_ORMAP_AREA_LOCAL_ZOOM);
     assert(OPENRIDE_ORMAP_AREA_LOCAL_ZOOM == OPENRIDE_ORMAP_AREA_COARSE_ZOOM);
@@ -179,12 +182,24 @@ int main(int argc, char **argv)
                                 sizeof(error)));
     assert(map_stats.routing_segments_seen > 0U);
     assert(map_stats.road_tiles_written > 0U);
+    assert(map_stats.road_detail_records > 0U);
+    assert(map_stats.road_records_written
+           == map_stats.road_regional_records
+            + map_stats.road_overview_records
+            + map_stats.road_local_records
+            + map_stats.road_detail_records);
+    assert(map_stats.labels_written
+           == map_stats.label_regional_count
+            + map_stats.label_overview_count
+            + map_stats.label_local_count
+            + map_stats.label_detail_count);
 
     OpenRideORMap *map = openride_ormap_open(map_path, error, sizeof(error));
     assert(map != NULL);
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(map);
     assert(metadata != NULL);
     assert(metadata->format_version == (int)OPENRIDE_ORMAP_FORMAT_VERSION);
+    assert(metadata->min_zoom == OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM);
     assert(metadata->max_zoom == OPENRIDE_ORMAP_MAX_ZOOM);
     assert(metadata->road_max_zoom == OPENRIDE_ORMAP_ROAD_DATA_MAX_ZOOM);
     assert(metadata->mask_zoom == OPENRIDE_ORMAP_MASK_ZOOM);
