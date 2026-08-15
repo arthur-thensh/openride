@@ -256,13 +256,18 @@ bool openride_map_zoom_test_record_present(
 
     const bool written = write_results(test);
     if (status && status_size > 0U) {
-        snprintf(status,
-                 status_size,
-                 written
-                     ? "test zoom termine: data/%s (%zu frames)"
-                     : "test zoom termine mais log impossible (%zu frames)",
-                 written ? OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME : "",
-                 test->sample_count);
+        if (written) {
+            snprintf(status,
+                     status_size,
+                     "test zoom termine: data/%s (%zu frames)",
+                     OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME,
+                     test->sample_count);
+        } else {
+            snprintf(status,
+                     status_size,
+                     "test zoom termine mais log impossible (%zu frames)",
+                     test->sample_count);
+        }
     }
     release_samples(test);
     test->active = false;
