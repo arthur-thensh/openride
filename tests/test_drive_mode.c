@@ -17,10 +17,15 @@ static void test_gps_quality(void)
 static void test_auto_zoom(void)
 {
     const double city = openride_drive_mode_target_zoom(5.0, 1000.0);
+    const double cruise_60 =
+        openride_drive_mode_target_zoom(60.0 / 3.6, 1000.0);
     const double motorway = openride_drive_mode_target_zoom(33.0, 1000.0);
     const double near_turn = openride_drive_mode_target_zoom(20.0, 50.0);
     const double far_turn = openride_drive_mode_target_zoom(20.0, 1000.0);
-    assert(city > motorway);
+
+    assert(city > cruise_60);
+    assert(cruise_60 > motorway);
+    assert(fabs(cruise_60 - 16.5) < 1e-9);
     assert(near_turn > far_turn);
 }
 

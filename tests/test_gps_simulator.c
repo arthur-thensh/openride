@@ -48,6 +48,21 @@ int main(void)
     assert(openride_gps_simulator_sample(&simulator, &sample));
     assert(fabs(sample.lat - no_offset_lat) > 0.0005);
 
+    /*
+     * Installing a rerouted geometry must clear a temporary DEV deviation.
+     * v0.26-B relies on this to resume on the recalculated route.
+     */
+    assert(openride_gps_simulator_set_route(&simulator,
+                                            &route,
+                                            36.0,
+                                            error,
+                                            sizeof(error)));
+    assert(fabs(simulator.lateral_offset_m) < 1e-9);
+    assert(openride_gps_simulator_sample(&simulator, &sample));
+    assert(fabs(sample.lat - 50.0) < 1e-7);
+    assert(fabs(sample.lon - 3.0) < 1e-7);
+
+    openride_gps_simulator_start(&simulator);
     openride_gps_simulator_stop(&simulator);
     assert(openride_gps_simulator_update(&simulator, 0.5, &sample));
     assert(sample.speed_mps == 0.0);
