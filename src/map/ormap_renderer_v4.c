@@ -1,5 +1,6 @@
 #include "map/ormap_renderer.h"
 
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
@@ -30,11 +31,6 @@ void openride_ormap_renderer_draw_layer_legacy(
     int viewport_width,
     int viewport_height,
     OpenRideORMapRenderLayer layer);
-
-void openride_ormap_renderer_draw_legacy(OpenRideORMapRenderer *renderer,
-                                         const OpenRideMapCamera *camera,
-                                         int viewport_width,
-                                         int viewport_height);
 
 static double v4_smoothstep(double value, double start, double end)
 {
