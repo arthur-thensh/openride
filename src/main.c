@@ -43,6 +43,7 @@
 #include "openride/ui_search_overlay.h"
 #include "openride/ui_route_downloads_panel.h"
 #include "openride/ui_drive_hud.h"
+#include "openride/ui_map_overlay.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -1338,269 +1339,239 @@ static void format_duration(double seconds, char *text, size_t text_size)
     }
 }
 
-static void draw_overlay(SDL_Renderer *renderer,
-                         const OpenRideMapCamera *camera,
-                         const OpenRideMapSelection *selection,
-                         const OpenRideMBTilesMetadata *metadata,
-                         bool scalable_map,
-                         bool graph_loaded,
-                         OpenRideRoutingProfile profile,
-                         OpenRideMapStyle map_style,
-                         const OpenRideRoute *route,
-                         bool route_valid,
-                         const char *route_status,
-                         const OpenRideRoutingSnap *start_snap,
-                         const OpenRideRoutingSnap *destination_snap,
-                         bool loop_active,
-                         double loop_target_distance_m,
-                         OpenRideLoopDirection loop_direction,
-                         const OpenRideLoopStats *loop_stats,
-                         const OpenRideGPXDocument *gpx_document,
-                         bool gpx_loaded,
-                         bool gpx_recording,
-                         bool gpx_navigation,
-                         int viewport_width,
-                         int viewport_height)
+static void draw_map_status_overlay(
+    SDL_Renderer *renderer,
+    const OpenRideMapCamera *camera,
+    const OpenRideMapSelection *selection,
+    const OpenRideMBTilesMetadata *metadata,
+    bool scalable_map,
+    bool graph_loaded,
+    OpenRideRoutingProfile profile,
+    OpenRideMapStyle map_style,
+    const OpenRideRoute *route,
+    bool route_valid,
+    const char *route_status,
+    const OpenRideRoutingSnap *start_snap,
+    const OpenRideRoutingSnap *destination_snap,
+    bool loop_active,
+    double loop_target_distance_m,
+    OpenRideLoopDirection loop_direction,
+    const OpenRideLoopStats *loop_stats,
+    const OpenRideGPXDocument *gpx_document,
+    bool gpx_loaded,
+    bool gpx_recording,
+    bool gpx_navigation,
+    bool compact,
+    int viewport_width,
+    int viewport_height)
 {
-    const float panel_x = 10.0f;
-    const float panel_y = 10.0f;
-    const float panel_w = 500.0f;
-    const float panel_h = 238.0f;
-    SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
+    if (!renderer || !camera || !selection) return;
 
-    SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
-    SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
-    SDL_RenderRect(renderer, &panel);
+    OpenRideUIMapOverlayState state = {
+        .compact = compact,
+        .title = compact ? "OpenRide" : "OpenRide v0.23",
+        .route_ready = route_valid,
+        .route_ready_text = "TRAJET PRET - touche DEMARRER"
+    };
 
-    SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer, panel_x + 12.0f, panel_y + 10.0f, "OpenRide v0.23");
+    char summary[128] = {0};
+    char lines[OPENRIDE_UI_MAP_OVERLAY_MAX_LINES][192] = {{0}};
+    char distance_title[40] = {0};
+    char distance_text[32] = {0};
+    char duration_text[32] = {0};
 
-    SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugTextFormat(renderer,
-                              panel_x + 12.0f,
-                              panel_y + 25.0f,
-                              "centre %.5f %.5f  |  z %.1f  |  %s",
-                              camera->center_lat,
-                              camera->center_lon,
-                              camera->zoom,
-                              scalable_map ? openride_map_style_name(map_style) : "raster offline");
-
-    if (selection->has_start) {
-        SDL_FRect chip = {panel_x + 12.0f, panel_y + 44.0f, 10.0f, 10.0f};
-        SDL_SetRenderDrawColor(renderer, 42, 157, 84, SDL_ALPHA_OPAQUE);
-        SDL_RenderFillRect(renderer, &chip);
-        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugTextFormat(renderer,
-                                  panel_x + 30.0f,
-                                  panel_y + 45.0f,
-                                  "Depart       %.5f  %.5f",
-                                  selection->start.lat,
-                                  selection->start.lon);
-    } else {
-        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugText(renderer,
-                            panel_x + 12.0f,
-                            panel_y + 45.0f,
-                            "Clique sur la carte pour choisir le depart");
-    }
-
-    if (selection->has_destination) {
-        SDL_FRect chip = {panel_x + 12.0f, panel_y + 60.0f, 10.0f, 10.0f};
-        SDL_SetRenderDrawColor(renderer, 214, 66, 57, SDL_ALPHA_OPAQUE);
-        SDL_RenderFillRect(renderer, &chip);
-        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugTextFormat(renderer,
-                                  panel_x + 30.0f,
-                                  panel_y + 61.0f,
-                                  "Destination  %.5f  %.5f",
-                                  selection->destination.lat,
-                                  selection->destination.lon);
-    } else if (selection->has_start) {
-        SDL_SetRenderDrawColor(renderer, 238, 241, 243, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugText(renderer,
-                            panel_x + 12.0f,
-                            panel_y + 61.0f,
-                            loop_active
-                                ? "Boucle generee depuis ce depart"
-                                : "Clique destination ou B pour generer une boucle");
-    }
-
-    SDL_SetRenderDrawColor(renderer,
-                           graph_loaded ? 116 : 226,
-                           graph_loaded ? 188 : 158,
-                           graph_loaded ? 118 : 74,
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugTextFormat(renderer,
-                              panel_x + 12.0f,
-                              panel_y + 79.0f,
-                              "Routage: %s  |  profil: %s",
-                              route_status ? route_status : "-",
-                              openride_routing_profile_name(profile));
-
-    if (route_valid && loop_active && loop_stats) {
-        SDL_SetRenderDrawColor(renderer, 224, 177, 112, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugTextFormat(renderer,
-                                  panel_x + 12.0f,
-                                  panel_y + 94.0f,
-                                  "Boucle: cible %.0f km | %s | score %.0f | repetition %.0f%%",
-                                  loop_target_distance_m / 1000.0,
-                                  openride_loop_direction_name(loop_direction),
-                                  loop_stats->score,
-                                  loop_stats->overlap_ratio * 100.0);
-    } else if (route_valid && gpx_navigation) {
-        SDL_SetRenderDrawColor(renderer, 190, 142, 214, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugTextFormat(renderer,
-                                  panel_x + 12.0f,
-                                  panel_y + 94.0f,
-                                  "navigation sur trace GPX | %.1f km",
-                                  route ? route->distance_m / 1000.0 : 0.0);
-    } else if (route_valid) {
-        SDL_SetRenderDrawColor(renderer, 150, 181, 210, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugTextFormat(renderer,
-                                  panel_x + 12.0f,
-                                  panel_y + 94.0f,
-                                  "accroche segment: depart %.1f m | arrivee %.1f m",
-                                  start_snap ? start_snap->distance_m : 0.0,
-                                  destination_snap ? destination_snap->distance_m : 0.0);
-    } else {
-        SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugText(renderer,
-                            panel_x + 12.0f,
-                            panel_y + 94.0f,
-                            "1 rapide | 2 balade | 3 trail");
-    }
-
-    SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugTextFormat(renderer,
-                              panel_x + 12.0f,
-                              panel_y + 110.0f,
-                              "B: generer boucle | +/-: %.0f km | O: direction %s",
-                              loop_target_distance_m / 1000.0,
-                              openride_loop_direction_name(loop_direction));
-
-    SDL_RenderDebugText(renderer,
-                        panel_x + 12.0f,
-                        panel_y + 126.0f,
-                        "M: style carte | 1 rapide | 2 balade | 3 trail");
-
-    SDL_RenderDebugText(renderer,
-                        panel_x + 12.0f,
-                        panel_y + 142.0f,
-                        "S: GPS | F: suivi | A: recalcul auto | X: ecart test | R: manuel");
-
-    SDL_RenderDebugText(renderer,
-                        panel_x + 12.0f,
-                        panel_y + 158.0f,
-                        "glisser: deplacer | clic droit: supprimer | C: effacer");
-
-    SDL_SetRenderDrawColor(renderer,
-                           gpx_loaded ? 190 : 157,
-                           gpx_loaded ? 142 : 166,
-                           gpx_loaded ? 214 : 174,
-                           SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugTextFormat(renderer,
-                              panel_x + 12.0f,
-                              panel_y + 174.0f,
-                              "GPX: %s | track %u | route %u | wpt %u%s",
-                              gpx_loaded ? "charge" : "aucun",
-                              gpx_document ? gpx_document->track_points.count : 0U,
-                              gpx_document ? gpx_document->route_points.count : 0U,
-                              gpx_document ? gpx_document->waypoints.count : 0U,
-                              gpx_recording ? " | ENREG" : "");
-
-    SDL_SetRenderDrawColor(renderer, 157, 166, 174, SDL_ALPHA_OPAQUE);
-    SDL_RenderDebugText(renderer,
-                        panel_x + 12.0f,
-                        panel_y + 190.0f,
-                        "I: importer GPX | N: naviguer GPX | E: exporter | G: enregistrer");
-
-    SDL_RenderDebugText(renderer,
-                        panel_x + 12.0f,
-                        panel_y + 206.0f,
-                        "/: recherche hors ligne");
-
-    if (route_valid || (selection->has_start && selection->has_destination)) {
-        double distance_m = selection->has_start && selection->has_destination
-            ? openride_geo_distance_m(selection->start.lat,
-                                      selection->start.lon,
-                                      selection->destination.lat,
-                                      selection->destination.lon)
-            : 0.0;
-        char distance_text[32];
-        char duration_text[32] = {0};
-        const char *title = "DISTANCE DIRECTE";
-
+    if (compact) {
         if (route_valid && route) {
-            distance_m = route->distance_m;
-            title = loop_active ? "BOUCLE HORS LIGNE" : "ITINERAIRE HORS LIGNE";
-            format_duration(route->estimated_time_s, duration_text, sizeof(duration_text));
-        }
-
-        if (distance_m >= 1000.0) {
-            snprintf(distance_text, sizeof(distance_text), "%.1f km", distance_m / 1000.0);
+            snprintf(summary,
+                     sizeof(summary),
+                     "%.1f km | %.0f min | %s",
+                     route->distance_m / 1000.0,
+                     route->estimated_time_s / 60.0,
+                     openride_routing_profile_name(profile));
         } else {
-            snprintf(distance_text, sizeof(distance_text), "%.0f m", distance_m);
+            snprintf(summary,
+                     sizeof(summary),
+                     "%.80s",
+                     route_status && route_status[0]
+                         ? route_status
+                         : "pret");
+        }
+        state.summary = summary;
+        state.attribution = metadata && metadata->attribution[0]
+            ? "(c) OpenStreetMap contributors | ODbL"
+            : NULL;
+    } else {
+        uint32_t line_count = 0U;
+
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "centre %.5f %.5f | z %.1f | %s",
+                 camera->center_lat,
+                 camera->center_lon,
+                 camera->zoom,
+                 scalable_map
+                     ? openride_map_style_name(map_style)
+                     : "raster offline");
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+
+        if (selection->has_start) {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "Depart %.5f %.5f",
+                     selection->start.lat,
+                     selection->start.lon);
+        } else {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "Clique sur la carte pour choisir le depart");
+        }
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+
+        if (selection->has_destination) {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "Destination %.5f %.5f",
+                     selection->destination.lat,
+                     selection->destination.lon);
+            state.lines[line_count] = lines[line_count];
+            ++line_count;
+        } else if (selection->has_start) {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "%s",
+                     loop_active
+                         ? "Boucle generee depuis ce depart"
+                         : "Clique destination ou B pour generer une boucle");
+            state.lines[line_count] = lines[line_count];
+            ++line_count;
         }
 
-        const float distance_w = 230.0f;
-        const float distance_h = route_valid ? 82.0f : 66.0f;
-        const float distance_x = viewport_width >= 760
-            ? (float)viewport_width - distance_w - 10.0f
-            : 10.0f;
-        const float distance_y = viewport_width >= 760
-            ? 10.0f
-            : panel_y + panel_h + 8.0f;
-        SDL_FRect distance_panel = {
-            distance_x,
-            distance_y,
-            distance_w,
-            distance_h
-        };
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "Routage: %.120s | profil: %s",
+                 route_status ? route_status : "-",
+                 openride_routing_profile_name(profile));
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
 
-        SDL_SetRenderDrawColor(renderer, 24, 28, 32, 218);
-        SDL_RenderFillRect(renderer, &distance_panel);
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
-        SDL_RenderRect(renderer, &distance_panel);
-
-        SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
-        SDL_RenderDebugText(renderer,
-                            distance_x + 14.0f,
-                            distance_y + 10.0f,
-                            title);
-        SDL_SetRenderDrawColor(renderer, 247, 248, 249, SDL_ALPHA_OPAQUE);
-        draw_scaled_text(renderer,
-                         distance_x + 14.0f,
-                         distance_y + 30.0f,
-                         1.75f,
-                         distance_text);
-        if (route_valid) {
-            SDL_SetRenderDrawColor(renderer, 174, 181, 188, SDL_ALPHA_OPAQUE);
-            SDL_RenderDebugText(renderer,
-                                distance_x + 14.0f,
-                                distance_y + 64.0f,
-                                duration_text);
+        if (route_valid && loop_active && loop_stats) {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "Boucle: cible %.0f km | %s | score %.0f | repetition %.0f%%",
+                     loop_target_distance_m / 1000.0,
+                     openride_loop_direction_name(loop_direction),
+                     loop_stats->score,
+                     loop_stats->overlap_ratio * 100.0);
+        } else if (route_valid && gpx_navigation) {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "navigation sur trace GPX | %.1f km",
+                     route ? route->distance_m / 1000.0 : 0.0);
+        } else if (route_valid) {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "accroche segment: depart %.1f m | arrivee %.1f m",
+                     start_snap ? start_snap->distance_m : 0.0,
+                     destination_snap ? destination_snap->distance_m : 0.0);
+        } else {
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "1 rapide | 2 balade | 3 trail");
         }
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "B: generer boucle | +/-: %.0f km | O: direction %s",
+                 loop_target_distance_m / 1000.0,
+                 openride_loop_direction_name(loop_direction));
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+
+        state.lines[line_count++] =
+            "M: style carte | 1 rapide | 2 balade | 3 trail";
+        state.lines[line_count++] =
+            "S: GPS | F: suivi | A: recalcul auto | X: ecart test | R: manuel";
+        state.lines[line_count++] =
+            "glisser: deplacer | clic droit: supprimer | C: effacer";
+
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "GPX: %s | track %u | route %u | wpt %u%s",
+                 gpx_loaded ? "charge" : "aucun",
+                 gpx_document ? gpx_document->track_points.count : 0U,
+                 gpx_document ? gpx_document->route_points.count : 0U,
+                 gpx_document ? gpx_document->waypoints.count : 0U,
+                 gpx_recording ? " | ENREG" : "");
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+
+        state.lines[line_count++] =
+            "I: importer GPX | N: naviguer GPX | E: exporter | G: enregistrer";
+        state.lines[line_count++] = "/: recherche hors ligne";
+        state.line_count = line_count;
+
+        if (route_valid
+            || (selection->has_start && selection->has_destination)) {
+            double distance_m = selection->has_start
+                    && selection->has_destination
+                ? openride_geo_distance_m(selection->start.lat,
+                                          selection->start.lon,
+                                          selection->destination.lat,
+                                          selection->destination.lon)
+                : 0.0;
+            const char *title = "DISTANCE DIRECTE";
+
+            if (route_valid && route) {
+                distance_m = route->distance_m;
+                title = loop_active
+                    ? "BOUCLE HORS LIGNE"
+                    : "ITINERAIRE HORS LIGNE";
+                format_duration(route->estimated_time_s,
+                                duration_text,
+                                sizeof(duration_text));
+            }
+
+            snprintf(distance_title,
+                     sizeof(distance_title),
+                     "%s",
+                     title);
+            if (distance_m >= 1000.0) {
+                snprintf(distance_text,
+                         sizeof(distance_text),
+                         "%.1f km",
+                         distance_m / 1000.0);
+            } else {
+                snprintf(distance_text,
+                         sizeof(distance_text),
+                         "%.0f m",
+                         distance_m);
+            }
+
+            state.show_distance = true;
+            state.distance_title = distance_title;
+            state.distance_text = distance_text;
+            state.duration_text = duration_text;
+        }
+
+        state.attribution = metadata && metadata->attribution[0]
+            ? metadata->attribution
+            : NULL;
     }
 
-    if (metadata->attribution[0] != '\0' && viewport_height > 28) {
-        size_t text_len = strlen(metadata->attribution);
-        if (text_len > 90U) text_len = 90U;
-        const float backing_width = (float)(text_len * 8U + 12U);
-        SDL_FRect attribution_panel = {
-            8.0f,
-            (float)viewport_height - 24.0f,
-            backing_width,
-            16.0f
-        };
-        SDL_SetRenderDrawColor(renderer, 249, 249, 247, 210);
-        SDL_RenderFillRect(renderer, &attribution_panel);
-        SDL_SetRenderDrawColor(renderer, 65, 68, 70, 255);
-        SDL_RenderDebugText(renderer,
-                            14.0f,
-                            (float)viewport_height - 20.0f,
-                            metadata->attribution);
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui,
+                           renderer,
+                           viewport_width,
+                           viewport_height)) {
+        return;
     }
+    openride_ui_map_overlay_draw(&ui, &state);
+    openride_ui_end(&ui);
 }
 
 static void utf8_backspace(char *text)
@@ -2681,93 +2652,6 @@ static void draw_navigation_position(SDL_Renderer *renderer,
     SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
     draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
 }
-
-#ifdef __ANDROID__
-static void draw_android_status_overlay(SDL_Renderer *renderer,
-                                        const OpenRideMBTilesMetadata *metadata,
-                                        const OpenRideRoute *route,
-                                        bool route_valid,
-                                        const char *route_status,
-                                        OpenRideRoutingProfile profile,
-                                        int viewport_width,
-                                        int viewport_height)
-{
-    const SDL_Rect safe = openride_render_safe_area(renderer, viewport_width, viewport_height);
-    const float ui_scale = openride_ui_scale(renderer);
-    const float text_scale = ui_scale > 2.0f ? 2.0f : ui_scale;
-    const float attribution_scale = ui_scale > 1.5f ? 1.5f : ui_scale;
-    const float margin = 8.0f * ui_scale;
-    const float panel_x = (float)safe.x + margin;
-    const float panel_y = (float)safe.y + margin;
-    float panel_w = (float)safe.w - margin * 2.0f;
-    if (panel_w > 390.0f * ui_scale) panel_w = 390.0f * ui_scale;
-    if (panel_w < 180.0f * ui_scale) panel_w = 180.0f * ui_scale;
-    const float panel_h = (route_valid ? 64.0f : 48.0f) * ui_scale;
-    SDL_FRect panel = {panel_x, panel_y, panel_w, panel_h};
-
-    SDL_SetRenderDrawColor(renderer, 20, 24, 28, 205);
-    SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 55);
-    SDL_RenderRect(renderer, &panel);
-
-    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
-    draw_scaled_text(renderer,
-                     panel_x + 10.0f * ui_scale,
-                     panel_y + 7.0f * ui_scale,
-                     text_scale,
-                     "OpenRide");
-
-    SDL_SetRenderDrawColor(renderer, 185, 194, 202, 255);
-    char status_line[96];
-    if (route_valid && route) {
-        snprintf(status_line,
-                 sizeof(status_line),
-                 "%.1f km | %.0f min | %s",
-                 route->distance_m / 1000.0,
-                 route->estimated_time_s / 60.0,
-                 openride_routing_profile_name(profile));
-    } else {
-        snprintf(status_line,
-                 sizeof(status_line),
-                 "%.30s",
-                 route_status && route_status[0] ? route_status : "pret");
-    }
-    draw_scaled_text(renderer,
-                     panel_x + 10.0f * ui_scale,
-                     panel_y + 26.0f * ui_scale,
-                     text_scale,
-                     status_line);
-
-    if (route_valid) {
-        SDL_SetRenderDrawColor(renderer, 255, 214, 83, 255);
-        draw_scaled_text(renderer,
-                         panel_x + 10.0f * ui_scale,
-                         panel_y + 44.0f * ui_scale,
-                         text_scale,
-                         "TRAJET PRET - touche DEMARRER");
-    }
-
-    /* Keep OSM attribution visible, but above the gesture/navigation area and toolbar. */
-    if (metadata && metadata->attribution[0] != '\0') {
-        const float toolbar_clearance = 90.0f * ui_scale;
-        const float attribution_y = (float)(safe.y + safe.h) - toolbar_clearance;
-        if (attribution_y > panel_y + panel_h + 8.0f * ui_scale) {
-            SDL_FRect backing = {(float)safe.x + 8.0f * ui_scale,
-                                 attribution_y,
-                                 250.0f * ui_scale,
-                                 14.0f * ui_scale};
-            SDL_SetRenderDrawColor(renderer, 249, 249, 247, 210);
-            SDL_RenderFillRect(renderer, &backing);
-            SDL_SetRenderDrawColor(renderer, 65, 68, 70, 255);
-            draw_scaled_text(renderer,
-                             backing.x + 5.0f * ui_scale,
-                             backing.y + 3.0f * ui_scale,
-                             attribution_scale,
-                             "(c) OpenStreetMap contributors | ODbL");
-        }
-    }
-}
-#endif
 
 static void draw_navigation_overlay(SDL_Renderer *renderer,
                                     const OpenRideNavigationState *navigation,
@@ -7368,42 +7252,36 @@ int main(int argc, char **argv)
         if (!drive_mode.active) {
             draw_center_marker(renderer, width, height);
         }
-#ifdef __ANDROID__
         if (!drive_mode.active) {
-            draw_android_status_overlay(renderer,
+            draw_map_status_overlay(renderer,
+                                    &camera,
+                                    &selection,
                                     metadata,
+                                    scalable_map,
+                                    graph_loaded,
+                                    routing_profile,
+                                    map_style,
                                     &route,
                                     route_valid,
                                     route_status,
-                                    routing_profile,
+                                    &start_snap,
+                                    &destination_snap,
+                                    loop_active,
+                                    loop_target_distance_m,
+                                    loop_direction,
+                                    &loop_stats,
+                                    &gpx_overlay,
+                                    gpx_loaded,
+                                    gpx_recording_active,
+                                    gpx_navigation_active,
+#ifdef __ANDROID__
+                                    true,
+#else
+                                    false,
+#endif
                                     width,
                                     height);
         }
-#else
-        draw_overlay(renderer,
-                     &camera,
-                     &selection,
-                     metadata,
-                     scalable_map,
-                     graph_loaded,
-                     routing_profile,
-                     map_style,
-                     &route,
-                     route_valid,
-                     route_status,
-                     &start_snap,
-                     &destination_snap,
-                     loop_active,
-                     loop_target_distance_m,
-                     loop_direction,
-                     &loop_stats,
-                     &gpx_overlay,
-                     gpx_loaded,
-                     gpx_recording_active,
-                     gpx_navigation_active,
-                     width,
-                     height);
-#endif
         if (!drive_mode.active) {
             draw_navigation_overlay(renderer,
                                     &navigation_state,
