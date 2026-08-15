@@ -86,6 +86,7 @@ add_library(openride_core STATIC
     src/map/ormap.c
     src/map/ormap_builder.c
     src/map/ormap_builder_v4.c
+    src/map/ormap_builder_v7.c
     src/map/ormap_landcover_mesh.c
     src/map/mvt.c
     src/map/map_style.c
@@ -103,6 +104,13 @@ set_source_files_properties(
     PROPERTIES
         COMPILE_DEFINITIONS
             "openride_ormap_build=openride_ormap_build_legacy"
+)
+
+set_source_files_properties(
+    src/map/ormap_builder_v4.c
+    PROPERTIES
+        COMPILE_DEFINITIONS
+            "openride_ormap_build=openride_ormap_build_v6"
 )
 
 target_include_directories(openride_core
@@ -134,6 +142,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/ormap_renderer.c
     src/map/map_zoom_test_logger.c
     src/map/ormap_renderer_v4.c
+    src/map/ormap_renderer_v7.c
     src/map/ormap_trig_cache.c
     src/map/map_world.c
 )
@@ -145,6 +154,13 @@ set_property(
         sin=openride_ormap_cached_sin
         openride_ormap_renderer_draw_layer=openride_ormap_renderer_draw_layer_legacy
         openride_ormap_renderer_draw=openride_ormap_renderer_draw_legacy
+)
+
+set_property(
+    SOURCE src/map/ormap_renderer_v4.c
+    APPEND PROPERTY COMPILE_DEFINITIONS
+        openride_ormap_renderer_draw_layer=openride_ormap_renderer_draw_layer_v6
+        openride_ormap_renderer_draw=openride_ormap_renderer_draw_v6
 )
 
 if(ANDROID)
