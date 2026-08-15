@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """One-shot guarded migration for UI Engine V1.14 navigation overlay.
 
-Moves the non-drive navigation status panel from raw SDL drawing in main.c to
-ui_navigation_overlay on desktop. On Android, this legacy intermediate HUD is
-hidden entirely: the normal map UI remains visible until the Drive HUD takes
-over when active navigation starts.
+Desktop keeps a non-drive navigation diagnostics overlay rendered by the UI
+engine. Android deliberately has no intermediate navigation-status panel: the
+normal map stays clear until the Drive HUD takes over.
 
-Navigation, instruction lookup, ETA computation, trip statistics, simulator
-state and reroute state remain owned by main.c; the UI component receives only
-preformatted text lines.
+The migration is intentionally re-runnable. It can fix both a pre-V1.14
+main.c and a main.c that already received the first V1.14 implementation.
 
 This script does not build, test, commit, or push anything.
 """
@@ -48,6 +46,8 @@ def replace_block(text: str,
 
 
 def prepare_cmake(text: str) -> str:
+    if "src/ui/ui_navigation_overlay.c" in text:
+        return text
     return replace_once(
         text,
         "    src/ui/ui_drive_hud.c\n"
@@ -61,20 +61,8 @@ def prepare_cmake(text: str) -> str:
     )
 
 
-def prepare_main(text: str) -> str:
-    text = replace_once(
-        text,
-        '#include "openride/ui_drive_hud.h"\n'
-        '#include "openride/ui_map_overlay.h"\n'
-        '#include "openride/drive_mode.h"',
-        '#include "openride/ui_drive_hud.h"\n'
-        '#include "openride/ui_map_overlay.h"\n'
-        '#include "openride/ui_navigation_overlay.h"\n'
-        '#include "openride/drive_mode.h"',
-        "V1.14 UI include",
-    )
-
-    replacement = r'''static void draw_navigation_overlay(SDL_Renderer *renderer,
+def final_navigation_overlay() -> str:
+    return r'''static void draw_navigation_overlay(SDL_Renderer *renderer,
                                     const OpenRideNavigationState *navigation,
                                     const OpenRideNavigationInstructionList *instructions,
                                     const OpenRideGPSSimulator *simulator,
@@ -88,11 +76,7 @@ def prepare_main(text: str) -> str:
                                     int viewport_height)
 {
 #ifdef __ANDROID__
-    /*
-     * Android uses the compact map status until active navigation starts,
-     * then ui_drive_hud takes over. The old intermediate "NAVIGATION GPS
-     * REEL | ROUTAGE" panel is intentionally hidden to keep the map clear.
-     */
+    /* Android: keep the normal map clear until ui_drive_hud takes over. */
     (void)renderer;
     (void)navigation;
     (void)instructions;
@@ -252,11 +236,26 @@ def prepare_main(text: str) -> str:
 
 '''
 
+
+def prepare_main(text: str) -> str:
+    if '#include "openride/ui_navigation_overlay.h"' not in text:
+        text = replace_once(
+            text,
+            '#include "openride/ui_drive_hud.h"\n'
+            '#include "openride/ui_map_overlay.h"\n'
+            '#include "openride/drive_mode.h"',
+            '#include "openride/ui_drive_hud.h"\n'
+            '#include "openride/ui_map_overlay.h"\n'
+            '#include "openride/ui_navigation_overlay.h"\n'
+            '#include "openride/drive_mode.h"',
+            "V1.14 UI include",
+        )
+
     text = replace_block(
         text,
         "static void draw_navigation_overlay(",
         "static void draw_mobile_toolbar(",
-        replacement,
+        final_navigation_overlay(),
         "V1.14 navigation status overlay",
     )
 
@@ -267,7 +266,9 @@ def prepare_main(text: str) -> str:
     if text.count("static void draw_navigation_overlay(") != 1:
         raise RuntimeError("V1.14: navigation overlay definition count changed")
     if "NAVIGATION GPS REEL" in text:
-        raise RuntimeError("V1.14: Android navigation status HUD label remains")
+        raise RuntimeError("V1.14: Android navigation HUD code still remains")
+    if "Android: keep the normal map clear until ui_drive_hud takes over." not in text:
+        raise RuntimeError("V1.14: Android early return missing")
 
     return text
 
@@ -282,23 +283,28 @@ def main() -> int:
         MAIN: prepare_main(originals[MAIN]),
     }
 
-    for path, content in prepared.items():
-        if content == originals[path]:
-            raise RuntimeError(f"{path}: migration produced no change")
+    changed = [path for path in prepared if prepared[path] != originals[path]]
+    if not changed:
+        print("OK: UI Engine V1.14 is already applied")
+        print("Android intermediate navigation HUD is already disabled")
+        return 0
 
-    delta = len(originals[MAIN]) - len(prepared[MAIN])
-    if delta < -3000 or delta > 9000:
-        raise RuntimeError(
-            f"src/main.c: unexpected V1.14 size delta ({delta} bytes removed net)"
-        )
+    main_changed = prepared[MAIN] != originals[MAIN]
+    if main_changed:
+        delta = len(originals[MAIN]) - len(prepared[MAIN])
+        if delta < -6000 or delta > 14000:
+            raise RuntimeError(
+                f"src/main.c: unexpected V1.14 size delta ({delta} bytes removed net)"
+            )
 
-    for path, content in prepared.items():
-        path.write_text(content, encoding="utf-8")
+    for path in changed:
+        path.write_text(prepared[path], encoding="utf-8")
 
     print("OK: UI Engine V1.14 navigation overlay migration applied")
-    print("Changed: CMakeLists.txt, src/main.c")
-    print("Desktop non-drive navigation status now renders through UI Engine")
-    print("Android intermediate navigation status HUD is disabled")
+    for path in changed:
+        print(f"Changed: {path.relative_to(ROOT)}")
+    print("Desktop navigation diagnostics render through UI Engine")
+    print("Android intermediate navigation HUD is disabled")
     print("Android Drive HUD remains the active-navigation interface")
     print("Next: git diff --check && git diff -- CMakeLists.txt src/main.c")
     return 0
