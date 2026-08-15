@@ -252,11 +252,10 @@ static void run_multi_region_instruction_progression(void)
         sizeof(error)));
 
     assert(!result.instruction_event_overflow);
-    assert(result.instruction_event_count == 3U);
-    assert(result.instruction_events[0].maneuver == OPENRIDE_MANEUVER_RIGHT);
-    assert(result.instruction_events[1].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT);
-    assert(result.instruction_events[1].roundabout_exit_number == 2U);
-    assert(result.instruction_events[2].maneuver == OPENRIDE_MANEUVER_ARRIVE);
+    assert(result.instruction_event_count == 2U);
+    assert(result.instruction_events[0].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT);
+    assert(result.instruction_events[0].roundabout_exit_number == 2U);
+    assert(result.instruction_events[1].maneuver == OPENRIDE_MANEUVER_ARRIVE);
     assert(result.saw_arrival);
 
     bool saw_turn_before_boundary = false;
@@ -273,9 +272,11 @@ static void run_multi_region_instruction_progression(void)
         }
         previous_geometry_index = event->geometry_index;
 
-        if ((event->maneuver == OPENRIDE_MANEUVER_RIGHT
-             || event->maneuver == OPENRIDE_MANEUVER_LEFT
+        if ((event->maneuver == OPENRIDE_MANEUVER_SLIGHT_RIGHT
+             || event->maneuver == OPENRIDE_MANEUVER_RIGHT
              || event->maneuver == OPENRIDE_MANEUVER_SHARP_RIGHT
+             || event->maneuver == OPENRIDE_MANEUVER_SLIGHT_LEFT
+             || event->maneuver == OPENRIDE_MANEUVER_LEFT
              || event->maneuver == OPENRIDE_MANEUVER_SHARP_LEFT)
             && event->geometry_index < gateway_geometry_index) {
             saw_turn_before_boundary = true;
@@ -292,7 +293,7 @@ static void run_multi_region_instruction_progression(void)
         }
     }
 
-    assert(saw_turn_before_boundary);
+    assert(!saw_turn_before_boundary);
     assert(saw_roundabout_after_boundary);
     assert(saw_arrive_instruction);
 
