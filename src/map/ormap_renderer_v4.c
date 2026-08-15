@@ -415,17 +415,20 @@ static void v4_draw_coarse_landcover(OpenRideORMapRenderer *renderer,
                            int width,
                            int height)
 {
-    if (camera->zoom < 9.20 || camera->zoom > 13.85) return;
+    if (camera->zoom < 10.0 || camera->zoom > 14.45) return;
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     if (!metadata || metadata->format_version < 4) return;
 
-    const double urban_in = v4_smoothstep(camera->zoom, 9.70, 10.45);
-    const double green_in = v4_smoothstep(camera->zoom, 9.20, 10.05);
-    const double fade_out = 1.0 - v4_smoothstep(camera->zoom, 13.15, 13.75);
+    const double handoff_in =
+        v4_smoothstep(camera->zoom, 10.0, 11.30);
+    const double urban_out =
+        1.0 - v4_smoothstep(camera->zoom, 13.15, 13.75);
+    const double green_out =
+        1.0 - v4_smoothstep(camera->zoom, 13.40, 14.40);
     const OpenRideMapColor urban =
-        v4_builtup_color(renderer, false, urban_in * fade_out);
+        v4_builtup_color(renderer, false, handoff_in * urban_out);
     const OpenRideMapColor green =
-        v4_green_color(renderer, green_in * fade_out);
+        v4_green_color(renderer, handoff_in * green_out);
     if (urban.a == 0U && green.a == 0U) return;
 
     const int zoom = metadata->area_coarse_zoom;
@@ -611,12 +614,13 @@ void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     const bool v4 = metadata && metadata->format_version >= 4;
 
-    if (v4 && layer == OPENRIDE_ORMAP_RENDER_LAYER_AREAS) {
-        /* Low-zoom landcover stays below vector water, roads and labels. */
+    if (v4 && layer == OPENRIDE_ORMAP_RENDER_LAYER_MASKS) {
+        /* Coarse semantics are the background of the mask layer. Detailed
+         * forest/built-up masks are then drawn over them during the handoff. */
         v4_draw_coarse_landcover(renderer,
-                               camera,
-                               viewport_width,
-                               viewport_height);
+                                 camera,
+                                 viewport_width,
+                                 viewport_height);
     }
 
     openride_ormap_renderer_draw_layer_legacy(renderer,

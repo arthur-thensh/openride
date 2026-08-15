@@ -1304,10 +1304,12 @@ static bool world_reference_label_try_place(
 static void draw_major_city_labels(OpenRideMapWorld *world,
                                    const OpenRideMapCamera *camera,
                                    const OpenRideMapPalette *palette,
+                                   double opacity,
                                    int viewport_width,
                                    int viewport_height)
 {
-    if (!world || !world->renderer || !camera || !palette) return;
+    if (!world || !world->renderer || !camera || !palette
+        || opacity <= 0.0) return;
 
     WorldCityLabelBox boxes[WORLD_MAJOR_CITY_LABEL_MAX];
     uint32_t box_count = 0U;
@@ -1392,7 +1394,7 @@ static void draw_major_city_labels(OpenRideMapWorld *world,
                                        palette->label_halo.r,
                                        palette->label_halo.g,
                                        palette->label_halo.b,
-                                       245U);
+                                       openride_scaled_alpha(245U, opacity));
                 SDL_RenderDebugText(world->renderer,
                                     x - 1.0f,
                                     y,
@@ -1414,7 +1416,8 @@ static void draw_major_city_labels(OpenRideMapWorld *world,
                                        palette->label.r,
                                        palette->label.g,
                                        palette->label.b,
-                                       SDL_ALPHA_OPAQUE);
+                                       openride_scaled_alpha(
+                                           SDL_ALPHA_OPAQUE, opacity));
                 SDL_RenderDebugText(world->renderer, x, y, label->name);
             }
         }
@@ -1488,6 +1491,8 @@ void openride_map_world_draw(OpenRideMapWorld *world,
     }
 
     const OpenRideMapPalette palette = openride_map_palette(style);
+    const double overview_handoff =
+        1.0 - openride_zoom_smoothstep(camera->zoom, 10.0, 11.30);
     for (size_t i = 0U; i < world->region_count; ++i) {
         const OpenRideMapWorldRegion *region = &world->regions[i];
         if (skip_region_id && region->definition
@@ -1505,7 +1510,8 @@ void openride_map_world_draw(OpenRideMapWorld *world,
         boundary.a = camera->zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM ? 78U : 52U;
         const double boundary_fade_out =
             1.0 - openride_zoom_smoothstep(camera->zoom, 9.60, 10.70);
-        boundary.a = openride_scaled_alpha(boundary.a, boundary_fade_out);
+        boundary.a = openride_scaled_alpha(
+            boundary.a, boundary_fade_out * overview_handoff);
         draw_line_array(world,
                         camera,
                         &region->boundary,
@@ -1551,6 +1557,8 @@ void openride_map_world_draw(OpenRideMapWorld *world,
                     openride_zoom_smoothstep(camera->zoom, 9.65, 10.55);
                 color.a = openride_scaled_alpha(190U, primary_fade);
             }
+            color.a = openride_scaled_alpha(color.a, overview_handoff);
+            if (color.a == 0U) continue;
 
             int line_width = paint.width;
             if (camera->zoom < 8.0 && line_width > 2) line_width = 2;
@@ -1598,6 +1606,7 @@ void openride_map_world_draw(OpenRideMapWorld *world,
     draw_major_city_labels(world,
                            camera,
                            &palette,
+                           overview_handoff,
                            viewport_width,
                            viewport_height);
 }

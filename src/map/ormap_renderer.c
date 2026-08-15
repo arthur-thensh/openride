@@ -43,6 +43,11 @@ static uint8_t ormap_scaled_alpha(uint8_t alpha, double factor)
     return (uint8_t)lround((double)alpha * factor);
 }
 
+static double ormap_detail_handoff_fade(double zoom)
+{
+    return ormap_zoom_smoothstep(zoom, 10.0, 11.30);
+}
+
 static void ormap_scale_color_alpha(OpenRideMapColor *color, double factor)
 {
     if (!color) return;
@@ -627,8 +632,11 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
                        int width,
                        int height)
 {
-    if (camera->zoom < 14.0 || camera->zoom > 17.2) return;
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
+    const bool v4 = metadata && metadata->format_version >= 4;
+    const double mask_start = v4 ? 13.40 : 14.0;
+    const double mask_end = v4 ? 14.40 : 14.50;
+    if (camera->zoom < mask_start || camera->zoom > 17.2) return;
     const int zoom = metadata ? metadata->mask_zoom : OPENRIDE_ORMAP_MASK_ZOOM;
     const int count = 1 << zoom;
     const double scale = pow(2.0, camera->zoom - zoom);
@@ -653,7 +661,7 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
     OpenRideMapColor forest = forest_color(renderer->style);
 
     const double mask_fade =
-        ormap_zoom_smoothstep(camera->zoom, 14.0, 14.50);
+        ormap_zoom_smoothstep(camera->zoom, mask_start, mask_end);
     ormap_scale_color_alpha(&builtup, mask_fade);
     ormap_scale_color_alpha(&water, mask_fade);
     ormap_scale_color_alpha(&forest, mask_fade);
@@ -718,7 +726,8 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
                             int height,
                             int zoom,
                             bool draw_builtup,
-                            bool draw_water)
+                            bool draw_water,
+                            double level_fade)
 {
     const int count = 1 << zoom;
     const double scale = pow(2.0, camera->zoom - zoom);
@@ -743,9 +752,9 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
         area_color(renderer, OPENRIDE_ORMAP_AREA_WATER);
 
     const double water_fade =
-        ormap_zoom_smoothstep(camera->zoom, 10.75, 11.20);
+        ormap_detail_handoff_fade(camera->zoom) * level_fade;
     const double builtup_fade =
-        ormap_zoom_smoothstep(camera->zoom, 13.0, 13.45);
+        ormap_zoom_smoothstep(camera->zoom, 13.0, 13.45) * level_fade;
     ormap_scale_color_alpha(&water_color, water_fade);
     ormap_scale_color_alpha(&builtup_color, builtup_fade);
 
@@ -802,22 +811,30 @@ static void draw_areas(OpenRideORMapRenderer *renderer,
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     if (!metadata || metadata->format_version < 3 || camera->zoom < 10.0) return;
 
-    if (camera->zoom < 12.5) {
+    const double detail_mix =
+        ormap_zoom_smoothstep(camera->zoom, 12.15, 12.85);
+    const bool draw_detail_builtup =
+        camera->zoom >= 13.0;
+
+    if (detail_mix < 1.0) {
         draw_area_level(renderer,
                         camera,
                         width,
                         height,
                         metadata->area_coarse_zoom,
                         false,
-                        true);
-    } else {
+                        true,
+                        1.0 - detail_mix);
+    }
+    if (detail_mix > 0.0) {
         draw_area_level(renderer,
                         camera,
                         width,
                         height,
                         metadata->area_detail_zoom,
-                        camera->zoom >= 13.0,
-                        true);
+                        draw_detail_builtup,
+                        true,
+                        detail_mix);
     }
 }
 
@@ -1014,12 +1031,14 @@ static double android_road_class_fade(double zoom, int road_class)
 #endif
 }
 
-static void apply_android_road_fade(double zoom,
-                                    int road_class,
-                                    OpenRideMapRoadPaint *paint)
+static void apply_road_fades(double zoom,
+                             int road_class,
+                             OpenRideMapRoadPaint *paint)
 {
     if (!paint) return;
-    const double fade = android_road_class_fade(zoom, road_class);
+    const double fade =
+        ormap_detail_handoff_fade(zoom)
+        * android_road_class_fade(zoom, road_class);
     ormap_scale_color_alpha(&paint->line, fade);
     ormap_scale_color_alpha(&paint->casing, fade);
 }
@@ -1043,7 +1062,7 @@ static void build_road_paint_table(OpenRideORMapRenderer *renderer,
                 zoom,
                 road_class,
                 &table->paints[road_class]);
-            apply_android_road_fade(
+            apply_road_fades(
                 zoom,
                 road_class,
                 &table->paints[road_class]);
@@ -1422,7 +1441,7 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
      * detailed renderer becomes active.
      */
     const double detail_label_fade =
-        ormap_zoom_smoothstep(camera->zoom, 10.70, 11.30);
+        ormap_detail_handoff_fade(camera->zoom);
 
     for (uint32_t i = 0U; i < count && box_count < ORMAP_LABEL_BOX_MAX; ++i) {
         const OpenRideORMapLabel *label = &labels[i];
@@ -1468,7 +1487,7 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
         const bool persistent_region_reference =
             label_is_region_reference(labels, count, i);
         const double label_fade = persistent_region_reference
-            ? 1.0
+            ? detail_label_fade
             : detail_label_fade * label_fade_factor(kind, camera->zoom);
         if (label_fade <= 0.0) continue;
 
