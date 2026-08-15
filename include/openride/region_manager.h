@@ -22,6 +22,7 @@ typedef struct OpenRideRegionDefinition {
 typedef struct OpenRideRegionStatus {
     bool map_installed;
     bool ormap_installed;
+    bool ormap_current;
     bool legacy_map_installed;
     bool routing_installed;
     bool search_installed;
