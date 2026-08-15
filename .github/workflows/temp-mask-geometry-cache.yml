@@ -11,7 +11,7 @@ permissions:
 jobs:
   patch-build-test:
     if: github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-24.04
+    runs-on: macos-14
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -34,11 +34,6 @@ jobs:
             echo "::error title=Mask patch helper::$safe"
             exit "$status"
           fi
-
-      - name: Install desktop build prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config curl unzip
 
       - name: Bootstrap dependencies
         run: |
@@ -65,7 +60,7 @@ jobs:
       - name: Run desktop tests
         run: ./scripts/test.sh
 
-      - name: Validate Android toolchain packages
+      - name: Select JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
