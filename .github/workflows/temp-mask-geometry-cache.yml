@@ -57,6 +57,21 @@ jobs:
             exit "$status"
           fi
 
+      - name: Create MBTiles test fixture
+        run: |
+          mkdir -p data/maps
+          rm -f data/maps/demo.mbtiles
+          sqlite3 data/maps/demo.mbtiles <<'SQL'
+          CREATE TABLE metadata (name TEXT, value TEXT);
+          CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB);
+          INSERT INTO metadata VALUES ('name','OpenRide CI demo');
+          INSERT INTO metadata VALUES ('format','png');
+          INSERT INTO metadata VALUES ('minzoom','6');
+          INSERT INTO metadata VALUES ('maxzoom','8');
+          INSERT INTO metadata VALUES ('center','0,0,7');
+          INSERT INTO tiles VALUES (7,64,63,X'89504E470D0A1A0A00');
+          SQL
+
       - name: Run desktop tests
         shell: bash
         run: |
@@ -93,6 +108,7 @@ jobs:
 
       - name: Commit clean candidate
         run: |
+          rm -f data/maps/demo.mbtiles
           git rm .github/temp/apply_mask_geometry_cache.py .github/temp/fix_mask_helper.py .github/workflows/temp-mask-geometry-cache.yml
           git add src/map/ormap_renderer.h src/map/ormap_renderer.c src/map/map_world.c src/map/map_zoom_test_logger.c
           git diff --cached --check
