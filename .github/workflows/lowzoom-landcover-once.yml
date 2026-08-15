@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 8
+          fetch-depth: 9
 
       - name: Apply cartographic pipeline patch
         shell: bash
@@ -57,8 +57,13 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -G Ninja -DOPENRIDE_BUILD_TESTS=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
 
-      - name: Build
-        run: cmake --build build
+      - name: Build modified renderer and all test targets
+        shell: bash
+        run: |
+          cmake --build build --target CMakeFiles/openride.dir/src/map/ormap_renderer_v4.c.o
+          mapfile -t test_targets < <(ninja -C build -t targets all | sed -n 's/^\(test_[^:]*\):.*/\1/p' | sort -u)
+          test ${#test_targets[@]} -gt 0
+          cmake --build build --target "${test_targets[@]}"
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
