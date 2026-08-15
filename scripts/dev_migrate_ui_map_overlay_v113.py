@@ -321,7 +321,7 @@ def prepare_main(text: str) -> str:
         text,
         "#ifdef __ANDROID__\nstatic void draw_android_status_overlay(",
         "static void draw_navigation_overlay(",
-        "static void draw_navigation_overlay(",
+        "",
         "V1.13 remove Android status renderer",
     )
 
