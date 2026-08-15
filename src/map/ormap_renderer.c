@@ -16,6 +16,9 @@
 #define ORMAP_ROAD_PREWARM_TILE_BUDGET 3U
 #define ORMAP_ROAD_DRAW_LOAD_BUDGET 2U
 
+static OpenRideORMapRoadDebugStats g_last_road_debug_stats;
+static const OpenRideORMapRenderer *g_last_road_debug_renderer = NULL;
+
 typedef struct GeometryBatch {
     uint32_t vertex_count;
     uint32_t index_count;
@@ -446,7 +449,15 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
         --renderer->road_draw_load_budget_remaining;
     }
 
-    if (!victim) victim = oldest;
+    if (!victim) {
+        victim = oldest;
+        /* Speculative prewarm must not evict a tile used by the immediately
+         * previous rendered frame. The real draw path may still replace it. */
+        if (prewarm && victim->occupied
+            && victim->last_used + 1U >= renderer->frame_counter) {
+            return NULL;
+        }
+    }
     road_cache_entry_destroy(victim);
     victim->occupied = true;
     victim->zoom = zoom;
@@ -1350,11 +1361,12 @@ static uint32_t prewarm_road_level(OpenRideORMapRenderer *renderer,
                                    int width,
                                    int height,
                                    int zoom,
+                                   double viewport_zoom,
                                    uint32_t budget)
 {
     if (!renderer || !camera || budget == 0U) return 0U;
     const int count = 1 << zoom;
-    const double scale = pow(2.0, camera->zoom - zoom);
+    const double scale = pow(2.0, viewport_zoom - zoom);
     const double tile_size = ORMAP_TILE_SIZE * scale;
     const OpenRidePointD center = openride_mercator_forward(camera->center_lat,
                                                              camera->center_lon);
@@ -1377,7 +1389,9 @@ static uint32_t prewarm_road_level(OpenRideORMapRenderer *renderer,
         for (int tx = first_x; tx <= last_x; ++tx) {
             const int qx = wrap_x(tx, count);
             if (road_cache_contains(renderer, zoom, qx, ty)) continue;
-            (void)road_cache_slot(renderer, zoom, qx, ty, true, false);
+            OpenRideORMapRoadCacheEntry *entry =
+                road_cache_slot(renderer, zoom, qx, ty, true, false);
+            if (!entry) continue;
             if (++loaded >= budget) return loaded;
         }
     }
@@ -1385,8 +1399,10 @@ static uint32_t prewarm_road_level(OpenRideORMapRenderer *renderer,
 }
 
 static int road_prewarm_target_zoom(OpenRideORMapRenderer *renderer,
-                                    double camera_zoom)
+                                    double camera_zoom,
+                                    double *viewport_zoom)
 {
+    if (viewport_zoom) *viewport_zoom = -1.0;
     if (!renderer) return -1;
     if (!renderer->road_has_previous_camera_zoom) {
         renderer->road_previous_camera_zoom = camera_zoom;
@@ -1404,22 +1420,28 @@ static int road_prewarm_target_zoom(OpenRideORMapRenderer *renderer,
 
     if (renderer->road_zoom_direction > 0) {
         if (camera_zoom >= 12.80 && camera_zoom < 14.40) {
+            if (viewport_zoom) *viewport_zoom = 13.40;
             return OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM;
         }
         if (camera_zoom >= 11.15 && camera_zoom < 12.80) {
+            if (viewport_zoom) *viewport_zoom = 11.85;
             return OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM;
         }
         if (camera_zoom >= 9.95 && camera_zoom < 11.25) {
+            if (viewport_zoom) *viewport_zoom = 10.55;
             return OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM;
         }
     } else if (renderer->road_zoom_direction < 0) {
         if (camera_zoom <= 15.00 && camera_zoom > 13.40) {
+            if (viewport_zoom) *viewport_zoom = 14.40;
             return OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM;
         }
         if (camera_zoom <= 13.40 && camera_zoom > 11.85) {
+            if (viewport_zoom) *viewport_zoom = 12.80;
             return OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM;
         }
         if (camera_zoom <= 11.85 && camera_zoom > 10.55) {
+            if (viewport_zoom) *viewport_zoom = 11.25;
             return OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM;
         }
     }
@@ -1475,7 +1497,9 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
         return;
     }
 
-    const int prewarm_zoom = road_prewarm_target_zoom(renderer, camera->zoom);
+    double prewarm_view_zoom = -1.0;
+    const int prewarm_zoom =
+        road_prewarm_target_zoom(renderer, camera->zoom, &prewarm_view_zoom);
     renderer->road_debug.prewarm_zoom = prewarm_zoom;
     if (prewarm_zoom >= 0) {
         (void)prewarm_road_level(renderer,
@@ -1483,6 +1507,7 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
                                  width,
                                  height,
                                  prewarm_zoom,
+                                 prewarm_view_zoom,
                                  ORMAP_ROAD_PREWARM_TILE_BUDGET);
     }
 
@@ -1530,6 +1555,8 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
     }
     renderer->road_debug.roads_ms =
         (double)(SDL_GetTicksNS() - roads_started) / 1000000.0;
+    g_last_road_debug_stats = renderer->road_debug;
+    g_last_road_debug_renderer = renderer;
 }
 
 static const char *label_kind_name(int kind)
@@ -1830,7 +1857,16 @@ void openride_ormap_renderer_get_road_debug_stats(
     if (!stats) return;
     memset(stats, 0, sizeof(*stats));
     stats->prewarm_zoom = -1;
-    if (renderer) *stats = renderer->road_debug;
+    if (renderer && renderer == g_last_road_debug_renderer) {
+        *stats = renderer->road_debug;
+    } else if (g_last_road_debug_renderer) {
+        /* MapWorld owns the renderer actually used for installed regions.
+         * The DEV HUD asks the standalone renderer, so expose the most
+         * recently drawn ORMap road pass as a diagnostic fallback. */
+        *stats = g_last_road_debug_stats;
+    } else if (renderer) {
+        *stats = renderer->road_debug;
+    }
 }
 
 void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
