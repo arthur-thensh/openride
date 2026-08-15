@@ -2,9 +2,13 @@
 """One-shot guarded migration for UI Engine V1.14 navigation overlay.
 
 Moves the non-drive navigation status panel from raw SDL drawing in main.c to
-ui_navigation_overlay. Navigation, instruction lookup, ETA computation, trip
-statistics, simulator state and reroute state remain owned by main.c; the UI
-component receives only preformatted text lines.
+ui_navigation_overlay on desktop. On Android, this legacy intermediate HUD is
+hidden entirely: the normal map UI remains visible until the Drive HUD takes
+over when active navigation starts.
+
+Navigation, instruction lookup, ETA computation, trip statistics, simulator
+state and reroute state remain owned by main.c; the UI component receives only
+preformatted text lines.
 
 This script does not build, test, commit, or push anything.
 """
@@ -83,12 +87,27 @@ def prepare_main(text: str) -> str:
                                     bool gpx_navigation,
                                     int viewport_height)
 {
-    if (!gps_sample_valid || !navigation || !navigation->valid) return;
-
 #ifdef __ANDROID__
+    /*
+     * Android uses the compact map status until active navigation starts,
+     * then ui_drive_hud takes over. The old intermediate "NAVIGATION GPS
+     * REEL | ROUTAGE" panel is intentionally hidden to keep the map clear.
+     */
+    (void)renderer;
+    (void)navigation;
+    (void)instructions;
     (void)simulator;
+    (void)route;
+    (void)session;
+    (void)gps_sample_valid;
+    (void)follow_gps;
+    (void)auto_reroute;
     (void)deviation_enabled;
-#endif
+    (void)gpx_navigation;
+    (void)viewport_height;
+    return;
+#else
+    if (!gps_sample_valid || !navigation || !navigation->valid) return;
 
     int viewport_width = 0;
     int queried_height = viewport_height;
@@ -101,31 +120,17 @@ def prepare_main(text: str) -> str:
     char lines[OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES][160] = {{0}};
     uint32_t line_count = 0U;
 
-#ifdef __ANDROID__
-    snprintf(title,
-             sizeof(title),
-             "NAVIGATION GPS REEL%s",
-             gpx_navigation ? " | GPX" : " | ROUTAGE");
-#else
     snprintf(title,
              sizeof(title),
              "NAVIGATION GPS SIMULEE%s",
              gpx_navigation ? " | GPX" : " | ROUTAGE");
-#endif
     state.title = title;
 
-#ifdef __ANDROID__
-    snprintf(lines[line_count],
-             sizeof(lines[line_count]),
-             "%s | GPS actif",
-             openride_navigation_status_name(navigation->status));
-#else
     snprintf(lines[line_count],
              sizeof(lines[line_count]),
              "%s%s",
              openride_navigation_status_name(navigation->status),
              simulator && simulator->active ? " | lecture" : " | pause");
-#endif
     state.lines[line_count] = lines[line_count];
     ++line_count;
 
@@ -220,20 +225,12 @@ def prepare_main(text: str) -> str:
     }
 
     if (line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
-#ifdef __ANDROID__
-        snprintf(lines[line_count],
-                 sizeof(lines[line_count]),
-                 "GPS tactile | F suivi %s | A auto %s | R manuel",
-                 follow_gps ? "ON" : "OFF",
-                 auto_reroute ? "ON" : "OFF");
-#else
         snprintf(lines[line_count],
                  sizeof(lines[line_count]),
                  "S lecture | F suivi %s | A auto %s | X deviation %s | R manuel",
                  follow_gps ? "ON" : "OFF",
                  auto_reroute ? "ON" : "OFF",
                  deviation_enabled ? "ON" : "OFF");
-#endif
         state.lines[line_count] = lines[line_count];
         ++line_count;
     }
@@ -250,6 +247,7 @@ def prepare_main(text: str) -> str:
     }
     openride_ui_navigation_overlay_draw(&ui, &state);
     openride_ui_end(&ui);
+#endif
 }
 
 '''
@@ -265,9 +263,11 @@ def prepare_main(text: str) -> str:
     if "SDL_FRect panel = {x, y, w, h};" in text:
         raise RuntimeError("V1.14: raw legacy navigation panel remains")
     if text.count("openride_ui_navigation_overlay_draw(&ui, &state);") != 1:
-        raise RuntimeError("V1.14: expected one UI navigation overlay draw call")
+        raise RuntimeError("V1.14: expected one desktop UI navigation overlay draw call")
     if text.count("static void draw_navigation_overlay(") != 1:
         raise RuntimeError("V1.14: navigation overlay definition count changed")
+    if "NAVIGATION GPS REEL" in text:
+        raise RuntimeError("V1.14: Android navigation status HUD label remains")
 
     return text
 
@@ -297,8 +297,9 @@ def main() -> int:
 
     print("OK: UI Engine V1.14 navigation overlay migration applied")
     print("Changed: CMakeLists.txt, src/main.c")
-    print("Non-drive navigation status now renders through UI Engine")
-    print("Drive HUD remains the primary active-navigation interface")
+    print("Desktop non-drive navigation status now renders through UI Engine")
+    print("Android intermediate navigation status HUD is disabled")
+    print("Android Drive HUD remains the active-navigation interface")
     print("Next: git diff --check && git diff -- CMakeLists.txt src/main.c")
     return 0
 
