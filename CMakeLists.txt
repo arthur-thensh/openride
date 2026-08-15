@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.29.0 LANGUAGES C)
+project(OpenRide VERSION 0.31.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -123,7 +123,15 @@ set(OPENRIDE_APP_SOURCES
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
+    src/map/ormap_trig_cache.c
     src/map/map_world.c
+)
+
+set_property(
+    SOURCE src/map/ormap_renderer.c
+    APPEND PROPERTY COMPILE_DEFINITIONS
+        cos=openride_ormap_cached_cos
+        sin=openride_ormap_cached_sin
 )
 
 if(ANDROID)
