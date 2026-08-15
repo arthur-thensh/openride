@@ -63,6 +63,7 @@ add_library(openride_core STATIC
     src/core/voice_guidance.c
     src/core/location_filter.c
     src/core/gps_simulator.c
+    src/core/dev_missed_turn.c
     src/core/simulated_location_provider.c
     src/core/gpx.c
     src/core/place_search.c
@@ -337,6 +338,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_gps_simulator PRIVATE openride_core)
     add_test(NAME gps_simulator COMMAND test_gps_simulator)
+
+    add_executable(test_dev_missed_turn
+        tests/test_dev_missed_turn.c
+    )
+    target_link_libraries(test_dev_missed_turn PRIVATE openride_core)
+    add_test(NAME dev_missed_turn COMMAND test_dev_missed_turn)
 
     add_executable(test_navigation_scenarios
         tests/test_navigation_scenarios.c

@@ -10,6 +10,7 @@
 #include "openride/map_selection.h"
 #include "openride/loop_generator.h"
 #include "openride/gps_simulator.h"
+#include "openride/dev_missed_turn.h"
 #include "openride/gpx.h"
 #include "openride/navigation_engine.h"
 #include "openride/navigation_instructions.h"
@@ -75,6 +76,49 @@ typedef struct OpenRideLifecycleWatch {
 } OpenRideLifecycleWatch;
 
 #ifdef __ANDROID__
+typedef struct OpenRideAndroidMissedTurnDev {
+    OpenRideGPSSimulator simulator;
+    OpenRideDevMissedTurnPlan plan;
+    bool armed;
+    bool active;
+} OpenRideAndroidMissedTurnDev;
+
+static void openride_android_missed_turn_dev_init(
+    OpenRideAndroidMissedTurnDev *state)
+{
+    if (!state) return;
+    memset(state, 0, sizeof(*state));
+    openride_gps_simulator_init(&state->simulator);
+    openride_dev_missed_turn_plan_init(&state->plan);
+}
+
+static void openride_android_missed_turn_dev_reset(
+    OpenRideAndroidMissedTurnDev *state,
+    OpenRideSimulatedLocationContext *location_context,
+    OpenRideGPSSimulator *base_simulator)
+{
+    if (!state) return;
+    if (location_context
+        && location_context->simulator == &state->simulator) {
+        location_context->simulator = base_simulator;
+    }
+    openride_gps_simulator_clear_route(&state->simulator);
+    openride_dev_missed_turn_plan_destroy(&state->plan);
+    state->armed = false;
+    state->active = false;
+}
+
+static void openride_android_missed_turn_dev_destroy(
+    OpenRideAndroidMissedTurnDev *state,
+    OpenRideSimulatedLocationContext *location_context,
+    OpenRideGPSSimulator *base_simulator)
+{
+    if (!state) return;
+    openride_android_missed_turn_dev_reset(
+        state, location_context, base_simulator);
+    openride_gps_simulator_destroy(&state->simulator);
+}
+
 typedef struct OpenRideRegionPrepareThreadContext {
     OpenRidePlatformPaths paths;
     const OpenRideRegionDefinition *region;
@@ -2105,7 +2149,8 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
     OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION,
     OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED
+    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED,
+    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN
 } OpenRideMobilePanelAction;
 
 typedef struct OpenRideMobilePanelHit {
@@ -2289,7 +2334,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 8U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 9U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES
              || panel == OPENRIDE_APP_PANEL_HISTORY) rows = place_count;
 
@@ -2352,7 +2397,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
             };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
-            static const OpenRideMobilePanelAction actions[8] = {
+            static const OpenRideMobilePanelAction actions[9] = {
                 OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
@@ -2360,7 +2405,8 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION,
                 OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION,
-                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED
+                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED,
+                OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN
             };
             hit.action = actions[i];
         } else {
@@ -2387,6 +2433,8 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                                   bool simulated_gps_active,
                                   bool simulated_gps_deviation,
                                   double simulated_gps_time_scale,
+                                  bool simulated_missed_turn_armed,
+                                  bool simulated_missed_turn_active,
                                   const OpenRideRegionDefinition *region,
                                   const OpenRideRegionStatus *region_status,
                                   bool region_is_active,
@@ -2418,7 +2466,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
-    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 8U;
+    else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 9U;
     else if (panel == OPENRIDE_APP_PANEL_FAVORITES) rows = favorite_count;
     else if (panel == OPENRIDE_APP_PANEL_HISTORY) rows = history_count;
 
@@ -2639,7 +2687,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
         mobile_draw_panel_title(renderer, &layout, "PARAMETRES", "Touche une ligne pour modifier");
-        char labels[8][96];
+        char labels[9][96];
         snprintf(labels[0], sizeof(labels[0]), "Style carte : %s", openride_map_style_name(map_style));
         snprintf(labels[1], sizeof(labels[1]), "Profil routage : %s", openride_routing_profile_name(profile));
         snprintf(labels[2], sizeof(labels[2]), "Suivi GPS : %s", follow_gps ? "OUI" : "NON");
@@ -2658,13 +2706,26 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                  sizeof(labels[7]),
                  "Vitesse simulation [DEV] : x%.0f",
                  simulated_gps_time_scale);
-        for (uint32_t i = 0U; i < 8U; ++i) {
+        snprintf(labels[8],
+                 sizeof(labels[8]),
+                 "Virage rate reel [DEV] : %s",
+                 simulated_missed_turn_active
+                     ? "MAUVAISE ROUTE"
+                     : simulated_missed_turn_armed
+                         ? "ARME"
+                         : simulated_gps_active
+                             ? "DECLENCHER"
+                             : "GPS SIMULE REQUIS");
+        for (uint32_t i = 0U; i < 9U; ++i) {
             mobile_draw_button(renderer,
                                &layout.rows[i],
                                labels[i],
                                layout.text_scale,
                                (i == 5U && simulated_gps_active)
-                                   || (i == 6U && simulated_gps_deviation),
+                                   || (i == 6U && simulated_gps_deviation)
+                                   || (i == 8U
+                                       && (simulated_missed_turn_armed
+                                           || simulated_missed_turn_active)),
                                false);
         }
         mobile_draw_button(renderer, &layout.back, "Retour", layout.text_scale, false, false);
@@ -2786,6 +2847,8 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            bool simulated_gps_active,
                            bool simulated_gps_deviation,
                            double simulated_gps_time_scale,
+                           bool simulated_missed_turn_armed,
+                           bool simulated_missed_turn_active,
                            const OpenRideRegionDefinition *region,
                            const OpenRideRegionStatus *region_status,
                            bool region_is_active,
@@ -2815,6 +2878,8 @@ static void draw_app_panel(SDL_Renderer *renderer,
                           simulated_gps_active,
                           simulated_gps_deviation,
                           simulated_gps_time_scale,
+                          simulated_missed_turn_armed,
+                          simulated_missed_turn_active,
                           region,
                           region_status,
                           region_is_active,
@@ -2831,6 +2896,8 @@ static void draw_app_panel(SDL_Renderer *renderer,
     (void)simulated_gps_active;
     (void)simulated_gps_deviation;
     (void)simulated_gps_time_scale;
+    (void)simulated_missed_turn_armed;
+    (void)simulated_missed_turn_active;
     const float w = 580.0f;
     const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
     const float actual_w = viewport_width > (int)w ? w : (float)viewport_width - 16.0f;
@@ -3734,6 +3801,8 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
                                bool simulated_gps,
                                bool simulated_gps_deviation,
                                double simulated_gps_time_scale,
+                               bool simulated_missed_turn_armed,
+                               bool simulated_missed_turn_active,
                                int viewport_width,
                                int viewport_height)
 {
@@ -3835,14 +3904,20 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
                          maneuver_text);
     }
 
-    char gps_text[64];
-    char simulation_prefix[32] = {0};
+    char gps_text[80];
+    char simulation_prefix[40] = {0};
     if (simulated_gps) {
+        const char *format =
+            simulated_missed_turn_active
+                ? "SIM x%.0f RATE | "
+                : simulated_missed_turn_armed
+                    ? "SIM x%.0f ARME | "
+                    : simulated_gps_deviation
+                        ? "SIM x%.0f +80m | "
+                        : "SIM x%.0f DEV | ";
         snprintf(simulation_prefix,
                  sizeof(simulation_prefix),
-                 simulated_gps_deviation
-                     ? "SIM x%.0f DEV +80m | "
-                     : "SIM x%.0f DEV | ",
+                 format,
                  simulated_gps_time_scale);
     }
     if (drive->gps_quality == OPENRIDE_GPS_GOOD || drive->gps_quality == OPENRIDE_GPS_FAIR) {
@@ -4385,6 +4460,7 @@ int main(int argc, char **argv)
     OpenRideAndroidLocationContext android_location_context;
     OpenRideLocationProvider simulated_location_provider;
     OpenRideSimulatedLocationContext simulated_location_context;
+    OpenRideAndroidMissedTurnDev missed_turn_dev;
     openride_android_location_provider_init(&location_provider, &android_location_context);
     bool real_gps_active = false;
     bool real_gps_requested = false;
@@ -4422,6 +4498,7 @@ int main(int argc, char **argv)
     openride_app_lifecycle_init(&app_lifecycle);
     openride_gps_simulator_init(&gps_simulator);
 #ifdef __ANDROID__
+    openride_android_missed_turn_dev_init(&missed_turn_dev);
     openride_simulated_location_provider_init(
         &simulated_location_provider,
         &simulated_location_context,
@@ -6051,6 +6128,10 @@ int main(int argc, char **argv)
                                 simulator_deviation = false;
                                 openride_gps_simulator_set_lateral_offset_m(
                                     &gps_simulator, 0.0);
+                                openride_android_missed_turn_dev_reset(
+                                    &missed_turn_dev,
+                                    &simulated_location_context,
+                                    &gps_simulator);
                                 simulated_gps_active =
                                     openride_location_provider_start(
                                         &simulated_location_provider);
@@ -6077,7 +6158,12 @@ int main(int argc, char **argv)
                             }
                         } else if (mobile_hit.action
                                    == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION) {
-                            if (!simulated_gps_active
+                            if (missed_turn_dev.armed
+                                || missed_turn_dev.active) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "annule d'abord Virage rate reel [DEV]");
+                            } else if (!simulated_gps_active
                                 || !route_valid
                                 || !gps_simulator.route) {
                                 snprintf(route_status,
@@ -6122,6 +6208,89 @@ int main(int argc, char **argv)
                                      sizeof(route_status),
                                      "vitesse simulation [DEV] x%.0f",
                                      simulated_location_context.time_scale);
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN) {
+                            if (missed_turn_dev.armed
+                                || missed_turn_dev.active) {
+                                openride_android_missed_turn_dev_reset(
+                                    &missed_turn_dev,
+                                    &simulated_location_context,
+                                    &gps_simulator);
+                                openride_location_filter_reset(&location_filter);
+                                memset(&filtered_location,
+                                       0,
+                                       sizeof(filtered_location));
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "virage rate reel [DEV] annule");
+                            } else if (!simulated_gps_active
+                                       || !route_valid
+                                       || !gps_simulator.route) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "active d'abord le GPS simule [DEV]");
+                            } else if (!auto_reroute) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "active Recalcul auto avant le test DEV");
+                            } else if (simulator_deviation) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "annule d'abord Deviation 80 m [DEV]");
+                            } else if (!graph_loaded
+                                       || !route.nodes
+                                       || route.node_count < 3U) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "virage rate reel: itineraire mono-region requis");
+                            } else if (!openride_dev_missed_turn_plan_build(
+                                           &routing_graph,
+                                           &route,
+                                           gps_simulator.position_m,
+                                           100.0,
+                                           2500.0,
+                                           80.0,
+                                           &missed_turn_dev.plan,
+                                           error,
+                                           sizeof(error))) {
+                                snprintf(route_status,
+                                         sizeof(route_status),
+                                         "virage rate DEV impossible: %.140s",
+                                         error[0] ? error : "aucune branche adaptee");
+                            } else {
+                                const double speed_kph =
+                                    gps_simulator.speed_mps > 0.1
+                                        ? gps_simulator.speed_mps * 3.6
+                                        : 60.0;
+                                if (!openride_gps_simulator_set_route(
+                                        &missed_turn_dev.simulator,
+                                        &missed_turn_dev.plan.branch_route,
+                                        speed_kph,
+                                        error,
+                                        sizeof(error))) {
+                                    openride_dev_missed_turn_plan_destroy(
+                                        &missed_turn_dev.plan);
+                                    snprintf(route_status,
+                                             sizeof(route_status),
+                                             "simulateur virage rate indisponible: %.120s",
+                                             error[0] ? error : "erreur");
+                                } else {
+                                    missed_turn_dev.armed = true;
+                                    missed_turn_dev.active = false;
+                                    openride_drive_mode_set_active(
+                                        &drive_mode, true);
+                                    openride_drive_mode_set_auto_zoom(
+                                        &drive_mode, true);
+                                    follow_gps = true;
+                                    app_panel = OPENRIDE_APP_PANEL_NONE;
+                                    snprintf(
+                                        route_status,
+                                        sizeof(route_status),
+                                        "virage rate [DEV] arme dans %.0f m",
+                                        missed_turn_dev.plan.trigger_position_m
+                                            - gps_simulator.position_m);
+                                }
+                            }
                         }
                         break;
                     }
@@ -7508,6 +7677,32 @@ int main(int argc, char **argv)
         if (delta_seconds > 0.25) delta_seconds = 0.25;
 
 #ifdef __ANDROID__
+        if (!simulated_gps_active
+            && (missed_turn_dev.armed || missed_turn_dev.active)) {
+            openride_android_missed_turn_dev_reset(
+                &missed_turn_dev,
+                &simulated_location_context,
+                &gps_simulator);
+        }
+
+        if (simulated_gps_active
+            && missed_turn_dev.armed
+            && simulated_location_context.simulator == &gps_simulator
+            && gps_simulator.position_m
+                >= missed_turn_dev.plan.trigger_position_m) {
+            openride_gps_simulator_restart(&missed_turn_dev.simulator);
+            simulated_location_context.simulator =
+                &missed_turn_dev.simulator;
+            missed_turn_dev.armed = false;
+            missed_turn_dev.active = true;
+            openride_location_filter_reset(&location_filter);
+            memset(&filtered_location, 0, sizeof(filtered_location));
+            memset(&navigation_state, 0, sizeof(navigation_state));
+            snprintf(route_status,
+                     sizeof(route_status),
+                     "VIRAGE RATE [DEV]: branche reelle suivie");
+        }
+
         const bool android_location_active =
             simulated_gps_active || real_gps_active;
         OpenRideLocationProvider *android_location_provider =
@@ -7671,6 +7866,14 @@ int main(int argc, char **argv)
                 route_status,
                 sizeof(route_status));
             simulator_deviation = false;
+#ifdef __ANDROID__
+            if (missed_turn_dev.armed || missed_turn_dev.active) {
+                openride_android_missed_turn_dev_reset(
+                    &missed_turn_dev,
+                    &simulated_location_context,
+                    &gps_simulator);
+            }
+#endif
             memset(&navigation_state, 0, sizeof(navigation_state));
             memset(&filtered_location, 0, sizeof(filtered_location));
             if (route_valid) {
@@ -7945,6 +8148,8 @@ int main(int argc, char **argv)
                                simulated_gps_active,
                                simulator_deviation,
                                simulated_location_context.time_scale,
+                               missed_turn_dev.armed,
+                               missed_turn_dev.active,
                                width,
                                height);
         }
@@ -7965,10 +8170,14 @@ int main(int argc, char **argv)
                        simulated_gps_active,
                        simulator_deviation,
                        simulated_location_context.time_scale,
+                       missed_turn_dev.armed,
+                       missed_turn_dev.active,
 #else
                        false,
                        false,
                        1.0,
+                       false,
+                       false,
 #endif
                        region,
                        &region_status,
@@ -8025,6 +8234,10 @@ int main(int argc, char **argv)
     }
     simulator_deviation = false;
     openride_gps_simulator_set_lateral_offset_m(&gps_simulator, 0.0);
+    openride_android_missed_turn_dev_destroy(
+        &missed_turn_dev,
+        &simulated_location_context,
+        &gps_simulator);
     if (real_gps_active) {
         openride_location_provider_stop(&location_provider);
         real_gps_active = false;
