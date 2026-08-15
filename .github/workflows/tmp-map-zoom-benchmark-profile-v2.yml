@@ -1,0 +1,74 @@
+name: Temporary map zoom benchmark profiling V2
+
+on:
+  push:
+    branches:
+      - agent/map-zoom-benchmark-profile-v2
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/map-zoom-benchmark-profile-v2
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply profiling V2 integration
+        run: |
+          python3 .github/tmp/apply-map-zoom-benchmark-profile-v2.py
+          git diff --check
+          grep -q 'format_version=2' src/map/map_zoom_test_logger.c
+          grep -q 'unaccounted_ms' src/map/map_zoom_test_logger.c
+          grep -q 'waterways_ms' src/map/map_world.c
+          grep -q 'openride_map_world_debug_begin_frame' src/main.c
+          grep -q 'openride_map_world_get_debug_stats' src/main.c
+          grep -q 'map_zoom_profile.present_ms' src/main.c
+          test "$(grep -c 'map_zoom_loop_started_ns = SDL_GetTicksNS' src/main.c)" -eq 2
+
+      - name: Create clean candidate commit
+        run: |
+          git rm .github/tmp/apply-map-zoom-benchmark-profile-v2.py
+          git rm .github/workflows/tmp-map-zoom-benchmark-profile-v2.yml
+          git config user.name "OpenRide CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/main.c src/map/map_world.c src/map/map_world.h src/map/map_zoom_test_logger.c src/map/map_zoom_test_logger.h
+          git commit -m "DEV: profile complete map zoom frame"
+
+      - name: Install desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build libsqlite3-dev zlib1g-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+          ./scripts/bootstrap_sdl.sh
+          ./scripts/bootstrap_sqlite.sh
+
+      - name: Build and test desktop
+        run: |
+          sed -i '/cos=openride_ormap_cached_cos/d' CMakeLists.txt
+          sed -i '/sin=openride_ormap_cached_sin/d' CMakeLists.txt
+          cmake -S . -B build -G Ninja -DOPENRIDE_BUILD_TESTS=ON
+          cmake --build build
+          ctest --test-dir build --output-on-failure -E '^mbtiles$'
+          git restore CMakeLists.txt
+
+      - name: Build production Android debug APK
+        run: ./scripts/android_build.sh
+
+      - name: Verify clean candidate and push
+        run: |
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:agent/map-zoom-benchmark-profile-v2
