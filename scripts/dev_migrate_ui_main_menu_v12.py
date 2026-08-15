@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
-"""One-shot source migration for UI Engine V1.2 main menu.
+"""One-shot guarded migration for UI Engine V1.2 main menu.
 
-The migration is intentionally narrow and guarded. It:
-- registers the UI toolbar and main-menu sources in CMake;
-- exposes ui_main_menu.h to src/main.c;
-- routes Android main-menu hit-testing through UI Engine;
-- routes Android main-menu drawing through UI Engine.
-
-Legacy main-menu branches remain in src/main.c for this validation pass, but
-become unreachable for the Android main panel. They can be deleted after the
-new component has been validated on-device.
-
-This script never builds, tests, commits, or pushes anything.
+It prepares all replacements in memory first and writes files only after every
+expected source fragment has matched exactly once. It never builds, tests,
+commits, or pushes anything.
 """
 
 from pathlib import Path
@@ -29,25 +21,16 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def migrate_cmake() -> bool:
-    text = CMAKE.read_text(encoding="utf-8")
-    original = text
-    text = replace_once(
+def migrated_cmake(text: str) -> str:
+    return replace_once(
         text,
         "    src/map/map_world.c\n    src/ui/ui.c\n)",
         "    src/map/map_world.c\n    src/ui/ui.c\n    src/ui/ui_toolbar.c\n    src/ui/ui_main_menu.c\n)",
         "CMake UI sources",
     )
-    if text != original:
-        CMAKE.write_text(text, encoding="utf-8")
-        return True
-    return False
 
 
-def migrate_main() -> bool:
-    text = MAIN.read_text(encoding="utf-8")
-    original = text
-
+def migrated_main(text: str) -> str:
     text = replace_once(
         text,
         '#include "openride/ui_toolbar.h"\n#include "openride/drive_mode.h"',
@@ -111,10 +94,8 @@ static OpenRideMobilePanelHit mobile_main_menu_hit_test(
 }
 
 typedef struct OpenRideMobilePanelLayout {'''
-    text = replace_once(text,
-                        old_hit_struct,
-                        new_hit_struct,
-                        "main-menu hit-test wrapper")
+    text = replace_once(
+        text, old_hit_struct, new_hit_struct, "main-menu hit-test wrapper")
 
     old_draw_entry = '''    int width = viewport_width;
     int height = 0;
@@ -138,10 +119,8 @@ typedef struct OpenRideMobilePanelLayout {'''
     }
 
     uint32_t rows = 0U;'''
-    text = replace_once(text,
-                        old_draw_entry,
-                        new_draw_entry,
-                        "main-menu renderer routing")
+    text = replace_once(
+        text, old_draw_entry, new_draw_entry, "main-menu renderer routing")
 
     old_event_hit = '''                        const OpenRideMobilePanelHit mobile_hit = mobile_app_panel_hit_test(
                             renderer,
@@ -165,26 +144,22 @@ typedef struct OpenRideMobilePanelLayout {'''
                                                             width,
                                                             height,
                                                             mobile_place_count);'''
-    text = replace_once(text,
-                        old_event_hit,
-                        new_event_hit,
-                        "main-menu event routing")
-
-    if text != original:
-        MAIN.write_text(text, encoding="utf-8")
-        return True
-    return False
+    return replace_once(
+        text, old_event_hit, new_event_hit, "main-menu event routing")
 
 
 def main() -> int:
-    # Evaluate both files from their current content before reporting success.
-    # Each individual replacement is exact and refuses ambiguous source states.
-    cmake_changed = migrate_cmake()
-    main_changed = migrate_main()
-    if not cmake_changed or not main_changed:
-        raise RuntimeError(
-            "migration did not change both expected files; restore working tree before retrying"
-        )
+    cmake_original = CMAKE.read_text(encoding="utf-8")
+    main_original = MAIN.read_text(encoding="utf-8")
+
+    # No file is written until every exact replacement has succeeded.
+    cmake_new = migrated_cmake(cmake_original)
+    main_new = migrated_main(main_original)
+    if cmake_new == cmake_original or main_new == main_original:
+        raise RuntimeError("migration unexpectedly produced no change")
+
+    CMAKE.write_text(cmake_new, encoding="utf-8")
+    MAIN.write_text(main_new, encoding="utf-8")
 
     print("OK: UI Engine V1.2 main-menu migration applied")
     print("Changed: CMakeLists.txt, src/main.c")
