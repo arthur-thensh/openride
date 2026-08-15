@@ -46,9 +46,20 @@ jobs:
           ./scripts/bootstrap_sqlite.sh
 
       - name: Configure and build desktop
+        shell: bash
         run: |
-          ./scripts/configure.sh
-          ./scripts/build.sh
+          set +e
+          output=$( { ./scripts/configure.sh && ./scripts/build.sh; } 2>&1 )
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            safe=${output//'%'/'%25'}
+            safe=${safe//$'\n'/'%0A'}
+            safe=${safe//$'\r'/'%0D'}
+            echo "::error title=Desktop build::$safe"
+            exit "$status"
+          fi
 
       - name: Run desktop tests
         run: ./scripts/test.sh
