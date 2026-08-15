@@ -141,6 +141,9 @@ static void geometry_batch_flush(OpenRideORMapRenderer *renderer,
         }
         return;
     }
+    if (renderer->road_debug_active) {
+        ++renderer->road_debug.batches;
+    }
     SDL_RenderGeometry(renderer->renderer,
                        NULL,
                        renderer->area_vertices,
@@ -1139,6 +1142,97 @@ static bool road_paint_table_has_casing(const RoadPaintTable *table)
     return false;
 }
 
+typedef enum RoadLODClassGroup {
+    ROAD_LOD_GROUP_MAJOR = 0,
+    ROAD_LOD_GROUP_PRIMARY,
+    ROAD_LOD_GROUP_LOCAL,
+    ROAD_LOD_GROUP_DETAIL
+} RoadLODClassGroup;
+
+static RoadLODClassGroup road_lod_class_group(int road_class)
+{
+    switch ((OpenRideRoadClass)road_class) {
+        case OPENRIDE_ROAD_MOTORWAY:
+        case OPENRIDE_ROAD_TRUNK:
+            return ROAD_LOD_GROUP_MAJOR;
+        case OPENRIDE_ROAD_PRIMARY:
+            return ROAD_LOD_GROUP_PRIMARY;
+        case OPENRIDE_ROAD_SECONDARY:
+        case OPENRIDE_ROAD_TERTIARY:
+            return ROAD_LOD_GROUP_LOCAL;
+        default:
+            return ROAD_LOD_GROUP_DETAIL;
+    }
+}
+
+static int road_lod_group_source(RoadLODClassGroup group, double zoom)
+{
+    switch (group) {
+        case ROAD_LOD_GROUP_MAJOR:
+            if (zoom < 11.25) return 0;
+            if (zoom < 12.80) return 1;
+            if (zoom < 14.40) return 2;
+            return 3;
+        case ROAD_LOD_GROUP_PRIMARY:
+            if (zoom < 12.80) return 1;
+            if (zoom < 14.40) return 2;
+            return 3;
+        case ROAD_LOD_GROUP_LOCAL:
+            return zoom < 14.40 ? 2 : 3;
+        case ROAD_LOD_GROUP_DETAIL:
+        default:
+            return 3;
+    }
+}
+
+static double road_lod_group_fade(RoadLODClassGroup group,
+                                  double regional_to_overview,
+                                  double overview_to_local,
+                                  double local_to_detail)
+{
+    switch (group) {
+        case ROAD_LOD_GROUP_MAJOR:
+            return 1.0;
+        case ROAD_LOD_GROUP_PRIMARY:
+            return regional_to_overview;
+        case ROAD_LOD_GROUP_LOCAL:
+            return overview_to_local;
+        case ROAD_LOD_GROUP_DETAIL:
+        default:
+            return local_to_detail;
+    }
+}
+
+static void road_paint_table_configure_lod(RoadPaintTable *table,
+                                           int lod_index,
+                                           double zoom,
+                                           double regional_to_overview,
+                                           double overview_to_local,
+                                           double local_to_detail)
+{
+    if (!table) return;
+    for (int road_class = OPENRIDE_ROAD_UNKNOWN;
+         road_class <= OPENRIDE_ROAD_OTHER;
+         ++road_class) {
+        if (!table->visible[road_class]) continue;
+        const RoadLODClassGroup group = road_lod_class_group(road_class);
+        if (road_lod_group_source(group, zoom) != lod_index) {
+            table->visible[road_class] = false;
+            continue;
+        }
+        const double fade = road_lod_group_fade(group,
+                                                regional_to_overview,
+                                                overview_to_local,
+                                                local_to_detail);
+        if (fade <= 0.001) {
+            table->visible[road_class] = false;
+            continue;
+        }
+        ormap_scale_color_alpha(&table->paints[road_class].line, fade);
+        ormap_scale_color_alpha(&table->paints[road_class].casing, fade);
+    }
+}
+
 static void draw_road_pass(OpenRideORMapRenderer *renderer,
                            const OpenRideMapCamera *camera,
                            int width,
@@ -1148,6 +1242,8 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
                            bool casing_pass,
                            bool budgeted_draw_load)
 {
+    const bool previous_road_debug_active = renderer->road_debug_active;
+    renderer->road_debug_active = true;
     const int count = 1 << zoom;
     const double scale = pow(2.0, camera->zoom - zoom);
     const double tile_size = ORMAP_TILE_SIZE * scale;
@@ -1169,6 +1265,7 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
         if (ty < 0 || ty >= count) continue;
         for (int tx = first_x; tx <= last_x; ++tx) {
             const int qx = wrap_x(tx, count);
+            ++renderer->road_debug.tiles_visited;
             OpenRideORMapRoadCacheEntry *entry =
                 road_cache_slot(renderer, zoom, qx, ty, false, budgeted_draw_load);
             if (!entry || entry->tile.count == 0U) continue;
@@ -1226,6 +1323,8 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
                             continue;
                         }
 
+                        ++renderer->road_debug.segments_drawn;
+
                         bool ok = true;
                         if (casing_pass) {
                             ok = geometry_batch_line(renderer,
@@ -1257,6 +1356,7 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
                         }
                         if (!ok) {
                             geometry_batch_flush(renderer, &batch);
+                            renderer->road_debug_active = previous_road_debug_active;
                             return;
                         }
                     }
@@ -1290,6 +1390,8 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
                     rotate_point(camera, width, height, &x1, &y1);
                     rotate_point(camera, width, height, &x2, &y2);
 
+                    ++renderer->road_debug.segments_drawn;
+
                     bool ok = true;
                     if (casing_pass) {
                         ok = geometry_batch_line(renderer,
@@ -1321,6 +1423,7 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
                     }
                     if (!ok) {
                         geometry_batch_flush(renderer, &batch);
+                        renderer->road_debug_active = previous_road_debug_active;
                         return;
                     }
                 }
@@ -1328,6 +1431,7 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
         }
     }
     geometry_batch_flush(renderer, &batch);
+    renderer->road_debug_active = previous_road_debug_active;
 }
 
 static int android_road_data_zoom(const OpenRideORMapMetadata *metadata,
@@ -1524,24 +1628,38 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
         OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM,
         OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM
     };
-    const double fades[4] = {
-        1.0 - regional_to_overview,
-        regional_to_overview * (1.0 - overview_to_local),
-        overview_to_local * (1.0 - local_to_detail),
-        local_to_detail
-    };
     RoadPaintTable tables[4];
+    bool active[4] = {false, false, false, false};
     for (int i = 0; i < 4; ++i) {
-        build_road_paint_table(renderer, camera->zoom, fades[i], &tables[i]);
+        build_road_paint_table(renderer, camera->zoom, 1.0, &tables[i]);
+        road_paint_table_configure_lod(&tables[i],
+                                       i,
+                                       camera->zoom,
+                                       regional_to_overview,
+                                       overview_to_local,
+                                       local_to_detail);
+        for (int road_class = OPENRIDE_ROAD_UNKNOWN;
+             road_class <= OPENRIDE_ROAD_OTHER;
+             ++road_class) {
+            if (tables[i].visible[road_class]) {
+                active[i] = true;
+                break;
+            }
+        }
     }
 
-    /* Keep road hierarchy coherent through a LOD handoff. On Android the
-     * low/mid-zoom style removes all casings, so avoid traversing every tile
-     * for an empty casing pass. */
+    /*
+     * Each road class has exactly one geometry owner at any camera zoom.
+     * A handoff therefore draws the stable/common hierarchy once and only
+     * fades in classes newly introduced by the next semantic LOD. The source
+     * for shared classes changes only after that handoff is complete; road
+     * LOD V1 does no geometric simplification, so this avoids duplicate
+     * rasterization without introducing a visible opacity dip.
+     */
     for (int pass = 0; pass < 2; ++pass) {
         const bool casing = pass == 0;
         for (int i = 0; i < 4; ++i) {
-            if (fades[i] <= 0.001) continue;
+            if (!active[i]) continue;
             if (casing && !road_paint_table_has_casing(&tables[i])) continue;
             draw_road_pass(renderer,
                            camera,
@@ -1848,6 +1966,7 @@ void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer)
     memset(&renderer->road_debug, 0, sizeof(renderer->road_debug));
     renderer->road_debug.prewarm_zoom = -1;
     renderer->road_draw_load_budget_remaining = ORMAP_ROAD_DRAW_LOAD_BUDGET;
+    renderer->road_debug_active = false;
 }
 
 void openride_ormap_renderer_get_road_debug_stats(

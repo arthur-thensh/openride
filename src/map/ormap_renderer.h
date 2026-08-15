@@ -74,6 +74,9 @@ typedef struct OpenRideORMapRoadDebugStats {
     uint32_t prewarm_loads;
     uint32_t draw_loads;
     uint32_t deferred_loads;
+    uint32_t tiles_visited;
+    uint32_t segments_drawn;
+    uint32_t batches;
     int prewarm_zoom;
 } OpenRideORMapRoadDebugStats;
 
@@ -84,6 +87,7 @@ typedef struct OpenRideORMapRenderer {
     uint64_t frame_counter;
     OpenRideORMapRoadDebugStats road_debug;
     uint32_t road_draw_load_budget_remaining;
+    bool road_debug_active;
     double road_previous_camera_zoom;
     bool road_has_previous_camera_zoom;
     int road_zoom_direction;
