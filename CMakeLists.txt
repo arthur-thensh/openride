@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.28.0 LANGUAGES C)
+project(OpenRide VERSION 0.29.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -59,6 +59,7 @@ add_library(openride_core STATIC
     src/core/loop_generator.c
     src/core/navigation_engine.c
     src/core/navigation_instructions.c
+    src/core/navigation_instruction_refinement.c
     src/core/navigation_session.c
     src/core/voice_guidance.c
     src/core/location_filter.c
@@ -86,6 +87,13 @@ add_library(openride_core STATIC
     src/map/ormap_builder.c
     src/map/mvt.c
     src/map/map_style.c
+)
+
+set_source_files_properties(
+    src/core/navigation_instructions.c
+    PROPERTIES
+        COMPILE_DEFINITIONS
+            "openride_navigation_instructions_build=openride_navigation_instructions_build_legacy"
 )
 
 target_include_directories(openride_core
@@ -361,6 +369,15 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_navigation_instructions PRIVATE openride_core)
     add_test(NAME navigation_instructions COMMAND test_navigation_instructions)
+
+    add_executable(test_navigation_instruction_refinement
+        tests/test_navigation_instruction_refinement.c
+    )
+    target_link_libraries(test_navigation_instruction_refinement PRIVATE openride_core)
+    add_test(
+        NAME navigation_instruction_refinement
+        COMMAND test_navigation_instruction_refinement
+    )
 
     add_executable(test_navigation_session
         tests/test_navigation_session.c
