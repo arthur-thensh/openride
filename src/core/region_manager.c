@@ -86,6 +86,7 @@ bool openride_region_status_ready(const OpenRideRegionStatus *status)
 {
     return status
         && status->ormap_installed
+        && status->ormap_current
         && status->routing_installed
         && status->search_installed;
 }
@@ -162,13 +163,13 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
     const double legacy_size = openride_platform_file_size_mb(status->legacy_map_path);
 
     /*
-     * A file being present is not enough: a format migration may require new
-     * data that simply does not exist in the previous .ormap. Keep old files
-     * readable for compatibility, but mark them stale for region installation
-     * so the app can rebuild/download the source instead of silently reusing
-     * obsolete cartography.
+     * Keep an older .ormap available for display while distinguishing it from
+     * a current-format installation. This makes format migrations non-destructive:
+     * MapWorld can keep drawing the previous map, while installation UI sees
+     * the region as not ready until the new cartographic data is generated.
      */
-    status->ormap_installed = ormap_size >= 0.0
+    status->ormap_installed = ormap_size >= 0.0;
+    status->ormap_current = status->ormap_installed
         && current_ormap_installed(status->ormap_path);
     status->legacy_map_installed = legacy_size >= 0.0;
     status->map_installed = status->ormap_installed || status->legacy_map_installed;
