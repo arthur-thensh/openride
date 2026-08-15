@@ -28,20 +28,12 @@ static void refresh_cache(double angle)
     g_ormap_trig_cache.angle = angle;
 
     /*
-     * Clang is used by both the macOS and Android OpenRide toolchains. Its
-     * sincos builtin lets the backend evaluate both values together, avoiding
-     * two independent libm argument-reduction paths whenever the camera
-     * bearing changes. The common per-vertex path still only performs the
-     * exact-angle cache check above.
+     * Keep this refresh portable across the macOS and Android toolchains.
+     * The cache still means these libm calls happen only when the bearing
+     * changes, not for every rotated map vertex.
      */
-#if defined(__clang__) || defined(__GNUC__)
-    __builtin_sincos(angle,
-                     &g_ormap_trig_cache.sine,
-                     &g_ormap_trig_cache.cosine);
-#else
     g_ormap_trig_cache.cosine = cos(angle);
     g_ormap_trig_cache.sine = sin(angle);
-#endif
 
     g_ormap_trig_cache.valid = true;
 }
