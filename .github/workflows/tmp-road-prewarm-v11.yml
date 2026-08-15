@@ -25,13 +25,12 @@ jobs:
           java-version: '17'
 
       - name: Apply road prewarm v1.1
-        run: |
-          git apply --check .github/tmp/road-prewarm-v11.patch
-          git apply .github/tmp/road-prewarm-v11.patch
+        run: python3 .github/tmp/apply-road-prewarm-v11.py
 
       - name: Remove temporary files and create candidate
         run: |
           git rm .github/tmp/road-prewarm-v11.patch
+          git rm .github/tmp/apply-road-prewarm-v11.py
           git rm .github/workflows/tmp-road-prewarm-v11.yml
           git config user.name "OpenRide CI"
           git config user.email "actions@users.noreply.github.com"
