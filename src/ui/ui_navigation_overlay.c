@@ -4,6 +4,7 @@
 #define OPENRIDE_UI_NAV_OVERLAY_GAP 4.0f
 #define OPENRIDE_UI_NAV_OVERLAY_MAX_WIDTH 540.0f
 #define OPENRIDE_UI_NAV_OVERLAY_LINE_HEIGHT 18.0f
+#define OPENRIDE_UI_NAV_OVERLAY_TOOLBAR_CLEARANCE 90.0f
 
 static float minf_openride(float a, float b)
 {
@@ -34,12 +35,15 @@ void openride_ui_navigation_overlay_draw(
         + 8.0f;
 
     /*
-     * Keep this below the normal map-status overlay. The drive HUD replaces
-     * this component entirely once active navigation mode takes over.
+     * Keep this below the normal map-status overlay and above the map toolbar.
+     * The drive HUD replaces this component entirely once active navigation
+     * mode takes over.
      */
+    const float bottom = safe.y + safe.h
+        - OPENRIDE_UI_NAV_OVERLAY_TOOLBAR_CLEARANCE;
     float y = safe.y + 235.0f;
-    if (y + height > safe.y + safe.h) {
-        y = safe.y + safe.h - height;
+    if (y + height > bottom) {
+        y = bottom - height;
     }
     if (y < safe.y) y = safe.y;
 
