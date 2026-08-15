@@ -154,6 +154,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/ormap_renderer_v8.c
     src/map/ormap_trig_cache.c
     src/map/map_world.c
+    src/ui/ui.c
 )
 
 set_property(
