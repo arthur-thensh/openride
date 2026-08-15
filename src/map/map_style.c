@@ -7,6 +7,40 @@ static bool is_kind(const char *kind, const char *expected)
     return kind && expected && strcmp(kind, expected) == 0;
 }
 
+static bool road_runtime_fade_started(const char *kind, double zoom)
+{
+#ifdef __ANDROID__
+    /*
+     * The ORMap renderer applies the matching smooth fades to these classes.
+     * Before each fade starts their final alpha is exactly zero, so admitting
+     * them here only makes the renderer traverse and rebuild invisible road
+     * geometry. Keep the style visibility gate aligned with the runtime fade
+     * starts to skip that work without changing anything visible on screen.
+     */
+    if (is_kind(kind, "secondary")) return zoom >= 11.75;
+    if (is_kind(kind, "tertiary")) return zoom >= 12.75;
+
+    if (is_kind(kind, "unclassified") ||
+        is_kind(kind, "residential") ||
+        is_kind(kind, "service") ||
+        is_kind(kind, "living_street")) {
+        return zoom >= 13.75;
+    }
+
+    if (is_kind(kind, "track") ||
+        is_kind(kind, "path") ||
+        is_kind(kind, "footway") ||
+        is_kind(kind, "cycleway") ||
+        is_kind(kind, "steps")) {
+        return zoom >= 14.50;
+    }
+#else
+    (void)kind;
+    (void)zoom;
+#endif
+    return true;
+}
+
 static OpenRideMapColor color(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
     OpenRideMapColor value = {r, g, b, a};
@@ -159,6 +193,7 @@ bool openride_map_road_visible_for_style(OpenRideMapStyle style,
                                          double zoom)
 {
     if (!kind || kind[0] == '\0') return zoom >= 12.0;
+    if (!road_runtime_fade_started(kind, zoom)) return false;
 
     if (is_kind(kind, "motorway") || is_kind(kind, "trunk")) return zoom >= 5.0;
     if (is_kind(kind, "primary")) return zoom >= 8.0;
