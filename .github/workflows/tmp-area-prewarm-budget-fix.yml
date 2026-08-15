@@ -28,7 +28,7 @@ jobs:
         run: |
           python3 .github/tmp/fix-area-prewarm-budget.py
           git diff --check
-          test "$(grep -c 'prewarm_area_level(renderer' src/map/ormap_renderer.c)" -eq 2
+          test "$(grep -c 'prewarm_area_level(renderer' src/map/ormap_renderer.c)" -eq 1
           grep -q 'one-tile/frame budget must remain a hard ceiling' src/map/ormap_renderer.c
 
       - name: Create clean fix commit
