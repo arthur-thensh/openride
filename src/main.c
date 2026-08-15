@@ -1752,48 +1752,76 @@ typedef enum OpenRideAppPanel {
     OPENRIDE_APP_PANEL_SETTINGS
 } OpenRideAppPanel;
 
-static OpenRideAppPanel app_panel_main_at(double x, double y, int viewport_width)
+static OpenRideAppPanel app_panel_main_at(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height)
 {
-    const double w = 580.0;
-    const double panel_x = viewport_width > (int)w ? ((double)viewport_width - w) * 0.5 : 8.0;
-    const double panel_w = viewport_width > (int)w ? w : (double)viewport_width - 16.0;
-    if (x < panel_x || x > panel_x + panel_w) return OPENRIDE_APP_PANEL_NONE;
-    const double first_y = 18.0 + 42.0;
-    const double row_h = 28.0;
-    if (y < first_y || y >= first_y + row_h * 5.0) return OPENRIDE_APP_PANEL_NONE;
-    const int row = (int)((y - first_y) / row_h);
-    switch (row) {
-        case 0: return OPENRIDE_APP_PANEL_NONE; /* search is handled specially */
-        case 1: return OPENRIDE_APP_PANEL_FAVORITES;
-        case 2: return OPENRIDE_APP_PANEL_HISTORY;
-        case 3: return OPENRIDE_APP_PANEL_REGIONS;
-        case 4: return OPENRIDE_APP_PANEL_SETTINGS;
-        default: return OPENRIDE_APP_PANEL_NONE;
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return OPENRIDE_APP_PANEL_NONE;
+    }
+    const OpenRideUIMainMenuAction action =
+        openride_ui_main_menu_hit_test(&ui, x, y);
+    openride_ui_end(&ui);
+
+    switch (action) {
+        case OPENRIDE_UI_MAIN_MENU_FAVORITES:
+            return OPENRIDE_APP_PANEL_FAVORITES;
+        case OPENRIDE_UI_MAIN_MENU_HISTORY:
+            return OPENRIDE_APP_PANEL_HISTORY;
+        case OPENRIDE_UI_MAIN_MENU_REGIONS:
+            return OPENRIDE_APP_PANEL_REGIONS;
+        case OPENRIDE_UI_MAIN_MENU_SETTINGS:
+            return OPENRIDE_APP_PANEL_SETTINGS;
+        case OPENRIDE_UI_MAIN_MENU_NONE:
+        case OPENRIDE_UI_MAIN_MENU_SEARCH:
+        case OPENRIDE_UI_MAIN_MENU_MAP_ZOOM_TEST:
+        case OPENRIDE_UI_MAIN_MENU_CLOSE:
+        default:
+            return OPENRIDE_APP_PANEL_NONE;
     }
 }
 
-static bool app_panel_main_search_at(double x, double y, int viewport_width)
+static bool app_panel_main_search_at(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height)
 {
-    const double w = 580.0;
-    const double panel_x = viewport_width > (int)w ? ((double)viewport_width - w) * 0.5 : 8.0;
-    const double panel_w = viewport_width > (int)w ? w : (double)viewport_width - 16.0;
-    return x >= panel_x && x <= panel_x + panel_w && y >= 60.0 && y < 88.0;
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return false;
+    }
+    const OpenRideUIMainMenuAction action =
+        openride_ui_main_menu_hit_test(&ui, x, y);
+    openride_ui_end(&ui);
+    return action == OPENRIDE_UI_MAIN_MENU_SEARCH;
 }
 
-static int app_panel_place_at(double x,
+static int app_panel_place_at(SDL_Renderer *renderer,
+                              double x,
                               double y,
                               int viewport_width,
+                              int viewport_height,
                               uint32_t count)
 {
     if (count == 0U) return -1;
-    const double w = 580.0;
-    const double panel_x = viewport_width > (int)w ? ((double)viewport_width - w) * 0.5 : 8.0;
-    const double panel_w = viewport_width > (int)w ? w : (double)viewport_width - 16.0;
-    const double row_top = 18.0 + 45.0;
-    const double row_h = 24.0;
-    if (x < panel_x + 10.0 || x > panel_x + panel_w - 10.0 || y < row_top) return -1;
-    const int index = (int)((y - row_top) / row_h);
-    return index >= 0 && (uint32_t)index < count ? index : -1;
+
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return -1;
+    }
+    const OpenRideUIPlacesPanelHit hit =
+        openride_ui_places_panel_hit_test(&ui, count, x, y);
+    openride_ui_end(&ui);
+    return hit.action == OPENRIDE_UI_PLACES_PANEL_PLACE ? hit.index : -1;
 }
 
 static void set_destination_from_place(OpenRideMapSelection *selection,
@@ -2157,7 +2185,9 @@ static OpenRideMobilePanelHit mobile_places_panel_hit_test(
     return hit;
 }
 
-static void draw_mobile_app_panel(SDL_Renderer *renderer,
+#endif
+
+static void draw_ui_app_panel(SDL_Renderer *renderer,
                                   OpenRideAppPanel panel,
                                   const OpenRideStoredPlace *favorites,
                                   uint32_t favorite_count,
@@ -2335,16 +2365,23 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     }
 
 }
-#endif
 
-static int app_panel_region_action_at(double x, double y, int viewport_width)
+static int app_panel_region_action_at(SDL_Renderer *renderer,
+                                      double x,
+                                      double y,
+                                      int viewport_width,
+                                      int viewport_height)
 {
-    const double panel_w = viewport_width > 580 ? 580.0 : (double)viewport_width - 16.0;
-    const double panel_x = viewport_width > 580 ? ((double)viewport_width - 580.0) * 0.5 : 8.0;
-    const double panel_y = 18.0;
-    if (x < panel_x || x > panel_x + panel_w) return 0;
-    if (y >= panel_y + 228.0 && y <= panel_y + 270.0) return 1;
-    if (y >= panel_y + 278.0 && y <= panel_y + 320.0) return 2;
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return 0;
+    }
+    const OpenRideUIRegionsPanelAction action =
+        openride_ui_regions_panel_hit_test(&ui, x, y);
+    openride_ui_end(&ui);
+    if (action == OPENRIDE_UI_REGIONS_PANEL_INSTALL) return 1;
+    if (action == OPENRIDE_UI_REGIONS_PANEL_REMOVE) return 2;
     return 0;
 }
 
@@ -2378,212 +2415,34 @@ static void draw_app_panel(SDL_Renderer *renderer,
                            int viewport_width)
 {
     if (panel == OPENRIDE_APP_PANEL_NONE) return;
-#ifdef __ANDROID__
-    draw_mobile_app_panel(renderer,
-                          panel,
-                          favorites,
-                          favorite_count,
-                          history,
-                          history_count,
-                          selected,
-                          map_style,
-                          profile,
-                          follow_gps,
-                          auto_reroute,
-                          voice_enabled,
-                          simulated_gps_active,
-                          simulated_gps_deviation,
-                          simulated_gps_time_scale,
-                          simulated_missed_turn_armed,
-                          simulated_missed_turn_active,
-                          region,
-                          region_status,
-                          region_is_active,
-                          region_busy,
-                          region_progress,
-                          region_work_status,
-                          selection,
-                          gps_valid,
-                          gps_accuracy_m,
-                          route_download_plan_state,
-                          viewport_width);
-    return;
-#endif
-    (void)simulated_gps_active;
-    (void)simulated_gps_deviation;
-    (void)simulated_gps_time_scale;
-    (void)simulated_missed_turn_armed;
-    (void)simulated_missed_turn_active;
-    const float w = 580.0f;
-    const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
-    const float actual_w = viewport_width > (int)w ? w : (float)viewport_width - 16.0f;
-    const float y = 18.0f;
-    SDL_FRect box = {x, y, actual_w, 360.0f};
-    SDL_SetRenderDrawColor(renderer, 18, 22, 26, 244);
-    SDL_RenderFillRect(renderer, &box);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 90);
-    SDL_RenderRect(renderer, &box);
-    SDL_SetRenderDrawColor(renderer, 245, 247, 248, 255);
-
-    if (panel == OPENRIDE_APP_PANEL_MAIN) {
-        SDL_RenderDebugText(renderer, x + 18, y + 16, "OPENRIDE - MENU");
-        SDL_RenderDebugText(renderer, x + 18, y + 52, "R  Recherche hors ligne");
-        SDL_RenderDebugText(renderer, x + 18, y + 80, "F  Favoris");
-        SDL_RenderDebugText(renderer, x + 18, y + 108, "H  Historique");
-        SDL_RenderDebugText(renderer, x + 18, y + 136, "C  Cartes / donnees installees");
-        SDL_RenderDebugText(renderer, x + 18, y + 164, "P  Parametres");
-        SDL_RenderDebugText(renderer, x + 18, y + 192, "Z  Test zoom carte [DEV]");
-        SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
-        SDL_RenderDebugText(renderer, x + 18, y + 322, "Tab/Esc: fermer | V: ajouter la position en favori");
-        return;
-    }
-
-    if (panel == OPENRIDE_APP_PANEL_ROUTE) {
-        SDL_RenderDebugText(renderer, x + 18, y + 16, "ITINERAIRE");
-        SDL_RenderDebugTextFormat(renderer,
-                                  x + 18,
-                                  y + 58,
-                                  "Depart : %s",
-                                  selection && selection->has_start
-                                      ? "selectionne"
-                                      : "a choisir");
-        SDL_RenderDebugTextFormat(renderer,
-                                  x + 18,
-                                  y + 88,
-                                  "Arrivee : %s",
-                                  selection && selection->has_destination
-                                      ? "selectionnee"
-                                      : "a choisir");
-        SDL_RenderDebugText(renderer,
-                            x + 18,
-                            y + 132,
-                            "D : rechercher le depart");
-        SDL_RenderDebugText(renderer,
-                            x + 18,
-                            y + 160,
-                            "A : rechercher l'arrivee");
-        SDL_RenderDebugText(renderer,
-                            x + 18,
-                            y + 188,
-                            "Entree : calculer");
-        SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
-        SDL_RenderDebugText(renderer,
-                            x + 18,
-                            y + 322,
-                            "Esc: retour | placement sur carte toujours disponible");
-        return;
-    }
-
-    if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) {
-        SDL_RenderDebugText(renderer, x + 18, y + 16, "CARTES REQUISES");
-        SDL_RenderDebugText(renderer,
-                            x + 18,
-                            y + 58,
-                            "Installe les regions requises depuis Android.");
-        return;
-    }
-
-    if (panel == OPENRIDE_APP_PANEL_FAVORITES || panel == OPENRIDE_APP_PANEL_HISTORY) {
-        const bool fav = panel == OPENRIDE_APP_PANEL_FAVORITES;
-        const OpenRideStoredPlace *items = fav ? favorites : history;
-        const uint32_t count = fav ? favorite_count : history_count;
-        SDL_RenderDebugText(renderer, x + 18, y + 16, fav ? "FAVORIS" : "HISTORIQUE");
-        if (count == 0U) {
-            SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
-            SDL_RenderDebugText(renderer, x + 18, y + 54, fav ? "Aucun favori" : "Historique vide");
-        }
-        for (uint32_t i = 0U; i < count; ++i) {
-            const float ry = y + 48.0f + 24.0f * (float)i;
-            if (i == selected) {
-                SDL_FRect hi = {x + 12, ry - 3, actual_w - 24, 21};
-                SDL_SetRenderDrawColor(renderer, 42, 82, 112, 220);
-                SDL_RenderFillRect(renderer, &hi);
-            }
-            SDL_SetRenderDrawColor(renderer, 238, 241, 243, 255);
-            SDL_RenderDebugTextFormat(renderer, x + 18, ry,
-                                      "%c %-38.38s  %.5f, %.5f",
-                                      i == selected ? '>' : ' ', items[i].name,
-                                      items[i].lat, items[i].lon);
-        }
-        SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
-        SDL_RenderDebugText(renderer, x + 18, y + 322,
-                            fav ? "Entree: centrer | Suppr: retirer | Esc: retour"
-                                : "Entree: centrer | Esc: retour");
-        return;
-    }
-
-    if (panel == OPENRIDE_APP_PANEL_REGIONS) {
-        SDL_RenderDebugText(renderer, x + 18, y + 16, "CARTES / DONNEES HORS LIGNE");
-        SDL_RenderDebugTextFormat(renderer,
-                                  x + 18,
-                                  y + 48,
-                                  "%s%s",
-                                  region ? region->name : "Region",
-                                  region_is_active ? "  [ACTIVE]" : "");
-        if (region_status) {
-            SDL_RenderDebugTextFormat(renderer, x + 34, y + 78, "Carte .ormap : %s  %.1f Mo",
-                                      region_status->ormap_installed ? "installee" : "absente",
-                                      region_status->ormap_installed ? openride_platform_file_size_mb(region_status->ormap_path) : 0.0);
-            SDL_RenderDebugTextFormat(renderer, x + 34, y + 102, "Routage      : %s  %.1f Mo",
-                                      region_status->routing_installed ? "installe" : "absent",
-                                      region_status->routing_installed ? region_status->routing_size_mb : 0.0);
-            SDL_RenderDebugTextFormat(renderer, x + 34, y + 126, "Recherche    : %s  %.1f Mo",
-                                      region_status->search_installed ? "installee" : "absente",
-                                      region_status->search_installed ? region_status->search_size_mb : 0.0);
-            SDL_RenderDebugTextFormat(renderer, x + 34, y + 150, "Source PBF   : %s  %.1f Mo",
-                                      region_status->source_pbf_present ? "presente" : "absente",
-                                      region_status->source_pbf_present ? region_status->source_pbf_size_mb : 0.0);
-            if (region_status->legacy_map_installed && !region_status->ormap_installed) {
-                SDL_SetRenderDrawColor(renderer, 190, 198, 202, 255);
-                SDL_RenderDebugText(renderer, x + 34, y + 176, "Carte Shortbread actuelle: transition v0.22");
-            }
-        }
-        if (region_busy) {
-            SDL_SetRenderDrawColor(renderer, 235, 238, 240, 255);
-            SDL_RenderDebugTextFormat(renderer, x + 18, y + 214, "%s",
-                                      region_work_status && region_work_status[0] ? region_work_status : "Preparation en cours...");
-            if (region_progress >= 0.0) {
-                SDL_RenderDebugTextFormat(renderer, x + 18, y + 240, "Progression: %.0f %%", region_progress * 100.0);
-            }
-        } else {
-            SDL_FRect install = {x + 16, y + 228, actual_w - 32, 42};
-            SDL_SetRenderDrawColor(renderer, 40, 98, 62, 230);
-            SDL_RenderFillRect(renderer, &install);
-            SDL_SetRenderDrawColor(renderer, 250, 252, 250, 255);
-            SDL_RenderDebugText(renderer,
-                                x + 30,
-                                y + 242,
-                                openride_region_status_ready(region_status)
-                                    ? (region_is_active ? "D  REGION ACTIVE" : "D  UTILISER CETTE REGION")
-                                    : (region_status && region_status->source_pbf_present
-                                        ? "D  PREPARER DEPUIS LE PBF LOCAL"
-                                        : "D  TELECHARGER OSM ET PREPARER"));
-            SDL_FRect remove_box = {x + 16, y + 278, actual_w - 32, 42};
-            SDL_SetRenderDrawColor(renderer, 96, 54, 54, 210);
-            SDL_RenderFillRect(renderer, &remove_box);
-            SDL_SetRenderDrawColor(renderer, 250, 245, 245, 255);
-            SDL_RenderDebugText(renderer, x + 30, y + 292, "S  SUPPRIMER LES DONNEES GENEREES");
-        }
-        SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
-        if (!region_busy && region_work_status && region_work_status[0]) {
-            SDL_RenderDebugTextFormat(renderer, x + 18, y + 328, "%.76s", region_work_status);
-        } else {
-            SDL_RenderDebugText(renderer, x + 18, y + 328, "Fleches gauche/droite: changer de region | D/Entree: installer/activer");
-            SDL_RenderDebugText(renderer, x + 18, y + 344, "S: supprimer la region selectionnee | Esc: retour");
-        }
-        return;
-    }
-
-    if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
-        SDL_RenderDebugText(renderer, x + 18, y + 16, "PARAMETRES");
-        SDL_RenderDebugTextFormat(renderer, x + 18, y + 58, "M  Style carte       : %s", openride_map_style_name(map_style));
-        SDL_RenderDebugTextFormat(renderer, x + 18, y + 88, "1/2/3 Profil routage : %s", openride_routing_profile_name(profile));
-        SDL_RenderDebugTextFormat(renderer, x + 18, y + 118, "F  Suivi GPS camera  : %s", follow_gps ? "oui" : "non");
-        SDL_RenderDebugTextFormat(renderer, x + 18, y + 148, "A  Recalcul auto      : %s", auto_reroute ? "oui" : "non");
-        SDL_RenderDebugTextFormat(renderer, x + 18, y + 178, "V  Guidage vocal      : %s", voice_enabled ? "oui" : "non");
-        SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
-        SDL_RenderDebugText(renderer, x + 18, y + 322, "Les reglages sont sauvegardes automatiquement | Esc: retour");
-    }
+    draw_ui_app_panel(renderer,
+                      panel,
+                      favorites,
+                      favorite_count,
+                      history,
+                      history_count,
+                      selected,
+                      map_style,
+                      profile,
+                      follow_gps,
+                      auto_reroute,
+                      voice_enabled,
+                      simulated_gps_active,
+                      simulated_gps_deviation,
+                      simulated_gps_time_scale,
+                      simulated_missed_turn_armed,
+                      simulated_missed_turn_active,
+                      region,
+                      region_status,
+                      region_is_active,
+                      region_busy,
+                      region_progress,
+                      region_work_status,
+                      selection,
+                      gps_valid,
+                      gps_accuracy_m,
+                      route_download_plan_state,
+                      viewport_width);
 }
 
 static void clear_navigation_session(OpenRideNavigationEngine *navigation,
@@ -5779,7 +5638,7 @@ int main(int argc, char **argv)
                     }
 
                     if (app_panel == OPENRIDE_APP_PANEL_MAIN) {
-                        if (app_panel_main_search_at(x, y, width)) {
+                        if (app_panel_main_search_at(renderer, x, y, width, height)) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             open_place_search(window,
                                               place_world,
@@ -5790,7 +5649,7 @@ int main(int argc, char **argv)
                                               route_status,
                                               sizeof(route_status));
                         } else {
-                            const OpenRideAppPanel selected_panel = app_panel_main_at(x, y, width);
+                            const OpenRideAppPanel selected_panel = app_panel_main_at(renderer, x, y, width, height);
                             if (selected_panel != OPENRIDE_APP_PANEL_NONE) {
                                 app_panel = selected_panel;
                                 app_panel_selected = 0U;
@@ -5808,7 +5667,7 @@ int main(int argc, char **argv)
                         const bool favorites_panel = app_panel == OPENRIDE_APP_PANEL_FAVORITES;
                         const uint32_t count = favorites_panel ? favorite_count : history_count;
                         OpenRideStoredPlace *items = favorites_panel ? favorite_places : history_places;
-                        const int chosen_index = app_panel_place_at(x, y, width, count);
+                        const int chosen_index = app_panel_place_at(renderer, x, y, width, height, count);
                         if (chosen_index >= 0) {
                             const OpenRideStoredPlace *chosen = &items[chosen_index];
                             app_panel_selected = (uint32_t)chosen_index;
@@ -5829,7 +5688,7 @@ int main(int argc, char **argv)
                         break;
                     }
                     if (app_panel == OPENRIDE_APP_PANEL_REGIONS) {
-                        const int region_action = app_panel_region_action_at(x, y, width);
+                        const int region_action = app_panel_region_action_at(renderer, x, y, width, height);
                         if (region_action == 1 && !region_busy) {
                             if (openride_region_status_ready(&region_status)
 #ifdef __ANDROID__
