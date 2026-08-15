@@ -15,9 +15,17 @@
 #define ORMAP_GEOMETRY_BATCH_INDEX_LIMIT 24576U
 #define ORMAP_ROAD_PREWARM_TILE_BUDGET 3U
 #define ORMAP_ROAD_DRAW_LOAD_BUDGET 2U
+#define ORMAP_BUILTUP_MASK_PREWARM_TILE_BUDGET 6U
+#define ORMAP_BUILTUP_PREWARM_START 12.20
+#define ORMAP_BUILTUP_OVERVIEW_START 13.15
+#define ORMAP_BUILTUP_OVERVIEW_FULL 13.35
+#define ORMAP_BUILTUP_DETAIL_START 14.00
+#define ORMAP_BUILTUP_DETAIL_END 14.55
 
 static OpenRideORMapRoadDebugStats g_last_road_debug_stats;
 static const OpenRideORMapRenderer *g_last_road_debug_renderer = NULL;
+static OpenRideORMapAreaDebugStats g_last_area_debug_stats;
+static const OpenRideORMapRenderer *g_last_area_debug_renderer = NULL;
 
 typedef struct GeometryBatch {
     uint32_t vertex_count;
@@ -143,6 +151,9 @@ static void geometry_batch_flush(OpenRideORMapRenderer *renderer,
     }
     if (renderer->road_debug_active) {
         ++renderer->road_debug.batches;
+    }
+    if (renderer->area_debug_active) {
+        ++renderer->area_debug.batches;
     }
     SDL_RenderGeometry(renderer->renderer,
                        NULL,
@@ -491,6 +502,23 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
     return victim;
 }
 
+static bool mask_cache_contains(const OpenRideORMapRenderer *renderer,
+                                int zoom,
+                                int x,
+                                int y)
+{
+    if (!renderer) return false;
+    const size_t base = tile_cache_set_base(OPENRIDE_ORMAP_MASK_CACHE_CAPACITY,
+                                            zoom, x, y);
+    for (size_t i = 0U; i < ORMAP_CACHE_ASSOCIATIVITY; ++i) {
+        const OpenRideORMapMaskCacheEntry *entry = &renderer->masks[base + i];
+        if (entry->occupied && entry->zoom == zoom && entry->x == x && entry->y == y) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static OpenRideORMapMaskCacheEntry *mask_cache_slot(OpenRideORMapRenderer *renderer,
                                                      int zoom,
                                                      int x,
@@ -519,6 +547,7 @@ static OpenRideORMapMaskCacheEntry *mask_cache_slot(OpenRideORMapRenderer *rende
     victim->x = x;
     victim->y = y;
     victim->last_used = renderer->frame_counter;
+    const uint64_t load_started = SDL_GetTicksNS();
     char error[160] = {0};
     if (!openride_ormap_load_mask_tile(renderer->map,
                                        zoom,
@@ -529,7 +558,53 @@ static OpenRideORMapMaskCacheEntry *mask_cache_slot(OpenRideORMapRenderer *rende
                                        sizeof(error))) {
         /* Missing mask tile is expected in rural areas. */
     }
+    if (renderer->area_debug_active) {
+        renderer->area_debug.load_ms +=
+            (double)(SDL_GetTicksNS() - load_started) / 1000000.0;
+    }
     return victim;
+}
+
+static uint32_t prewarm_mask_level(OpenRideORMapRenderer *renderer,
+                                   const OpenRideMapCamera *camera,
+                                   int width,
+                                   int height,
+                                   int zoom,
+                                   double viewport_zoom,
+                                   uint32_t budget)
+{
+    if (!renderer || !camera || budget == 0U) return 0U;
+    const int count = 1 << zoom;
+    const double scale = pow(2.0, viewport_zoom - zoom);
+    const double tile_size = ORMAP_TILE_SIZE * scale;
+    const OpenRidePointD center =
+        openride_mercator_forward(camera->center_lat, camera->center_lon);
+    const double world_size = tile_size * count;
+    const double center_x = center.x * world_size;
+    const double center_y = center.y * world_size;
+    const double bearing =
+        camera->bearing_deg * 3.14159265358979323846 / 180.0;
+    const double half_w = fabs(cos(bearing)) * width * 0.5
+        + fabs(sin(bearing)) * height * 0.5;
+    const double half_h = fabs(sin(bearing)) * width * 0.5
+        + fabs(cos(bearing)) * height * 0.5;
+    const int first_x = (int)floor((center_x - half_w) / tile_size);
+    const int last_x = (int)floor((center_x + half_w) / tile_size);
+    const int first_y = (int)floor((center_y - half_h) / tile_size);
+    const int last_y = (int)floor((center_y + half_h) / tile_size);
+
+    uint32_t loaded = 0U;
+    for (int ty = first_y; ty <= last_y; ++ty) {
+        if (ty < 0 || ty >= count) continue;
+        for (int tx = first_x; tx <= last_x; ++tx) {
+            const int qx = wrap_x(tx, count);
+            if (mask_cache_contains(renderer, zoom, qx, ty)) continue;
+            if (!mask_cache_slot(renderer, zoom, qx, ty)) continue;
+            ++renderer->area_debug.mask_prewarm_loads;
+            if (++loaded >= budget) return loaded;
+        }
+    }
+    return loaded;
 }
 
 static OpenRideORMapWaterCacheEntry *water_cache_slot(OpenRideORMapRenderer *renderer,
@@ -601,6 +676,7 @@ static OpenRideORMapAreaCacheEntry *area_cache_slot(OpenRideORMapRenderer *rende
     victim->x = x;
     victim->y = y;
     victim->last_used = renderer->frame_counter;
+    const uint64_t load_started = SDL_GetTicksNS();
     char error[160] = {0};
     if (!openride_ormap_load_area_tile(renderer->map,
                                        zoom,
@@ -610,6 +686,10 @@ static OpenRideORMapAreaCacheEntry *area_cache_slot(OpenRideORMapRenderer *rende
                                        error,
                                        sizeof(error))) {
         /* Missing vector area tiles are common over rural/empty regions. */
+    }
+    if (renderer->area_debug_active) {
+        renderer->area_debug.load_ms +=
+            (double)(SDL_GetTicksNS() - load_started) / 1000000.0;
     }
     return victim;
 }
@@ -687,12 +767,49 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
                        int width,
                        int height)
 {
+    const uint64_t masks_started = SDL_GetTicksNS();
+    const bool previous_area_debug_active = renderer->area_debug_active;
+    renderer->area_debug_active = true;
+
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     const bool v4 = metadata && metadata->format_version >= 4;
-    const double mask_start = v4 ? 13.40 : 14.0;
-    const double mask_end = v4 ? 14.40 : 14.50;
-    if (camera->zoom < mask_start || camera->zoom > 17.2) return;
+    const bool v6 = metadata && metadata->format_version >= 6;
+    const double forest_start = v4 ? 13.40 : 14.0;
+    const double forest_end = v4 ? 14.40 : 14.50;
     const int zoom = metadata ? metadata->mask_zoom : OPENRIDE_ORMAP_MASK_ZOOM;
+
+    if (v6
+        && camera->zoom >= ORMAP_BUILTUP_PREWARM_START
+        && camera->zoom < ORMAP_BUILTUP_OVERVIEW_FULL) {
+        (void)prewarm_mask_level(renderer,
+                                 camera,
+                                 width,
+                                 height,
+                                 zoom,
+                                 ORMAP_BUILTUP_OVERVIEW_START,
+                                 ORMAP_BUILTUP_MASK_PREWARM_TILE_BUDGET);
+    }
+
+    const double builtup_overview_fade = v6
+        ? ormap_zoom_smoothstep(camera->zoom,
+                                ORMAP_BUILTUP_OVERVIEW_START,
+                                ORMAP_BUILTUP_OVERVIEW_FULL)
+            * (1.0 - ormap_zoom_smoothstep(camera->zoom,
+                                           ORMAP_BUILTUP_DETAIL_START,
+                                           ORMAP_BUILTUP_DETAIL_END))
+        : 0.0;
+    const bool draw_forest =
+        camera->zoom >= forest_start && camera->zoom <= 17.2;
+    const bool draw_builtup_overview = builtup_overview_fade > 0.001;
+    const bool draw_legacy_masks =
+        (!metadata || metadata->format_version < 3) && draw_forest;
+    if (!draw_forest && !draw_builtup_overview && !draw_legacy_masks) {
+        renderer->area_debug.areas_ms +=
+            (double)(SDL_GetTicksNS() - masks_started) / 1000000.0;
+        renderer->area_debug_active = previous_area_debug_active;
+        return;
+    }
+
     const int count = 1 << zoom;
     const double scale = pow(2.0, camera->zoom - zoom);
     const double tile_size = ORMAP_TILE_SIZE * scale;
@@ -715,45 +832,67 @@ static void draw_masks(OpenRideORMapRenderer *renderer,
     water.a = 210;
     OpenRideMapColor forest = forest_color(renderer->style);
 
-    const double mask_fade =
-        ormap_zoom_smoothstep(camera->zoom, mask_start, mask_end);
-    ormap_scale_color_alpha(&builtup, mask_fade);
-    ormap_scale_color_alpha(&water, mask_fade);
-    ormap_scale_color_alpha(&forest, mask_fade);
+    const double forest_fade =
+        ormap_zoom_smoothstep(camera->zoom, forest_start, forest_end);
+    ormap_scale_color_alpha(&forest, forest_fade);
+    ormap_scale_color_alpha(&builtup,
+                            v6 ? builtup_overview_fade : forest_fade);
+    ormap_scale_color_alpha(&water, forest_fade);
 
     GeometryBatch batch = {0};
-
     for (int ty = first_y; ty <= last_y; ++ty) {
         if (ty < 0 || ty >= count) continue;
         for (int tx = first_x; tx <= last_x; ++tx) {
             const int qx = wrap_x(tx, count);
+            ++renderer->area_debug.tiles_visited;
             OpenRideORMapMaskCacheEntry *entry = mask_cache_slot(renderer, zoom, qx, ty);
-            if (!entry || !entry->tile.builtup) continue;
+            if (!entry) continue;
             const double left = width * 0.5 + tx * tile_size - center_x;
             const double top = height * 0.5 + ty * tile_size - center_y;
-            if (!draw_mask_layer(renderer, &batch, camera, width, height,
-                                 tile_size, left, top, &entry->tile,
-                                 entry->tile.forest, forest)) {
-                geometry_batch_flush(renderer, &batch);
-                return;
-            }
-            /* v1/v2 stored filled water/built-up areas as semantic cells.
-             * v3 keeps these layers vector-only and retains masks for legacy
-             * compatibility plus the still-coarse forest background. */
-            if (!metadata || metadata->format_version < 3) {
+
+            if (draw_forest && entry->tile.forest && forest.a > 0U) {
                 if (!draw_mask_layer(renderer, &batch, camera, width, height,
                                      tile_size, left, top, &entry->tile,
-                                     entry->tile.builtup, builtup)
-                    || !draw_mask_layer(renderer, &batch, camera, width, height,
+                                     entry->tile.forest, forest)) {
+                    geometry_batch_flush(renderer, &batch);
+                    goto masks_done;
+                }
+            }
+
+            if (draw_builtup_overview && entry->tile.builtup && builtup.a > 0U) {
+                if (!draw_mask_layer(renderer, &batch, camera, width, height,
+                                     tile_size, left, top, &entry->tile,
+                                     entry->tile.builtup, builtup)) {
+                    geometry_batch_flush(renderer, &batch);
+                    goto masks_done;
+                }
+            }
+
+            /* v1/v2 stored filled water/built-up areas only as semantic cells. */
+            if (draw_legacy_masks) {
+                if (entry->tile.builtup && builtup.a > 0U
+                    && !draw_mask_layer(renderer, &batch, camera, width, height,
+                                        tile_size, left, top, &entry->tile,
+                                        entry->tile.builtup, builtup)) {
+                    geometry_batch_flush(renderer, &batch);
+                    goto masks_done;
+                }
+                if (entry->tile.water && water.a > 0U
+                    && !draw_mask_layer(renderer, &batch, camera, width, height,
                                         tile_size, left, top, &entry->tile,
                                         entry->tile.water, water)) {
                     geometry_batch_flush(renderer, &batch);
-                    return;
+                    goto masks_done;
                 }
             }
         }
     }
     geometry_batch_flush(renderer, &batch);
+
+masks_done:
+    renderer->area_debug.areas_ms +=
+        (double)(SDL_GetTicksNS() - masks_started) / 1000000.0;
+    renderer->area_debug_active = previous_area_debug_active;
 }
 
 static double decode_area_coord(uint16_t value)
@@ -808,8 +947,13 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
 
     const double water_fade =
         ormap_detail_handoff_fade(camera->zoom) * level_fade;
+    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
+    const bool v6 = metadata && metadata->format_version >= 6;
     const double builtup_fade =
-        ormap_zoom_smoothstep(camera->zoom, 13.0, 13.45) * level_fade;
+        ormap_zoom_smoothstep(camera->zoom,
+                              v6 ? ORMAP_BUILTUP_DETAIL_START : 13.0,
+                              v6 ? ORMAP_BUILTUP_DETAIL_END : 13.45)
+        * level_fade;
     ormap_scale_color_alpha(&water_color, water_fade);
     ormap_scale_color_alpha(&builtup_color, builtup_fade);
 
@@ -819,6 +963,7 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
         if (ty < 0 || ty >= count) continue;
         for (int tx = first_x; tx <= last_x; ++tx) {
             const int qx = wrap_x(tx, count);
+            ++renderer->area_debug.tiles_visited;
             OpenRideORMapAreaCacheEntry *entry = area_cache_slot(renderer, zoom, qx, ty);
             if (!entry || entry->tile.count == 0U) continue;
             const double left = width * 0.5 + tx * tile_size - center_x;
@@ -844,6 +989,8 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
                 }
                 const OpenRideMapColor color = triangle->kind == OPENRIDE_ORMAP_AREA_WATER
                     ? water_color : builtup_color;
+                if (color.a == 0U) continue;
+                ++renderer->area_debug.triangles_drawn;
                 if (!geometry_batch_triangle(renderer,
                                              &batch,
                                              x,
@@ -863,34 +1010,45 @@ static void draw_areas(OpenRideORMapRenderer *renderer,
                        int width,
                        int height)
 {
+    const uint64_t areas_started = SDL_GetTicksNS();
+    const bool previous_area_debug_active = renderer->area_debug_active;
+    renderer->area_debug_active = true;
+
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
-    if (!metadata || metadata->format_version < 3 || camera->zoom < 10.0) return;
+    if (metadata && metadata->format_version >= 3 && camera->zoom >= 10.0) {
+        const double detail_mix =
+            ormap_zoom_smoothstep(camera->zoom, 12.15, 12.85);
+        const bool v6 = metadata->format_version >= 6;
+        const bool draw_detail_builtup =
+            camera->zoom >= (v6 ? ORMAP_BUILTUP_DETAIL_START : 13.0);
 
-    const double detail_mix =
-        ormap_zoom_smoothstep(camera->zoom, 12.15, 12.85);
-    const bool draw_detail_builtup =
-        camera->zoom >= 13.0;
+        if (detail_mix < 1.0) {
+            draw_area_level(renderer,
+                            camera,
+                            width,
+                            height,
+                            metadata->area_coarse_zoom,
+                            false,
+                            true,
+                            1.0 - detail_mix);
+        }
+        if (detail_mix > 0.0) {
+            draw_area_level(renderer,
+                            camera,
+                            width,
+                            height,
+                            metadata->area_detail_zoom,
+                            draw_detail_builtup,
+                            true,
+                            detail_mix);
+        }
+    }
 
-    if (detail_mix < 1.0) {
-        draw_area_level(renderer,
-                        camera,
-                        width,
-                        height,
-                        metadata->area_coarse_zoom,
-                        false,
-                        true,
-                        1.0 - detail_mix);
-    }
-    if (detail_mix > 0.0) {
-        draw_area_level(renderer,
-                        camera,
-                        width,
-                        height,
-                        metadata->area_detail_zoom,
-                        draw_detail_builtup,
-                        true,
-                        detail_mix);
-    }
+    renderer->area_debug.areas_ms +=
+        (double)(SDL_GetTicksNS() - areas_started) / 1000000.0;
+    renderer->area_debug_active = previous_area_debug_active;
+    g_last_area_debug_stats = renderer->area_debug;
+    g_last_area_debug_renderer = renderer;
 }
 
 static int waterway_width(uint8_t kind, double zoom)
@@ -1964,6 +2122,7 @@ void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer)
     if (!renderer) return;
     ++renderer->frame_counter;
     memset(&renderer->road_debug, 0, sizeof(renderer->road_debug));
+    memset(&renderer->area_debug, 0, sizeof(renderer->area_debug));
     renderer->road_debug.prewarm_zoom = -1;
     renderer->road_draw_load_budget_remaining = ORMAP_ROAD_DRAW_LOAD_BUDGET;
     renderer->road_debug_active = false;
@@ -1985,6 +2144,21 @@ void openride_ormap_renderer_get_road_debug_stats(
         *stats = g_last_road_debug_stats;
     } else if (renderer) {
         *stats = renderer->road_debug;
+    }
+}
+
+void openride_ormap_renderer_get_area_debug_stats(
+    const OpenRideORMapRenderer *renderer,
+    OpenRideORMapAreaDebugStats *stats)
+{
+    if (!stats) return;
+    memset(stats, 0, sizeof(*stats));
+    if (renderer && renderer == g_last_area_debug_renderer) {
+        *stats = renderer->area_debug;
+    } else if (g_last_area_debug_renderer) {
+        *stats = g_last_area_debug_stats;
+    } else if (renderer) {
+        *stats = renderer->area_debug;
     }
 }
 
