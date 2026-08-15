@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 5
+          fetch-depth: 6
 
       - name: Apply cartographic pipeline patch
         shell: bash
@@ -35,7 +35,7 @@ jobs:
               for line in body.splitlines()
           )
           needle = '''    if count != 1:\n        raise SystemExit(f"{label}: expected one match, found {count}")\n    return text.replace(old, new, 1)'''
-          replacement = '''    if count != 1:\n        if label == "ormap v4 area comment":\n            return text\n        raise SystemExit(f"{label}: expected one match, found {count}")\n    return text.replace(old, new, 1)'''
+          replacement = '''    if count != 1:\n        if label == "ormap v4 area comment":\n            return text\n        if label == "coarse writer signature":\n            start = text.find("static bool v4_append_coarse_builtup(")\n            end = text.find("\\n{", start)\n            if start >= 0 and end >= 0:\n                return text[:start] + new + text[end:]\n        raise SystemExit(f"{label}: expected one match, found {count}")\n    return text.replace(old, new, 1)'''
           if needle not in source:
               raise SystemExit("replace_once guard not found in patch source")
           source = source.replace(needle, replacement, 1)
