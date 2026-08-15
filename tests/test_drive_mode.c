@@ -25,7 +25,8 @@ static void test_auto_zoom(void)
 
     assert(city > cruise_60);
     assert(cruise_60 > motorway);
-    assert(fabs(cruise_60 - 16.5) < 1e-9);
+    assert(fabs(cruise_60 - 17.2) < 1e-9);
+    assert(fabs(motorway - 16.0) < 1e-9);
     assert(near_turn > far_turn);
 }
 
