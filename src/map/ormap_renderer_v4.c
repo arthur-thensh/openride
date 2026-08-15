@@ -395,21 +395,38 @@ static OpenRideMapColor v4_builtup_color(OpenRideORMapRenderer *renderer,
     return color;
 }
 
-static void v4_draw_coarse_builtup(OpenRideORMapRenderer *renderer,
-                                   const OpenRideMapCamera *camera,
-                                   int width,
-                                   int height)
+static OpenRideMapColor v4_green_color(OpenRideORMapRenderer *renderer,
+                             double factor)
 {
-    if (camera->zoom < 9.70 || camera->zoom > 13.85) return;
+    OpenRideMapColor color;
+    if (renderer->style == OPENRIDE_MAP_STYLE_TOPO) {
+        color = (OpenRideMapColor){180U, 203U, 170U, 150U};
+    } else if (renderer->style == OPENRIDE_MAP_STYLE_TRAIL) {
+        color = (OpenRideMapColor){194U, 210U, 184U, 118U};
+    } else {
+        color = (OpenRideMapColor){207U, 216U, 201U, 98U};
+    }
+    color.a = v4_scaled_alpha(color.a, factor);
+    return color;
+}
+
+static void v4_draw_coarse_landcover(OpenRideORMapRenderer *renderer,
+                           const OpenRideMapCamera *camera,
+                           int width,
+                           int height)
+{
+    if (camera->zoom < 9.20 || camera->zoom > 13.85) return;
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     if (!metadata || metadata->format_version < 4) return;
 
-    const double fade_in = v4_smoothstep(camera->zoom, 9.70, 10.45);
+    const double urban_in = v4_smoothstep(camera->zoom, 9.70, 10.45);
+    const double green_in = v4_smoothstep(camera->zoom, 9.20, 10.05);
     const double fade_out = 1.0 - v4_smoothstep(camera->zoom, 13.15, 13.75);
-    const double factor = fade_in * fade_out;
-    if (factor <= 0.0) return;
-    const OpenRideMapColor color = v4_builtup_color(renderer, false, factor);
-    if (color.a == 0U) return;
+    const OpenRideMapColor urban =
+        v4_builtup_color(renderer, false, urban_in * fade_out);
+    const OpenRideMapColor green =
+        v4_green_color(renderer, green_in * fade_out);
+    if (urban.a == 0U && green.a == 0U) return;
 
     const int zoom = metadata->area_coarse_zoom;
     const int count = 1 << zoom;
@@ -419,67 +436,79 @@ static void v4_draw_coarse_builtup(OpenRideORMapRenderer *renderer,
     int first_x = 0, last_x = 0, first_y = 0, last_y = 0;
     V4Rotation rotation;
     v4_visible_tile_range(camera,
-                          width,
-                          height,
-                          zoom,
-                          &tile_size,
-                          &center_x,
-                          &center_y,
-                          &first_x,
-                          &last_x,
-                          &first_y,
-                          &last_y,
-                          &rotation);
+                width,
+                height,
+                zoom,
+                &tile_size,
+                &center_x,
+                &center_y,
+                &first_x,
+                &last_x,
+                &first_y,
+                &last_y,
+                &rotation);
 
     V4GeometryBatch batch = {0};
-    for (int ty = first_y; ty <= last_y; ++ty) {
-        if (ty < 0 || ty >= count) continue;
-        for (int tx = first_x; tx <= last_x; ++tx) {
-            const int qx = v4_wrap_x(tx, count);
-            OpenRideORMapAreaCacheEntry *entry =
-                v4_area_cache_slot(renderer, zoom, qx, ty);
-            if (!entry || entry->tile.count == 0U) continue;
-            const double left = width * 0.5 + tx * tile_size - center_x;
-            const double top = height * 0.5 + ty * tile_size - center_y;
-            for (uint32_t i = 0U; i < entry->tile.count; ++i) {
-                const OpenRideORMapAreaTriangle *triangle =
-                    &entry->tile.triangles[i];
-                if (triangle->kind != OPENRIDE_ORMAP_AREA_BUILTUP) continue;
-                const uint16_t xs[3] = {
-                    triangle->x1, triangle->x2, triangle->x3
-                };
-                const uint16_t ys[3] = {
-                    triangle->y1, triangle->y2, triangle->y3
-                };
-                float x[3];
-                float y[3];
-                float min_x = FLT_MAX;
-                float min_y = FLT_MAX;
-                float max_x = -FLT_MAX;
-                float max_y = -FLT_MAX;
-                for (uint32_t v = 0U; v < 3U; ++v) {
-                    x[v] = (float)(left
-                        + v4_decode_area_coord(xs[v]) * tile_size);
-                    y[v] = (float)(top
-                        + v4_decode_area_coord(ys[v]) * tile_size);
-                    v4_rotate_point(&rotation, &x[v], &y[v]);
-                    if (x[v] < min_x) min_x = x[v];
-                    if (x[v] > max_x) max_x = x[v];
-                    if (y[v] < min_y) min_y = y[v];
-                    if (y[v] > max_y) max_y = y[v];
-                }
-                if (max_x < -2.0f || min_x > width + 2.0f
-                    || max_y < -2.0f || min_y > height + 2.0f) {
-                    continue;
-                }
-                if (!v4_batch_triangle(renderer, &batch, x, y, color)) {
-                    v4_batch_flush(renderer, &batch);
-                    return;
-                }
-            }
+    /* Two passes guarantee the intended background hierarchy even if a tile
+     * also contains legacy area records: green first, then urban. */
+    const uint8_t kinds[2] = {
+        OPENRIDE_ORMAP_AREA_GREEN,
+        OPENRIDE_ORMAP_AREA_BUILTUP
+    };
+    for (uint32_t pass = 0U; pass < 2U; ++pass) {
+        const uint8_t kind = kinds[pass];
+        const OpenRideMapColor color =
+  kind == OPENRIDE_ORMAP_AREA_GREEN ? green : urban;
+        if (color.a == 0U) continue;
+        for (int ty = first_y; ty <= last_y; ++ty) {
+  if (ty < 0 || ty >= count) continue;
+  for (int tx = first_x; tx <= last_x; ++tx) {
+      const int qx = v4_wrap_x(tx, count);
+      OpenRideORMapAreaCacheEntry *entry =
+          v4_area_cache_slot(renderer, zoom, qx, ty);
+      if (!entry || entry->tile.count == 0U) continue;
+      const double left = width * 0.5 + tx * tile_size - center_x;
+      const double top = height * 0.5 + ty * tile_size - center_y;
+      for (uint32_t i = 0U; i < entry->tile.count; ++i) {
+          const OpenRideORMapAreaTriangle *triangle =
+              &entry->tile.triangles[i];
+          if (triangle->kind != kind) continue;
+          const uint16_t xs[3] = {
+              triangle->x1, triangle->x2, triangle->x3
+          };
+          const uint16_t ys[3] = {
+              triangle->y1, triangle->y2, triangle->y3
+          };
+          float x[3];
+          float y[3];
+          float min_x = FLT_MAX;
+          float min_y = FLT_MAX;
+          float max_x = -FLT_MAX;
+          float max_y = -FLT_MAX;
+          for (uint32_t v = 0U; v < 3U; ++v) {
+              x[v] = (float)(left
+                  + v4_decode_area_coord(xs[v]) * tile_size);
+              y[v] = (float)(top
+                  + v4_decode_area_coord(ys[v]) * tile_size);
+              v4_rotate_point(&rotation, &x[v], &y[v]);
+              if (x[v] < min_x) min_x = x[v];
+              if (x[v] > max_x) max_x = x[v];
+              if (y[v] < min_y) min_y = y[v];
+              if (y[v] > max_y) max_y = y[v];
+          }
+          if (max_x < -2.0f || min_x > width + 2.0f
+              || max_y < -2.0f || min_y > height + 2.0f) {
+              continue;
+          }
+          if (!v4_batch_triangle(renderer, &batch, x, y, color)) {
+              v4_batch_flush(renderer, &batch);
+              return;
+          }
+      }
+  }
         }
+        v4_batch_flush(renderer, &batch);
     }
-    v4_batch_flush(renderer, &batch);
 }
 
 static void v4_draw_detail_builtup(OpenRideORMapRenderer *renderer,
@@ -583,8 +612,8 @@ void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
     const bool v4 = metadata && metadata->format_version >= 4;
 
     if (v4 && layer == OPENRIDE_ORMAP_RENDER_LAYER_AREAS) {
-        /* Urban overview goes below vector water, never over it. */
-        v4_draw_coarse_builtup(renderer,
+        /* Low-zoom landcover stays below vector water, roads and labels. */
+        v4_draw_coarse_landcover(renderer,
                                camera,
                                viewport_width,
                                viewport_height);

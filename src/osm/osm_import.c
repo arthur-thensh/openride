@@ -2196,7 +2196,16 @@ static OpenRideOSMMapFeatureKind classify_map_area_way(const OSMStringTable *tab
         return OPENRIDE_OSM_MAP_FEATURE_WATER_AREA;
     }
     if (tag_is(natural, "wood")
+        || tag_is(natural, "grassland")
+        || tag_is(natural, "scrub")
+        || tag_is(natural, "heath")
         || tag_is(landuse, "forest")
+        || tag_is(landuse, "grass")
+        || tag_is(landuse, "meadow")
+        || tag_is(landuse, "recreation_ground")
+        || tag_is(landuse, "village_green")
+        || tag_is(leisure, "park")
+        || tag_is(leisure, "garden")
         || tag_is(leisure, "nature_reserve")) {
         return OPENRIDE_OSM_MAP_FEATURE_FOREST_AREA;
     }
