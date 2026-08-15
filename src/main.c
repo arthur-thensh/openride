@@ -37,6 +37,8 @@
 #include "openride/ui_toolbar.h"
 #include "openride/ui_main_menu.h"
 #include "openride/ui_route_panel.h"
+#include "openride/ui_settings_panel.h"
+#include "openride/ui_regions_panel.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -2252,6 +2254,97 @@ static OpenRideMobilePanelHit mobile_route_panel_hit_test(
     return hit;
 }
 
+static OpenRideMobilePanelHit mobile_settings_panel_hit_test(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height)
+{
+    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return hit;
+    }
+
+    switch (openride_ui_settings_panel_hit_test(&ui, x, y)) {
+        case OPENRIDE_UI_SETTINGS_PANEL_STYLE:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_PROFILE:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_FOLLOW:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_REROUTE:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_VOICE:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_GPS_SIMULATION:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_GPS_DEVIATION:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_GPS_SPEED:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_GPS_MISSED_TURN:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_BACK:
+            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
+            break;
+        case OPENRIDE_UI_SETTINGS_PANEL_NONE:
+        default:
+            break;
+    }
+    openride_ui_end(&ui);
+    return hit;
+}
+
+static OpenRideMobilePanelHit mobile_regions_panel_hit_test(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height)
+{
+    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return hit;
+    }
+
+    switch (openride_ui_regions_panel_hit_test(&ui, x, y)) {
+        case OPENRIDE_UI_REGIONS_PANEL_PREVIOUS:
+            hit.action = OPENRIDE_MOBILE_PANEL_REGION_PREVIOUS;
+            break;
+        case OPENRIDE_UI_REGIONS_PANEL_NEXT:
+            hit.action = OPENRIDE_MOBILE_PANEL_REGION_NEXT;
+            break;
+        case OPENRIDE_UI_REGIONS_PANEL_INSTALL:
+            hit.action = OPENRIDE_MOBILE_PANEL_REGION_INSTALL;
+            break;
+        case OPENRIDE_UI_REGIONS_PANEL_REMOVE:
+            hit.action = OPENRIDE_MOBILE_PANEL_REGION_REMOVE;
+            break;
+        case OPENRIDE_UI_REGIONS_PANEL_BACK:
+            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
+            break;
+        case OPENRIDE_UI_REGIONS_PANEL_NONE:
+        default:
+            break;
+    }
+    openride_ui_end(&ui);
+    return hit;
+}
+
 typedef struct OpenRideMobilePanelLayout {
     SDL_FRect panel;
     SDL_FRect back;
@@ -2578,6 +2671,52 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                 .gps_accuracy_m = gps_accuracy_m
             };
             (void)openride_ui_route_panel_draw(&ui, &state);
+            openride_ui_end(&ui);
+        }
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_SETTINGS) {
+        OpenRideUIContext ui;
+        openride_ui_init(&ui);
+        if (openride_ui_begin(&ui, renderer, width, height)) {
+            const OpenRideUISettingsPanelState state = {
+                .map_style_name = openride_map_style_name(map_style),
+                .routing_profile_name = openride_routing_profile_name(profile),
+                .follow_gps = follow_gps,
+                .auto_reroute = auto_reroute,
+                .voice_enabled = voice_enabled,
+                .simulated_gps_active = simulated_gps_active,
+                .simulated_gps_deviation = simulated_gps_deviation,
+                .simulated_gps_time_scale = simulated_gps_time_scale,
+                .simulated_missed_turn_armed = simulated_missed_turn_armed,
+                .simulated_missed_turn_active = simulated_missed_turn_active
+            };
+            (void)openride_ui_settings_panel_draw(&ui, &state);
+            openride_ui_end(&ui);
+        }
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_REGIONS) {
+        OpenRideUIContext ui;
+        openride_ui_init(&ui);
+        if (openride_ui_begin(&ui, renderer, width, height)) {
+            const OpenRideUIRegionsPanelState state = {
+                .region_name = region ? region->name : "Region",
+                .region_is_active = region_is_active,
+                .ormap_installed = region_status && region_status->ormap_installed,
+                .routing_installed = region_status && region_status->routing_installed,
+                .search_installed = region_status && region_status->search_installed,
+                .source_pbf_present = region_status && region_status->source_pbf_present,
+                .poly_present = region_status && region_status->poly_present,
+                .ready = openride_region_status_ready(region_status),
+                .total_size_mb = region_status ? region_status->total_size_mb : 0.0,
+                .busy = region_busy,
+                .progress = region_progress,
+                .work_status = region_work_status
+            };
+            (void)openride_ui_regions_panel_draw(&ui, &state);
             openride_ui_end(&ui);
         }
         return;
@@ -5857,6 +5996,18 @@ int main(int argc, char **argv)
                                                               y,
                                                               width,
                                                               height)
+                            : app_panel == OPENRIDE_APP_PANEL_SETTINGS
+                                ? mobile_settings_panel_hit_test(renderer,
+                                                                 x,
+                                                                 y,
+                                                                 width,
+                                                                 height)
+                            : app_panel == OPENRIDE_APP_PANEL_REGIONS
+                                ? mobile_regions_panel_hit_test(renderer,
+                                                                x,
+                                                                y,
+                                                                width,
+                                                                height)
                                 : mobile_app_panel_hit_test(renderer,
                                                             app_panel,
                                                             x,
