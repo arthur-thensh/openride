@@ -63,6 +63,82 @@ static void test_right_turn(void)
     openride_route_destroy(&route);
 }
 
+static void test_topology_suppresses_curve_only_turn(void)
+{
+    const OpenRideRoutePoint points[] = {
+        {50.0000, 3.0000},
+        {50.0010, 3.0000},
+        {50.0010, 3.0010}
+    };
+    OpenRideRoute route = route_from_points(points, 3U);
+    route.navigation_context = calloc(
+        route.geometry_count, sizeof(*route.navigation_context));
+    assert(route.navigation_context != NULL);
+    route.navigation_context_count = route.geometry_count;
+
+    OpenRideNavigationInstructionList list = {0};
+    char error[128] = {0};
+    assert(openride_navigation_instructions_build(NULL,
+                                                   &route,
+                                                   &list,
+                                                   error,
+                                                   sizeof(error)));
+
+    /* A 90 degree road bend without any alternative is not a decision. */
+    assert(list.count == 2U);
+    assert(list.items[0].maneuver == OPENRIDE_MANEUVER_DEPART);
+    assert(list.items[1].maneuver == OPENRIDE_MANEUVER_ARRIVE);
+
+    openride_navigation_instructions_destroy(&list);
+    openride_route_destroy(&route);
+}
+
+static void test_slight_turn_at_real_choice(void)
+{
+    const OpenRideRoutePoint points[] = {
+        {50.0000, 3.0000},
+        {50.0010, 3.0000},
+        {50.0016, 3.0010}
+    };
+
+    OpenRideRoute route = route_from_points(points, 3U);
+    route.navigation_context = calloc(
+        route.geometry_count, sizeof(*route.navigation_context));
+    assert(route.navigation_context != NULL);
+    route.navigation_context_count = route.geometry_count;
+    route.navigation_context[1].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
+
+    OpenRideNavigationInstructionList list = {0};
+    char error[128] = {0};
+    assert(openride_navigation_instructions_build(NULL,
+                                                   &route,
+                                                   &list,
+                                                   error,
+                                                   sizeof(error)));
+    assert(list.count == 3U);
+    assert(list.items[1].maneuver == OPENRIDE_MANEUVER_SLIGHT_RIGHT);
+    assert(list.items[1].turn_angle_deg > 45.0
+           && list.items[1].turn_angle_deg < 55.0);
+
+    openride_navigation_instructions_destroy(&list);
+    openride_route_destroy(&route);
+
+    /* Geometry-only routes keep a useful fallback at the same angle. */
+    route = route_from_points(points, 3U);
+    memset(&list, 0, sizeof(list));
+    memset(error, 0, sizeof(error));
+    assert(openride_navigation_instructions_build(NULL,
+                                                   &route,
+                                                   &list,
+                                                   error,
+                                                   sizeof(error)));
+    assert(list.count == 3U);
+    assert(list.items[1].maneuver == OPENRIDE_MANEUVER_SLIGHT_RIGHT);
+
+    openride_navigation_instructions_destroy(&list);
+    openride_route_destroy(&route);
+}
+
 static OpenRideRoutingGraph build_roundabout_graph(void)
 {
     OpenRideRoutingGraph graph = {0};
@@ -152,12 +228,9 @@ static void test_continue_grouping(void)
     assert(route.navigation_context != NULL);
     route.navigation_context_count = route.geometry_count;
 
-    /* Three nearby straight-through decisions should become one instruction. */
     route.navigation_context[1].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
     route.navigation_context[2].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
     route.navigation_context[3].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
-
-    /* A much later straight decision must stay separate. */
     route.navigation_context[4].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
 
     OpenRideNavigationInstructionList list = {0};
@@ -208,13 +281,11 @@ static void test_following_instruction(void)
     assert(following == &items[2]);
     assert(fabs(gap - 150.0) < 1e-9);
 
-    following =
-        openride_navigation_instructions_after(&list, 250.0, &gap);
+    following = openride_navigation_instructions_after(&list, 250.0, &gap);
     assert(following == &items[3]);
     assert(fabs(gap - 750.0) < 1e-9);
 
-    following =
-        openride_navigation_instructions_after(&list, 1000.0, &gap);
+    following = openride_navigation_instructions_after(&list, 1000.0, &gap);
     assert(following == NULL);
 }
 
@@ -230,6 +301,8 @@ static void test_distance_format(void)
 int main(void)
 {
     test_right_turn();
+    test_topology_suppresses_curve_only_turn();
+    test_slight_turn_at_real_choice();
     test_roundabout_exit_number();
     test_continue_grouping();
     test_following_instruction();
