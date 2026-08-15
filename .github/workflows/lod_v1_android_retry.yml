@@ -55,6 +55,11 @@ jobs:
             'cmake;3.22.1'
           "${ANDROID_HOME}/platform-tools/adb" version
 
+      - name: Bootstrap Android vendored dependencies
+        run: |
+          ./scripts/bootstrap_sdl.sh
+          ./scripts/bootstrap_sqlite.sh
+
       - name: Build production Android debug APK
         run: ./scripts/android_build.sh
 
