@@ -1,4 +1,5 @@
 #include "openride/region_manager.h"
+#include "openride/ormap.h"
 #include "openride/routing_gateway_index.h"
 
 #include <stdio.h>
@@ -89,6 +90,25 @@ bool openride_region_status_ready(const OpenRideRegionStatus *status)
         && status->search_installed;
 }
 
+static bool current_ormap_installed(const char *path)
+{
+    if (!path || path[0] == '\0' || !openride_platform_file_exists(path)) {
+        return false;
+    }
+
+    char map_error[160] = {0};
+    OpenRideORMap *map = openride_ormap_open(path,
+                                             map_error,
+                                             sizeof(map_error));
+    if (!map) return false;
+
+    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(map);
+    const bool current = metadata
+        && metadata->format_version == (int)OPENRIDE_ORMAP_FORMAT_VERSION;
+    openride_ormap_close(map);
+    return current;
+}
+
 bool openride_region_get_status(const OpenRidePlatformPaths *paths,
                                 const OpenRideRegionDefinition *region,
                                 OpenRideRegionStatus *status,
@@ -140,7 +160,16 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
 
     const double ormap_size = openride_platform_file_size_mb(status->ormap_path);
     const double legacy_size = openride_platform_file_size_mb(status->legacy_map_path);
-    status->ormap_installed = ormap_size >= 0.0;
+
+    /*
+     * A file being present is not enough: a format migration may require new
+     * data that simply does not exist in the previous .ormap. Keep old files
+     * readable for compatibility, but mark them stale for region installation
+     * so the app can rebuild/download the source instead of silently reusing
+     * obsolete cartography.
+     */
+    status->ormap_installed = ormap_size >= 0.0
+        && current_ormap_installed(status->ormap_path);
     status->legacy_map_installed = legacy_size >= 0.0;
     status->map_installed = status->ormap_installed || status->legacy_map_installed;
     if (status->ormap_installed) {
