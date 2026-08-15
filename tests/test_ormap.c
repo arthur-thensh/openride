@@ -144,6 +144,10 @@ int main(int argc, char **argv)
 {
     assert(argc == 2);
     assert(OPENRIDE_ORMAP_AREA_GREEN == 3);
+    assert(OPENRIDE_ORMAP_FORMAT_VERSION == 5U);
+    assert(OPENRIDE_ORMAP_AREA_REGIONAL_ZOOM < OPENRIDE_ORMAP_AREA_OVERVIEW_ZOOM);
+    assert(OPENRIDE_ORMAP_AREA_OVERVIEW_ZOOM < OPENRIDE_ORMAP_AREA_LOCAL_ZOOM);
+    assert(OPENRIDE_ORMAP_AREA_LOCAL_ZOOM == OPENRIDE_ORMAP_AREA_COARSE_ZOOM);
     char graph_path[256], places_path[256], map_path[256];
     const long pid = (long)getpid();
     snprintf(graph_path, sizeof(graph_path), "/tmp/openride-ormap-%ld.orgraph", pid);
