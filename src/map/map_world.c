@@ -93,7 +93,69 @@ struct OpenRideMapWorld {
     int *indices;
     uint32_t vertex_capacity;
     uint32_t index_capacity;
+    bool debug_enabled;
+    OpenRideMapWorldDebugStats debug;
 };
+
+static void map_world_accumulate_road_debug(
+    OpenRideORMapRoadDebugStats *dst,
+    const OpenRideORMapRoadDebugStats *src)
+{
+    if (!dst || !src) return;
+    dst->roads_ms += src->roads_ms;
+    dst->load_ms += src->load_ms;
+    dst->cache_hits += src->cache_hits;
+    dst->cache_misses += src->cache_misses;
+    dst->prewarm_loads += src->prewarm_loads;
+    dst->draw_loads += src->draw_loads;
+    dst->deferred_loads += src->deferred_loads;
+    dst->tiles_visited += src->tiles_visited;
+    dst->segments_drawn += src->segments_drawn;
+    dst->batches += src->batches;
+    if (src->prewarm_zoom >= 0) {
+        if (dst->prewarm_zoom < 0) dst->prewarm_zoom = src->prewarm_zoom;
+        else if (dst->prewarm_zoom != src->prewarm_zoom) dst->prewarm_zoom = -2;
+    }
+}
+
+static void map_world_accumulate_area_debug(
+    OpenRideORMapAreaDebugStats *dst,
+    const OpenRideORMapAreaDebugStats *src)
+{
+    if (!dst || !src) return;
+    dst->areas_ms += src->areas_ms;
+    dst->load_ms += src->load_ms;
+    dst->tiles_visited += src->tiles_visited;
+    dst->triangles_drawn += src->triangles_drawn;
+    dst->batches += src->batches;
+    dst->prewarm_loads += src->prewarm_loads;
+    dst->draw_loads += src->draw_loads;
+    dst->deferred_loads += src->deferred_loads;
+}
+
+void openride_map_world_debug_begin_frame(OpenRideMapWorld *world)
+{
+    if (!world) return;
+    memset(&world->debug, 0, sizeof(world->debug));
+    world->debug.road.prewarm_zoom = -1;
+    world->debug_enabled = true;
+}
+
+void openride_map_world_debug_end_frame(OpenRideMapWorld *world)
+{
+    if (!world) return;
+    world->debug_enabled = false;
+}
+
+void openride_map_world_get_debug_stats(
+    const OpenRideMapWorld *world,
+    OpenRideMapWorldDebugStats *stats)
+{
+    if (!stats) return;
+    memset(stats, 0, sizeof(*stats));
+    stats->road.prewarm_zoom = -1;
+    if (world) *stats = world->debug;
+}
 
 static void set_error(char *error, size_t error_size, const char *message)
 {
@@ -1490,6 +1552,10 @@ void openride_map_world_draw(OpenRideMapWorld *world,
         return;
     }
 
+    const bool debug_enabled = world->debug_enabled;
+    const uint64_t debug_started_ns = debug_enabled ? SDL_GetTicksNS() : 0U;
+    if (debug_enabled) world->debug.overview_drawn = true;
+
     const OpenRideMapPalette palette = openride_map_palette(style);
     const double overview_handoff =
         1.0 - openride_zoom_smoothstep(camera->zoom, 10.0, 11.30);
@@ -1609,6 +1675,11 @@ void openride_map_world_draw(OpenRideMapWorld *world,
                            overview_handoff,
                            viewport_width,
                            viewport_height);
+
+    if (debug_enabled) {
+        world->debug.overview_ms +=
+            (double)(SDL_GetTicksNS() - debug_started_ns) / 1000000.0;
+    }
 }
 
 
@@ -1666,6 +1737,10 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
         return;
     }
 
+    const bool debug_enabled = world->debug_enabled;
+    const uint64_t debug_started_ns = debug_enabled ? SDL_GetTicksNS() : 0U;
+    if (debug_enabled) world->debug.detail_drawn = true;
+
     const OpenRideMapPalette palette = openride_map_palette(style);
     SDL_SetRenderDrawColor(world->renderer,
                            palette.background.r,
@@ -1688,7 +1763,14 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
         openride_ormap_renderer_begin_frame(region->detail_renderer);
     }
 
-    if (visible_count == 0U) return;
+    if (debug_enabled) world->debug.visible_detail_regions = (uint32_t)visible_count;
+    if (visible_count == 0U) {
+        if (debug_enabled) {
+            world->debug.detail_ms +=
+                (double)(SDL_GetTicksNS() - debug_started_ns) / 1000000.0;
+        }
+        return;
+    }
 
     /*
      * Render by cartographic layer across every visible .ormap instead of
@@ -1698,17 +1780,40 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
     for (int layer = OPENRIDE_ORMAP_RENDER_LAYER_MASKS;
          layer <= OPENRIDE_ORMAP_RENDER_LAYER_LABELS;
          ++layer) {
+        const uint64_t layer_started_ns = debug_enabled ? SDL_GetTicksNS() : 0U;
         for (size_t i = 0U; i < world->region_count; ++i) {
             OpenRideMapWorldRegion *region = &world->regions[i];
             if (!region->detail_visible) continue;
-
             openride_ormap_renderer_draw_layer(region->detail_renderer,
                                                camera,
                                                viewport_width,
                                                viewport_height,
                                                (OpenRideORMapRenderLayer)layer);
         }
-}
+        if (debug_enabled) {
+            const double layer_ms = (double)(SDL_GetTicksNS() - layer_started_ns) / 1000000.0;
+            switch ((OpenRideORMapRenderLayer)layer) {
+                case OPENRIDE_ORMAP_RENDER_LAYER_MASKS: world->debug.masks_ms += layer_ms; break;
+                case OPENRIDE_ORMAP_RENDER_LAYER_AREAS: world->debug.areas_ms += layer_ms; break;
+                case OPENRIDE_ORMAP_RENDER_LAYER_WATERWAYS: world->debug.waterways_ms += layer_ms; break;
+                case OPENRIDE_ORMAP_RENDER_LAYER_ROADS: world->debug.roads_ms += layer_ms; break;
+                case OPENRIDE_ORMAP_RENDER_LAYER_LABELS: world->debug.labels_ms += layer_ms; break;
+                default: break;
+            }
+        }
+    }
+
+    if (debug_enabled) {
+        for (size_t i = 0U; i < world->region_count; ++i) {
+            const OpenRideMapWorldRegion *region = &world->regions[i];
+            if (!region->detail_visible || !region->detail_renderer) continue;
+            map_world_accumulate_road_debug(&world->debug.road, &region->detail_renderer->road_debug);
+            map_world_accumulate_area_debug(&world->debug.area, &region->detail_renderer->area_debug);
+        }
+        world->debug.ormap_stats_valid = true;
+        world->debug.detail_ms +=
+            (double)(SDL_GetTicksNS() - debug_started_ns) / 1000000.0;
+    }
 }
 
 

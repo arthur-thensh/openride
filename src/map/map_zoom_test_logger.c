@@ -1,275 +1,39 @@
 #include "map/map_zoom_test_logger.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int compare_double_ascending(const void *lhs, const void *rhs)
-{
-    const double a = *(const double *)lhs;
-    const double b = *(const double *)rhs;
-    return a < b ? -1 : (a > b ? 1 : 0);
-}
-
-static double percentile_sorted(const double *values, size_t count, double q)
-{
-    if (!values || count == 0U) return 0.0;
-    if (count == 1U) return values[0];
-    if (q <= 0.0) return values[0];
-    if (q >= 1.0) return values[count - 1U];
-
-    const double position = q * (double)(count - 1U);
-    const size_t lower = (size_t)position;
-    const size_t upper = lower + 1U < count ? lower + 1U : lower;
-    const double fraction = position - (double)lower;
-    return values[lower] + (values[upper] - values[lower]) * fraction;
-}
-
-static void release_samples(OpenRideMapZoomTest *test)
-{
-    if (!test) return;
-    free(test->samples);
-    test->samples = NULL;
-    test->sample_count = 0U;
-    test->dropped_samples = 0U;
-    test->first_present_ns = 0U;
-    test->last_present_ns = 0U;
-}
+static int compare_double_ascending(const void *lhs, const void *rhs) { const double a = *(const double *)lhs; const double b = *(const double *)rhs; return a < b ? -1 : (a > b ? 1 : 0); }
+static double percentile_sorted(const double *values, size_t count, double q) { if (!values || count == 0U) return 0.0; if (count == 1U) return values[0]; if (q <= 0.0) return values[0]; if (q >= 1.0) return values[count - 1U]; const double p=q*(double)(count-1U); const size_t lo=(size_t)p; const size_t hi=lo+1U<count?lo+1U:lo; const double f=p-(double)lo; return values[lo]+(values[hi]-values[lo])*f; }
+static double world_total_ms(const OpenRideMapZoomFrameProfile *p) { return p ? p->world_overview_ms + p->world_detail_ms : 0.0; }
+static double sample_unaccounted_ms(const OpenRideMapZoomTestSample *s) { if (!s) return 0.0; const double v=s->frame_ms-s->profile.update_ms-s->profile.map_ms-s->profile.ui_ms-s->profile.present_ms; return v>0.0?v:0.0; }
+static void release_samples(OpenRideMapZoomTest *t) { if(!t)return; free(t->samples); t->samples=NULL; t->sample_count=0U; t->dropped_samples=0U; t->first_present_ns=0U; t->last_present_ns=0U; }
 
 static bool write_results(const OpenRideMapZoomTest *test)
 {
-    if (!test || !test->samples || test->sample_count == 0U
-        || test->output_path[0] == '\0') {
-        return false;
-    }
-
+    if (!test || !test->samples || test->sample_count == 0U || test->output_path[0] == '\0') return false;
     double *frame_times = malloc(test->sample_count * sizeof(*frame_times));
     if (!frame_times) return false;
-
-    double frame_sum_ms = 0.0;
-    double max_frame_ms = 0.0;
-    double max_road_ms = 0.0;
-    double max_road_load_ms = 0.0;
-    double max_area_ms = 0.0;
-    double max_area_load_ms = 0.0;
-    size_t max_frame_index = 0U;
-
-    for (size_t i = 0U; i < test->sample_count; ++i) {
-        const OpenRideMapZoomTestSample *sample = &test->samples[i];
-        frame_times[i] = sample->frame_ms;
-        frame_sum_ms += sample->frame_ms;
-        if (sample->frame_ms > max_frame_ms) {
-            max_frame_ms = sample->frame_ms;
-            max_frame_index = i;
-        }
-        if (sample->road.roads_ms > max_road_ms) max_road_ms = sample->road.roads_ms;
-        if (sample->road.load_ms > max_road_load_ms) max_road_load_ms = sample->road.load_ms;
-        if (sample->area.areas_ms > max_area_ms) max_area_ms = sample->area.areas_ms;
-        if (sample->area.load_ms > max_area_load_ms) max_area_load_ms = sample->area.load_ms;
-    }
-    qsort(frame_times,
-          test->sample_count,
-          sizeof(*frame_times),
-          compare_double_ascending);
-
-    FILE *file = fopen(test->output_path, "wb");
-    if (!file) {
-        free(frame_times);
-        return false;
-    }
-
-    const double mean_frame_ms = frame_sum_ms / (double)test->sample_count;
-    const double average_fps = frame_sum_ms > 0.0
-        ? 1000.0 * (double)test->sample_count / frame_sum_ms
-        : 0.0;
-    const OpenRideMapZoomTestSample *worst = &test->samples[max_frame_index];
-
-    fprintf(file, "# OpenRide map zoom benchmark\n");
-    fprintf(file, "# format_version=1\n");
-    fprintf(file, "# latitude=%.6f\n", OPENRIDE_MAP_ZOOM_TEST_LAT);
-    fprintf(file, "# longitude=%.6f\n", OPENRIDE_MAP_ZOOM_TEST_LON);
-    fprintf(file, "# zoom_min=%.3f\n", OPENRIDE_MAP_ZOOM_TEST_MIN);
-    fprintf(file, "# zoom_max=%.3f\n", OPENRIDE_MAP_ZOOM_TEST_MAX);
-    fprintf(file, "# zoom_speed=%.3f\n", OPENRIDE_MAP_ZOOM_TEST_SPEED);
-    fprintf(file, "# samples=%zu\n", test->sample_count);
-    fprintf(file, "# dropped_samples=%zu\n", test->dropped_samples);
-    fprintf(file, "# duration_ms=%.3f\n", frame_sum_ms);
-    fprintf(file, "# fps_average=%.3f\n", average_fps);
-    fprintf(file, "# frame_ms_mean=%.3f\n", mean_frame_ms);
-    fprintf(file, "# frame_ms_p50=%.3f\n", percentile_sorted(frame_times, test->sample_count, 0.50));
-    fprintf(file, "# frame_ms_p75=%.3f\n", percentile_sorted(frame_times, test->sample_count, 0.75));
-    fprintf(file, "# frame_ms_p90=%.3f\n", percentile_sorted(frame_times, test->sample_count, 0.90));
-    fprintf(file, "# frame_ms_p95=%.3f\n", percentile_sorted(frame_times, test->sample_count, 0.95));
-    fprintf(file, "# frame_ms_p99=%.3f\n", percentile_sorted(frame_times, test->sample_count, 0.99));
-    fprintf(file, "# frame_ms_max=%.3f\n", max_frame_ms);
-    fprintf(file, "# worst_frame=%zu\n", max_frame_index);
-    fprintf(file, "# worst_zoom=%.5f\n", worst->zoom);
-    fprintf(file, "# worst_direction=%d\n", worst->direction);
-    fprintf(file, "# road_ms_max=%.3f\n", max_road_ms);
-    fprintf(file, "# road_load_ms_max=%.3f\n", max_road_load_ms);
-    fprintf(file, "# area_ms_max=%.3f\n", max_area_ms);
-    fprintf(file, "# area_load_ms_max=%.3f\n", max_area_load_ms);
-    fprintf(file,
-            "frame,elapsed_ms,zoom,direction,frame_ms,"
-            "road_ms,road_load_ms,road_hits,road_misses,road_prewarm_loads,"
-            "road_draw_loads,road_deferred_loads,road_prewarm_zoom,road_tiles,"
-            "road_segments,road_batches,area_ms,area_load_ms,area_tiles,"
-            "area_triangles,area_batches,area_prewarm_loads,area_draw_loads,"
-            "area_deferred_loads\n");
-
-    for (size_t i = 0U; i < test->sample_count; ++i) {
-        const OpenRideMapZoomTestSample *s = &test->samples[i];
-        fprintf(file,
-                "%zu,%.3f,%.5f,%d,%.3f,"
-                "%.3f,%.3f,%u,%u,%u,%u,%u,%d,%u,%u,%u,"
-                "%.3f,%.3f,%u,%u,%u,%u,%u,%u\n",
-                i,
-                s->elapsed_ms,
-                s->zoom,
-                s->direction,
-                s->frame_ms,
-                s->road.roads_ms,
-                s->road.load_ms,
-                (unsigned)s->road.cache_hits,
-                (unsigned)s->road.cache_misses,
-                (unsigned)s->road.prewarm_loads,
-                (unsigned)s->road.draw_loads,
-                (unsigned)s->road.deferred_loads,
-                s->road.prewarm_zoom,
-                (unsigned)s->road.tiles_visited,
-                (unsigned)s->road.segments_drawn,
-                (unsigned)s->road.batches,
-                s->area.areas_ms,
-                s->area.load_ms,
-                (unsigned)s->area.tiles_visited,
-                (unsigned)s->area.triangles_drawn,
-                (unsigned)s->area.batches,
-                (unsigned)s->area.prewarm_loads,
-                (unsigned)s->area.draw_loads,
-                (unsigned)s->area.deferred_loads);
-    }
-
-    const bool ok = fclose(file) == 0;
-    free(frame_times);
-    return ok;
+    double frame_sum_ms=0.0,max_frame_ms=0.0,max_update_ms=0.0,max_map_ms=0.0,max_world_ms=0.0,max_masks_ms=0.0,max_areas_layer_ms=0.0,max_waterways_ms=0.0,max_roads_layer_ms=0.0,max_labels_ms=0.0,max_ui_ms=0.0,max_present_ms=0.0,max_unaccounted_ms=0.0,max_road_ms=0.0,max_road_load_ms=0.0,max_area_ms=0.0,max_area_load_ms=0.0;
+    size_t max_frame_index=0U;
+    for(size_t i=0U;i<test->sample_count;++i){const OpenRideMapZoomTestSample*s=&test->samples[i];const double w=world_total_ms(&s->profile),u=sample_unaccounted_ms(s);frame_times[i]=s->frame_ms;frame_sum_ms+=s->frame_ms;if(s->frame_ms>max_frame_ms){max_frame_ms=s->frame_ms;max_frame_index=i;}if(s->profile.update_ms>max_update_ms)max_update_ms=s->profile.update_ms;if(s->profile.map_ms>max_map_ms)max_map_ms=s->profile.map_ms;if(w>max_world_ms)max_world_ms=w;if(s->profile.masks_ms>max_masks_ms)max_masks_ms=s->profile.masks_ms;if(s->profile.areas_layer_ms>max_areas_layer_ms)max_areas_layer_ms=s->profile.areas_layer_ms;if(s->profile.waterways_ms>max_waterways_ms)max_waterways_ms=s->profile.waterways_ms;if(s->profile.roads_layer_ms>max_roads_layer_ms)max_roads_layer_ms=s->profile.roads_layer_ms;if(s->profile.labels_ms>max_labels_ms)max_labels_ms=s->profile.labels_ms;if(s->profile.ui_ms>max_ui_ms)max_ui_ms=s->profile.ui_ms;if(s->profile.present_ms>max_present_ms)max_present_ms=s->profile.present_ms;if(u>max_unaccounted_ms)max_unaccounted_ms=u;if(s->road.roads_ms>max_road_ms)max_road_ms=s->road.roads_ms;if(s->road.load_ms>max_road_load_ms)max_road_load_ms=s->road.load_ms;if(s->area.areas_ms>max_area_ms)max_area_ms=s->area.areas_ms;if(s->area.load_ms>max_area_load_ms)max_area_load_ms=s->area.load_ms;}
+    qsort(frame_times,test->sample_count,sizeof(*frame_times),compare_double_ascending);
+    FILE *file=fopen(test->output_path,"wb");if(!file){free(frame_times);return false;}
+    const double mean=frame_sum_ms/(double)test->sample_count;const double fps=frame_sum_ms>0.0?1000.0*(double)test->sample_count/frame_sum_ms:0.0;const OpenRideMapZoomTestSample*worst=&test->samples[max_frame_index];
+    fprintf(file,"# OpenRide map zoom benchmark\n# format_version=2\n");
+    fprintf(file,"# latitude=%.6f\n# longitude=%.6f\n# zoom_min=%.3f\n# zoom_max=%.3f\n# zoom_speed=%.3f\n",OPENRIDE_MAP_ZOOM_TEST_LAT,OPENRIDE_MAP_ZOOM_TEST_LON,OPENRIDE_MAP_ZOOM_TEST_MIN,OPENRIDE_MAP_ZOOM_TEST_MAX,OPENRIDE_MAP_ZOOM_TEST_SPEED);
+    fprintf(file,"# samples=%zu\n# dropped_samples=%zu\n# duration_ms=%.3f\n# fps_average=%.3f\n# frame_ms_mean=%.3f\n",test->sample_count,test->dropped_samples,frame_sum_ms,fps,mean);
+    fprintf(file,"# frame_ms_p50=%.3f\n# frame_ms_p75=%.3f\n# frame_ms_p90=%.3f\n# frame_ms_p95=%.3f\n# frame_ms_p99=%.3f\n# frame_ms_max=%.3f\n",percentile_sorted(frame_times,test->sample_count,0.50),percentile_sorted(frame_times,test->sample_count,0.75),percentile_sorted(frame_times,test->sample_count,0.90),percentile_sorted(frame_times,test->sample_count,0.95),percentile_sorted(frame_times,test->sample_count,0.99),max_frame_ms);
+    fprintf(file,"# worst_frame=%zu\n# worst_zoom=%.5f\n# worst_direction=%d\n",max_frame_index,worst->zoom,worst->direction);
+    fprintf(file,"# worst_update_ms=%.3f\n# worst_map_ms=%.3f\n# worst_world_ms=%.3f\n# worst_masks_ms=%.3f\n# worst_areas_layer_ms=%.3f\n# worst_waterways_ms=%.3f\n# worst_roads_layer_ms=%.3f\n# worst_labels_ms=%.3f\n# worst_ui_ms=%.3f\n# worst_present_ms=%.3f\n# worst_unaccounted_ms=%.3f\n",worst->profile.update_ms,worst->profile.map_ms,world_total_ms(&worst->profile),worst->profile.masks_ms,worst->profile.areas_layer_ms,worst->profile.waterways_ms,worst->profile.roads_layer_ms,worst->profile.labels_ms,worst->profile.ui_ms,worst->profile.present_ms,sample_unaccounted_ms(worst));
+    fprintf(file,"# update_ms_max=%.3f\n# map_ms_max=%.3f\n# world_ms_max=%.3f\n# masks_ms_max=%.3f\n# areas_layer_ms_max=%.3f\n# waterways_ms_max=%.3f\n# roads_layer_ms_max=%.3f\n# labels_ms_max=%.3f\n# ui_ms_max=%.3f\n# present_ms_max=%.3f\n# unaccounted_ms_max=%.3f\n# road_ms_max=%.3f\n# road_load_ms_max=%.3f\n# area_ms_max=%.3f\n# area_load_ms_max=%.3f\n",max_update_ms,max_map_ms,max_world_ms,max_masks_ms,max_areas_layer_ms,max_waterways_ms,max_roads_layer_ms,max_labels_ms,max_ui_ms,max_present_ms,max_unaccounted_ms,max_road_ms,max_road_load_ms,max_area_ms,max_area_load_ms);
+    fprintf(file,"frame,elapsed_ms,zoom,direction,frame_ms,update_ms,map_ms,world_ms,world_overview_ms,world_detail_ms,masks_ms,areas_layer_ms,waterways_ms,roads_layer_ms,labels_ms,ui_ms,present_ms,unaccounted_ms,visible_detail_regions,ormap_stats_valid,road_ms,road_load_ms,road_hits,road_misses,road_prewarm_loads,road_draw_loads,road_deferred_loads,road_prewarm_zoom,road_tiles,road_segments,road_batches,area_ms,area_load_ms,area_tiles,area_triangles,area_batches,area_prewarm_loads,area_draw_loads,area_deferred_loads\n");
+    for(size_t i=0U;i<test->sample_count;++i){const OpenRideMapZoomTestSample*s=&test->samples[i];fprintf(file,"%zu,%.3f,%.5f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%.3f,%u,%u,%u,%u,%u,%d,%u,%u,%u,%.3f,%.3f,%u,%u,%u,%u,%u,%u\n",i,s->elapsed_ms,s->zoom,s->direction,s->frame_ms,s->profile.update_ms,s->profile.map_ms,world_total_ms(&s->profile),s->profile.world_overview_ms,s->profile.world_detail_ms,s->profile.masks_ms,s->profile.areas_layer_ms,s->profile.waterways_ms,s->profile.roads_layer_ms,s->profile.labels_ms,s->profile.ui_ms,s->profile.present_ms,sample_unaccounted_ms(s),(unsigned)s->profile.visible_detail_regions,s->profile.ormap_stats_valid?1U:0U,s->road.roads_ms,s->road.load_ms,(unsigned)s->road.cache_hits,(unsigned)s->road.cache_misses,(unsigned)s->road.prewarm_loads,(unsigned)s->road.draw_loads,(unsigned)s->road.deferred_loads,s->road.prewarm_zoom,(unsigned)s->road.tiles_visited,(unsigned)s->road.segments_drawn,(unsigned)s->road.batches,s->area.areas_ms,s->area.load_ms,(unsigned)s->area.tiles_visited,(unsigned)s->area.triangles_drawn,(unsigned)s->area.batches,(unsigned)s->area.prewarm_loads,(unsigned)s->area.draw_loads,(unsigned)s->area.deferred_loads);}
+    const bool ok=fclose(file)==0;free(frame_times);return ok;
 }
 
-bool openride_map_zoom_test_start(OpenRideMapZoomTest *test,
-                                  OpenRideMapCamera *camera,
-                                  const OpenRidePlatformPaths *paths)
-{
-    if (!test || !camera || !paths) return false;
-
-    openride_map_zoom_test_cancel(test);
-    test->samples = calloc(OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES,
-                           sizeof(*test->samples));
-    if (!test->samples) return false;
-    if (!openride_platform_path_join(test->output_path,
-                                     sizeof(test->output_path),
-                                     paths->data_dir,
-                                     OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME)) {
-        release_samples(test);
-        return false;
-    }
-
-    /* Remove a stale result before the benchmark starts. No benchmark frame
-     * exists yet, so this filesystem operation cannot contaminate timings. */
-    (void)remove(test->output_path);
-
-    test->active = true;
-    test->direction = 1;
-    test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
-    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
-    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
-    camera->zoom = test->zoom;
-    camera->bearing_deg = 0.0;
-    return true;
-}
-
-void openride_map_zoom_test_update(OpenRideMapZoomTest *test,
-                                   OpenRideMapCamera *camera,
-                                   double delta_seconds)
-{
-    if (!test || !camera || !test->active || test->direction == 0) return;
-    if (delta_seconds < 0.0) delta_seconds = 0.0;
-    const double delta = OPENRIDE_MAP_ZOOM_TEST_SPEED * delta_seconds;
-    test->zoom += (double)test->direction * delta;
-    if (test->direction > 0 && test->zoom >= OPENRIDE_MAP_ZOOM_TEST_MAX) {
-        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MAX;
-        test->direction = -1;
-    } else if (test->direction < 0
-               && test->zoom <= OPENRIDE_MAP_ZOOM_TEST_MIN) {
-        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
-        test->direction = 0;
-    }
-    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
-    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
-    camera->zoom = test->zoom;
-    camera->bearing_deg = 0.0;
-}
-
-void openride_map_zoom_test_cancel(OpenRideMapZoomTest *test)
-{
-    if (!test) return;
-    release_samples(test);
-    test->active = false;
-    test->direction = 0;
-    test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
-}
-
-void openride_map_zoom_test_destroy(OpenRideMapZoomTest *test)
-{
-    openride_map_zoom_test_cancel(test);
-}
-
-bool openride_map_zoom_test_record_present(
-    OpenRideMapZoomTest *test,
-    uint64_t present_ns,
-    const OpenRideORMapRoadDebugStats *road,
-    const OpenRideORMapAreaDebugStats *area,
-    char *status,
-    size_t status_size)
-{
-    if (!test || !test->active) return false;
-
-    if (test->last_present_ns == 0U) {
-        test->first_present_ns = present_ns;
-        test->last_present_ns = present_ns;
-    } else {
-        if (test->sample_count < OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES) {
-            OpenRideMapZoomTestSample *sample = &test->samples[test->sample_count++];
-            sample->elapsed_ms =
-                (double)(present_ns - test->first_present_ns) / 1000000.0;
-            sample->frame_ms =
-                (double)(present_ns - test->last_present_ns) / 1000000.0;
-            sample->zoom = test->zoom;
-            sample->direction = test->direction;
-            if (road) sample->road = *road;
-            if (area) sample->area = *area;
-        } else {
-            ++test->dropped_samples;
-        }
-        test->last_present_ns = present_ns;
-    }
-
-    if (test->direction != 0) return false;
-
-    const bool written = write_results(test);
-    if (status && status_size > 0U) {
-        if (written) {
-            snprintf(status,
-                     status_size,
-                     "test zoom termine: data/%s (%zu frames)",
-                     OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME,
-                     test->sample_count);
-        } else {
-            snprintf(status,
-                     status_size,
-                     "test zoom termine mais log impossible (%zu frames)",
-                     test->sample_count);
-        }
-    }
-    release_samples(test);
-    test->active = false;
-    return true;
-}
+bool openride_map_zoom_test_start(OpenRideMapZoomTest*t,OpenRideMapCamera*c,const OpenRidePlatformPaths*p){if(!t||!c||!p)return false;openride_map_zoom_test_cancel(t);t->samples=calloc(OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES,sizeof(*t->samples));if(!t->samples)return false;if(!openride_platform_path_join(t->output_path,sizeof(t->output_path),p->data_dir,OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME)){release_samples(t);return false;}(void)remove(t->output_path);t->active=true;t->direction=1;t->zoom=OPENRIDE_MAP_ZOOM_TEST_MIN;c->center_lat=OPENRIDE_MAP_ZOOM_TEST_LAT;c->center_lon=OPENRIDE_MAP_ZOOM_TEST_LON;c->zoom=t->zoom;c->bearing_deg=0.0;return true;}
+void openride_map_zoom_test_update(OpenRideMapZoomTest*t,OpenRideMapCamera*c,double d){if(!t||!c||!t->active||t->direction==0)return;if(d<0.0)d=0.0;t->zoom+=(double)t->direction*OPENRIDE_MAP_ZOOM_TEST_SPEED*d;if(t->direction>0&&t->zoom>=OPENRIDE_MAP_ZOOM_TEST_MAX){t->zoom=OPENRIDE_MAP_ZOOM_TEST_MAX;t->direction=-1;}else if(t->direction<0&&t->zoom<=OPENRIDE_MAP_ZOOM_TEST_MIN){t->zoom=OPENRIDE_MAP_ZOOM_TEST_MIN;t->direction=0;}c->center_lat=OPENRIDE_MAP_ZOOM_TEST_LAT;c->center_lon=OPENRIDE_MAP_ZOOM_TEST_LON;c->zoom=t->zoom;c->bearing_deg=0.0;}
+void openride_map_zoom_test_cancel(OpenRideMapZoomTest*t){if(!t)return;release_samples(t);t->active=false;t->direction=0;t->zoom=OPENRIDE_MAP_ZOOM_TEST_MIN;}
+void openride_map_zoom_test_destroy(OpenRideMapZoomTest*t){openride_map_zoom_test_cancel(t);}
+bool openride_map_zoom_test_record_present(OpenRideMapZoomTest*t,uint64_t ns,const OpenRideMapZoomFrameProfile*p,const OpenRideORMapRoadDebugStats*r,const OpenRideORMapAreaDebugStats*a,char*status,size_t status_size){if(!t||!t->active)return false;if(t->last_present_ns==0U){t->first_present_ns=ns;t->last_present_ns=ns;}else{if(t->sample_count<OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES){OpenRideMapZoomTestSample*s=&t->samples[t->sample_count++];s->elapsed_ms=(double)(ns-t->first_present_ns)/1000000.0;s->frame_ms=(double)(ns-t->last_present_ns)/1000000.0;s->zoom=t->zoom;s->direction=t->direction;if(p)s->profile=*p;if(r)s->road=*r;if(a)s->area=*a;}else ++t->dropped_samples;t->last_present_ns=ns;}if(t->direction!=0)return false;const bool written=write_results(t);if(status&&status_size>0U){if(written)snprintf(status,status_size,"test zoom termine: data/%s (%zu frames)",OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME,t->sample_count);else snprintf(status,status_size,"test zoom termine mais log impossible (%zu frames)",t->sample_count);}release_samples(t);t->active=false;return true;}
