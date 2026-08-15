@@ -1,4 +1,5 @@
 #include "openride/ormap.h"
+#include "openride/ormap_landcover_mesh.h"
 #include "openride/osm_import.h"
 
 #include <sqlite3.h>
@@ -845,23 +846,20 @@ static bool v4_append_coarse_layer(sqlite3 *db,
         int ty = 0;
         v4_decode_tile_key(bucket->key, &tx, &ty);
 
-        uint32_t rectangle_count = 0U;
-        for (uint32_t y = 0U; y < V4_COARSE_GRID; ++y) {
-            uint32_t x = 0U;
-            while (x < V4_COARSE_GRID) {
-                while (x < V4_COARSE_GRID
-                       && !v4_bit_get(bucket->bits, y * V4_COARSE_GRID + x)) {
-                    ++x;
-                }
-                if (x >= V4_COARSE_GRID) break;
-                ++rectangle_count;
-                while (x < V4_COARSE_GRID
-                       && v4_bit_get(bucket->bits, y * V4_COARSE_GRID + x)) {
-                    ++x;
-                }
-            }
+        OpenRideORMapLandcoverMesh mesh = {0};
+        const double tolerance = kind == OPENRIDE_ORMAP_AREA_GREEN ? 1.20 : 0.90;
+        if (!openride_ormap_landcover_mesh_build(bucket->bits,
+                                                 V4_COARSE_GRID,
+                                                 tolerance,
+                                                 &mesh)) {
+            ok = false;
+            v4_set_error(error, error_size, "unable to contour coarse landcover tile");
+            break;
         }
-        if (rectangle_count == 0U) continue;
+        if (mesh.triangle_count == 0U) {
+            openride_ormap_landcover_mesh_destroy(&mesh);
+            continue;
+        }
 
         unsigned char *old_raw = NULL;
         size_t old_raw_size = 0U;
@@ -881,6 +879,7 @@ static bool v4_append_coarse_layer(sqlite3 *db,
                 || memcmp(old_raw, "ORA1", 4U) != 0
                 || v4_read_u16_le(old_raw + 6U) != V4_AREA_RECORD_SIZE) {
                 free(old_raw);
+                openride_ormap_landcover_mesh_destroy(&mesh);
                 ok = false;
                 v4_set_error(error, error_size, "invalid coarse area tile");
                 break;
@@ -888,28 +887,31 @@ static bool v4_append_coarse_layer(sqlite3 *db,
             old_count = v4_read_u32_le(old_raw + 8U);
             if (12U + (size_t)old_count * V4_AREA_RECORD_SIZE > old_raw_size) {
                 free(old_raw);
+                openride_ormap_landcover_mesh_destroy(&mesh);
                 ok = false;
                 v4_set_error(error, error_size, "truncated coarse area tile");
                 break;
             }
         } else if (select_rc != SQLITE_DONE) {
+            openride_ormap_landcover_mesh_destroy(&mesh);
             ok = false;
             v4_set_error(error, error_size, sqlite3_errmsg(db));
             break;
         }
 
-        const uint32_t add_count = rectangle_count * 2U;
-        if (old_count > UINT32_MAX - add_count) {
+        if (old_count > UINT32_MAX - mesh.triangle_count) {
             free(old_raw);
+            openride_ormap_landcover_mesh_destroy(&mesh);
             ok = false;
             v4_set_error(error, error_size, "coarse landcover area overflow");
             break;
         }
-        const uint32_t total_count = old_count + add_count;
+        const uint32_t total_count = old_count + mesh.triangle_count;
         const size_t raw_size = 12U + (size_t)total_count * V4_AREA_RECORD_SIZE;
         unsigned char *raw = malloc(raw_size);
         if (!raw) {
             free(old_raw);
+            openride_ormap_landcover_mesh_destroy(&mesh);
             ok = false;
             v4_set_error(error, error_size, "out of memory building coarse landcover tile");
             break;
@@ -925,40 +927,20 @@ static bool v4_append_coarse_layer(sqlite3 *db,
         }
         free(old_raw);
 
-        uint32_t record_index = old_count;
-        for (uint32_t y = 0U; y < V4_COARSE_GRID; ++y) {
-            uint32_t x = 0U;
-            while (x < V4_COARSE_GRID) {
-                while (x < V4_COARSE_GRID
-                       && !v4_bit_get(bucket->bits, y * V4_COARSE_GRID + x)) {
-                    ++x;
-                }
-                if (x >= V4_COARSE_GRID) break;
-                const uint32_t start = x;
-                while (x < V4_COARSE_GRID
-                       && v4_bit_get(bucket->bits, y * V4_COARSE_GRID + x)) {
-                    ++x;
-                }
-                const double x0 = (double)start / V4_COARSE_GRID;
-                const double x1 = (double)x / V4_COARSE_GRID;
-                const double y0 = (double)y / V4_COARSE_GRID;
-                const double y1 = (double)(y + 1U) / V4_COARSE_GRID;
-                unsigned char *record =
-                    raw + 12U + (size_t)record_index++ * V4_AREA_RECORD_SIZE;
-                v4_write_area_record(record,
-                                     x0, y0,
-                                     x1, y0,
-                                     x1, y1,
-                                     kind);
-                record = raw + 12U
-                    + (size_t)record_index++ * V4_AREA_RECORD_SIZE;
-                v4_write_area_record(record,
-                                     x0, y0,
-                                     x1, y1,
-                                     x0, y1,
-                                     kind);
-            }
+        for (uint32_t i = 0U; i < mesh.triangle_count; ++i) {
+            const OpenRideORMapLandcoverTriangle *triangle = &mesh.triangles[i];
+            unsigned char *record = raw + 12U
+                + (size_t)(old_count + i) * V4_AREA_RECORD_SIZE;
+            v4_write_area_record(record,
+                                 triangle->x0,
+                                 triangle->y0,
+                                 triangle->x1,
+                                 triangle->y1,
+                                 triangle->x2,
+                                 triangle->y2,
+                                 kind);
         }
+        openride_ormap_landcover_mesh_destroy(&mesh);
 
         unsigned char *compressed = NULL;
         size_t compressed_size = 0U;

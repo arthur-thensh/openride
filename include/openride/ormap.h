@@ -96,7 +96,7 @@ typedef enum OpenRideORMapAreaKind {
  * Filled areas are pre-triangulated by the builder. Coordinates are quantized
  * in a slightly buffered tile-local domain so adjacent tiles overlap by half
  * a data-zoom pixel instead of exposing hairline seams while rotating/scaling.
- * In v4 this representation is used for water and the coarse urban overview;
+ * In v4 this representation is used for water and generalized overview landcover;
  * detailed built-up coverage stays in the semantic mask instead.
  */
 typedef struct OpenRideORMapAreaTriangle {
@@ -223,7 +223,7 @@ const OpenRideORMapLabel *openride_ormap_labels(const OpenRideORMap *map,
  * Build OpenRide's compact map from the same regional inputs used by routing
  * and search. Roads and waterways remain vector lines. Water surfaces remain
  * compact vector triangles. v4 stores built-up landuse at two robust LODs:
- * a coarse rectilinear urban layer for regional views and the merged semantic
+ * a generalized contour mesh for overview views and the merged semantic
  * occupancy mask for detailed views. This avoids triangulating large merged
  * city contours; individual building footprints still are not stored.
  */

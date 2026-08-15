@@ -86,6 +86,7 @@ add_library(openride_core STATIC
     src/map/ormap.c
     src/map/ormap_builder.c
     src/map/ormap_builder_v4.c
+    src/map/ormap_landcover_mesh.c
     src/map/mvt.c
     src/map/map_style.c
 )
@@ -284,6 +285,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_ormap PRIVATE openride_core)
     add_test(NAME ormap COMMAND test_ormap "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.osm.pbf")
+
+    add_executable(test_ormap_landcover_mesh
+        tests/test_ormap_landcover_mesh.c
+    )
+    target_link_libraries(test_ormap_landcover_mesh PRIVATE openride_core)
+    add_test(NAME ormap_landcover_mesh COMMAND test_ormap_landcover_mesh)
 
     add_executable(test_region_install
         tests/test_region_install.c
