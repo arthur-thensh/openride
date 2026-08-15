@@ -1656,7 +1656,6 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
 {
     if (!active) return;
 
-#ifdef __ANDROID__
     int viewport_height = 0;
     int queried_width = viewport_width;
     SDL_GetCurrentRenderOutputSize(renderer, &queried_width, &viewport_height);
@@ -1698,83 +1697,6 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
     }
     openride_ui_search_overlay_draw(&ui, &state);
     openride_ui_end(&ui);
-    return;
-#else
-    const float w = 620.0f;
-    const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
-    const float actual_w = viewport_width > (int)w ? w : (float)viewport_width - 16.0f;
-    const float y = 16.0f;
-    const float row_h = 24.0f;
-    const float h = 72.0f + row_h * (float)(result_count > 0U ? result_count : 1U);
-    SDL_FRect panel = {x, y, actual_w, h};
-
-    SDL_SetRenderDrawColor(renderer, 20, 24, 28, 242);
-    SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 90);
-    SDL_RenderRect(renderer, &panel);
-
-    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
-    SDL_RenderDebugText(renderer,
-                        x + 14.0f,
-                        y + 12.0f,
-                        title && title[0] ? title : "RECHERCHER UN LIEU");
-    SDL_SetRenderDrawColor(renderer, 173, 183, 191, 255);
-    SDL_RenderDebugText(renderer, x + 14.0f, y + 29.0f, "Entrer: centrer | Fleches: choisir | Esc: fermer");
-
-    SDL_FRect query_box = {x + 12.0f, y + 46.0f, actual_w - 24.0f, 20.0f};
-    SDL_SetRenderDrawColor(renderer, 38, 44, 50, 255);
-    SDL_RenderFillRect(renderer, &query_box);
-    SDL_SetRenderDrawColor(renderer, 235, 237, 239, 255);
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 18.0f,
-                              y + 52.0f,
-                              "> %s%s",
-                              query ? query : "",
-                              active ? "_" : "");
-
-    if (!available) {
-        SDL_SetRenderDrawColor(renderer, 226, 158, 74, 255);
-        SDL_RenderDebugText(renderer,
-                            x + 14.0f,
-                            y + 78.0f,
-                            "Aucun index de recherche regional installe");
-        return;
-    }
-
-    if (result_count == 0U) {
-        SDL_SetRenderDrawColor(renderer, 157, 166, 174, 255);
-        SDL_RenderDebugText(renderer,
-                            x + 14.0f,
-                            y + 78.0f,
-                            (query && strlen(query) >= 2U)
-                                ? "Aucun resultat"
-                                : "Tape au moins 2 caracteres");
-        return;
-    }
-
-    for (uint32_t i = 0U; i < result_count; ++i) {
-        const float row_y = y + 73.0f + row_h * (float)i;
-        if (i == selected_result) {
-            SDL_FRect highlight = {x + 10.0f, row_y - 2.0f, actual_w - 20.0f, row_h - 2.0f};
-            SDL_SetRenderDrawColor(renderer, 42, 82, 112, 220);
-            SDL_RenderFillRect(renderer, &highlight);
-        }
-        const OpenRideRegionDefinition *result_region =
-            results[i].region_id[0] != '\0'
-                ? openride_region_find(results[i].region_id)
-                : NULL;
-        SDL_SetRenderDrawColor(renderer, 238, 241, 243, 255);
-        SDL_RenderDebugTextFormat(renderer,
-                                  x + 16.0f,
-                                  row_y + 3.0f,
-                                  "%c %-30.30s  [%s%s%s]",
-                                  i == selected_result ? '>' : ' ',
-                                  results[i].name,
-                                  openride_place_kind_name(results[i].kind),
-                                  result_region ? " - " : "",
-                                  result_region ? result_region->name : "");
-    }
-#endif
 }
 
 
@@ -1787,7 +1709,6 @@ static int place_search_result_at(SDL_Renderer *renderer,
 {
     if (result_count == 0U) return -1;
 
-#ifdef __ANDROID__
     OpenRideUIContext ui;
     openride_ui_init(&ui);
     if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
@@ -1800,17 +1721,6 @@ static int place_search_result_at(SDL_Renderer *renderer,
         y);
     openride_ui_end(&ui);
     return result;
-#else
-    (void)renderer;
-    (void)viewport_height;
-    const double panel_width = viewport_width > 620 ? 620.0 : (double)viewport_width - 16.0;
-    const double panel_x = viewport_width > 620 ? ((double)viewport_width - panel_width) * 0.5 : 8.0;
-    const double row_top = 87.0;
-    const double row_height = 24.0;
-    if (x < panel_x + 10.0 || x > panel_x + panel_width - 10.0 || y < row_top) return -1;
-    const int index = (int)((y - row_top) / row_height);
-    return index >= 0 && (uint32_t)index < result_count ? index : -1;
-#endif
 }
 
 typedef enum OpenRidePlaceSearchPurpose {
