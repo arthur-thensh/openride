@@ -34,6 +34,7 @@
 #include "openride/region_install.h"
 #include "openride/touch_input.h"
 #include "openride/app_toolbar.h"
+#include "openride/app_ui_action.h"
 #include "openride/ui_toolbar.h"
 #include "openride/ui_main_menu.h"
 #include "openride/ui_route_panel.h"
@@ -1877,287 +1878,6 @@ static void open_place_search(SDL_Window *window,
     /* Text input is layout-aware: important for '/' on AZERTY keyboards. */
     SDL_StartTextInput(window);
 }
-
-#ifdef __ANDROID__
-typedef enum OpenRideMobilePanelAction {
-    OPENRIDE_MOBILE_PANEL_NONE = 0,
-    OPENRIDE_MOBILE_PANEL_CLOSE,
-    OPENRIDE_MOBILE_PANEL_BACK,
-    OPENRIDE_MOBILE_PANEL_SEARCH,
-    OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START,
-    OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START,
-    OPENRIDE_MOBILE_PANEL_ROUTE_MAP_START,
-    OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION,
-    OPENRIDE_MOBILE_PANEL_ROUTE_MAP_DESTINATION,
-    OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE,
-    OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED,
-    OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED,
-    OPENRIDE_MOBILE_PANEL_FAVORITES,
-    OPENRIDE_MOBILE_PANEL_HISTORY,
-    OPENRIDE_MOBILE_PANEL_REGIONS,
-    OPENRIDE_MOBILE_PANEL_SETTINGS,
-    OPENRIDE_MOBILE_PANEL_PLACE,
-    OPENRIDE_MOBILE_PANEL_REGION_PREVIOUS,
-    OPENRIDE_MOBILE_PANEL_REGION_NEXT,
-    OPENRIDE_MOBILE_PANEL_REGION_INSTALL,
-    OPENRIDE_MOBILE_PANEL_REGION_REMOVE,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN,
-    OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST
-} OpenRideMobilePanelAction;
-
-typedef struct OpenRideMobilePanelHit {
-    OpenRideMobilePanelAction action;
-    int index;
-} OpenRideMobilePanelHit;
-
-static OpenRideMobilePanelHit mobile_main_menu_hit_test(
-    SDL_Renderer *renderer,
-    double x,
-    double y,
-    int viewport_width,
-    int viewport_height)
-{
-    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
-    OpenRideUIContext ui;
-    openride_ui_init(&ui);
-    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
-        return hit;
-    }
-
-    switch (openride_ui_main_menu_hit_test(&ui, x, y)) {
-        case OPENRIDE_UI_MAIN_MENU_SEARCH:
-            hit.action = OPENRIDE_MOBILE_PANEL_SEARCH;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_FAVORITES:
-            hit.action = OPENRIDE_MOBILE_PANEL_FAVORITES;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_HISTORY:
-            hit.action = OPENRIDE_MOBILE_PANEL_HISTORY;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_REGIONS:
-            hit.action = OPENRIDE_MOBILE_PANEL_REGIONS;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_SETTINGS:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_MAP_ZOOM_TEST:
-            hit.action = OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_CLOSE:
-            hit.action = OPENRIDE_MOBILE_PANEL_CLOSE;
-            break;
-        case OPENRIDE_UI_MAIN_MENU_NONE:
-        default:
-            break;
-    }
-    openride_ui_end(&ui);
-    return hit;
-}
-
-static OpenRideMobilePanelHit mobile_route_panel_hit_test(
-    SDL_Renderer *renderer,
-    double x,
-    double y,
-    int viewport_width,
-    int viewport_height)
-{
-    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
-    OpenRideUIContext ui;
-    openride_ui_init(&ui);
-    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
-        return hit;
-    }
-
-    switch (openride_ui_route_panel_hit_test(&ui, x, y)) {
-        case OPENRIDE_UI_ROUTE_PANEL_GPS_START:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_SEARCH_START:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_MAP_START:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_MAP_START;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_SEARCH_DESTINATION:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_MAP_DESTINATION:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_MAP_DESTINATION;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_CALCULATE:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_BACK:
-            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
-            break;
-        case OPENRIDE_UI_ROUTE_PANEL_NONE:
-        default:
-            break;
-    }
-    openride_ui_end(&ui);
-    return hit;
-}
-
-static OpenRideMobilePanelHit mobile_route_downloads_panel_hit_test(
-    SDL_Renderer *renderer,
-    double x,
-    double y,
-    int viewport_width,
-    int viewport_height)
-{
-    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
-    OpenRideUIContext ui;
-    openride_ui_init(&ui);
-    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
-        return hit;
-    }
-
-    switch (openride_ui_route_downloads_panel_hit_test(&ui, x, y)) {
-        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_DOWNLOAD:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED;
-            break;
-        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_USE_INSTALLED:
-            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED;
-            break;
-        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_BACK:
-            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
-            break;
-        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_NONE:
-        default:
-            break;
-    }
-    openride_ui_end(&ui);
-    return hit;
-}
-
-static OpenRideMobilePanelHit mobile_settings_panel_hit_test(
-    SDL_Renderer *renderer,
-    double x,
-    double y,
-    int viewport_width,
-    int viewport_height)
-{
-    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
-    OpenRideUIContext ui;
-    openride_ui_init(&ui);
-    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
-        return hit;
-    }
-
-    switch (openride_ui_settings_panel_hit_test(&ui, x, y)) {
-        case OPENRIDE_UI_SETTINGS_PANEL_STYLE:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_PROFILE:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_FOLLOW:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_REROUTE:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_VOICE:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_GPS_SIMULATION:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_GPS_DEVIATION:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_GPS_SPEED:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_GPS_MISSED_TURN:
-            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_BACK:
-            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
-            break;
-        case OPENRIDE_UI_SETTINGS_PANEL_NONE:
-        default:
-            break;
-    }
-    openride_ui_end(&ui);
-    return hit;
-}
-
-static OpenRideMobilePanelHit mobile_regions_panel_hit_test(
-    SDL_Renderer *renderer,
-    double x,
-    double y,
-    int viewport_width,
-    int viewport_height)
-{
-    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
-    OpenRideUIContext ui;
-    openride_ui_init(&ui);
-    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
-        return hit;
-    }
-
-    switch (openride_ui_regions_panel_hit_test(&ui, x, y)) {
-        case OPENRIDE_UI_REGIONS_PANEL_PREVIOUS:
-            hit.action = OPENRIDE_MOBILE_PANEL_REGION_PREVIOUS;
-            break;
-        case OPENRIDE_UI_REGIONS_PANEL_NEXT:
-            hit.action = OPENRIDE_MOBILE_PANEL_REGION_NEXT;
-            break;
-        case OPENRIDE_UI_REGIONS_PANEL_INSTALL:
-            hit.action = OPENRIDE_MOBILE_PANEL_REGION_INSTALL;
-            break;
-        case OPENRIDE_UI_REGIONS_PANEL_REMOVE:
-            hit.action = OPENRIDE_MOBILE_PANEL_REGION_REMOVE;
-            break;
-        case OPENRIDE_UI_REGIONS_PANEL_BACK:
-            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
-            break;
-        case OPENRIDE_UI_REGIONS_PANEL_NONE:
-        default:
-            break;
-    }
-    openride_ui_end(&ui);
-    return hit;
-}
-
-static OpenRideMobilePanelHit mobile_places_panel_hit_test(
-    SDL_Renderer *renderer,
-    double x,
-    double y,
-    int viewport_width,
-    int viewport_height,
-    uint32_t item_count)
-{
-    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
-    OpenRideUIContext ui;
-    openride_ui_init(&ui);
-    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
-        return hit;
-    }
-
-    const OpenRideUIPlacesPanelHit places_hit =
-        openride_ui_places_panel_hit_test(&ui, item_count, x, y);
-    if (places_hit.action == OPENRIDE_UI_PLACES_PANEL_PLACE) {
-        hit.action = OPENRIDE_MOBILE_PANEL_PLACE;
-        hit.index = places_hit.index;
-    } else if (places_hit.action == OPENRIDE_UI_PLACES_PANEL_BACK) {
-        hit.action = OPENRIDE_MOBILE_PANEL_BACK;
-    }
-
-    openride_ui_end(&ui);
-    return hit;
-}
-
-#endif
 
 static void draw_ui_app_panel(SDL_Renderer *renderer,
                                   OpenRideAppPanel panel,
@@ -4796,60 +4516,60 @@ int main(int argc, char **argv)
                             app_panel == OPENRIDE_APP_PANEL_FAVORITES ? favorite_count
                             : app_panel == OPENRIDE_APP_PANEL_HISTORY ? history_count
                             : 0U;
-                        const OpenRideMobilePanelHit mobile_hit =
+                        const OpenRideAppUIAction mobile_hit =
                             app_panel == OPENRIDE_APP_PANEL_MAIN
-                                ? mobile_main_menu_hit_test(renderer,
+                                ? openride_app_ui_main_menu_hit_test(renderer,
                                                             x,
                                                             y,
                                                             width,
                                                             height)
                             : app_panel == OPENRIDE_APP_PANEL_ROUTE
-                                ? mobile_route_panel_hit_test(renderer,
+                                ? openride_app_ui_route_panel_hit_test(renderer,
                                                               x,
                                                               y,
                                                               width,
                                                               height)
                             : app_panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
-                                ? mobile_route_downloads_panel_hit_test(renderer,
+                                ? openride_app_ui_route_downloads_panel_hit_test(renderer,
                                                                         x,
                                                                         y,
                                                                         width,
                                                                         height)
                             : app_panel == OPENRIDE_APP_PANEL_SETTINGS
-                                ? mobile_settings_panel_hit_test(renderer,
+                                ? openride_app_ui_settings_panel_hit_test(renderer,
                                                                  x,
                                                                  y,
                                                                  width,
                                                                  height)
                             : app_panel == OPENRIDE_APP_PANEL_REGIONS
-                                ? mobile_regions_panel_hit_test(renderer,
+                                ? openride_app_ui_regions_panel_hit_test(renderer,
                                                                 x,
                                                                 y,
                                                                 width,
                                                                 height)
                             : app_panel == OPENRIDE_APP_PANEL_FAVORITES
                               || app_panel == OPENRIDE_APP_PANEL_HISTORY
-                                ? mobile_places_panel_hit_test(renderer,
+                                ? openride_app_ui_places_panel_hit_test(renderer,
                                                                x,
                                                                y,
                                                                width,
                                                                height,
                                                                mobile_place_count)
-                                : (OpenRideMobilePanelHit){
-                                      OPENRIDE_MOBILE_PANEL_NONE,
+                                : (OpenRideAppUIAction){
+                                      OPENRIDE_APP_UI_NONE,
                                       -1
                                   };
 
-                        if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_CLOSE) {
+                        if (mobile_hit.action == OPENRIDE_APP_UI_CLOSE) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             app_panel_selected = 0U;
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_BACK) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_BACK) {
                             app_panel =
                                 app_panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
                                     ? OPENRIDE_APP_PANEL_ROUTE
                                     : OPENRIDE_APP_PANEL_MAIN;
                             app_panel_selected = 0U;
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SEARCH) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SEARCH) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_BROWSE;
@@ -4862,7 +4582,7 @@ int main(int argc, char **argv)
                                               route_status,
                                               sizeof(route_status));
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_GPS_START) {
+                                   == OPENRIDE_APP_UI_ROUTE_GPS_START) {
                             route_map_pick_marker = OPENRIDE_MARKER_NONE;
 #ifdef __ANDROID__
                             if (gps_sample_valid) {
@@ -4901,7 +4621,7 @@ int main(int argc, char **argv)
                             }
 #endif
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_START) {
+                                   == OPENRIDE_APP_UI_ROUTE_SEARCH_START) {
                             route_map_pick_marker = OPENRIDE_MARKER_NONE;
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_ROUTE_START;
@@ -4915,14 +4635,14 @@ int main(int argc, char **argv)
                                               route_status,
                                               sizeof(route_status));
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_MAP_START) {
+                                   == OPENRIDE_APP_UI_ROUTE_MAP_START) {
                             route_map_pick_marker = OPENRIDE_MARKER_START;
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             snprintf(route_status,
                                      sizeof(route_status),
                                      "Touchez la carte pour choisir le depart");
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_SEARCH_DESTINATION) {
+                                   == OPENRIDE_APP_UI_ROUTE_SEARCH_DESTINATION) {
                             route_map_pick_marker = OPENRIDE_MARKER_NONE;
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION;
@@ -4936,7 +4656,7 @@ int main(int argc, char **argv)
                                               route_status,
                                               sizeof(route_status));
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_MAP_DESTINATION) {
+                                   == OPENRIDE_APP_UI_ROUTE_MAP_DESTINATION) {
                             route_map_pick_marker =
                                 OPENRIDE_MARKER_DESTINATION;
                             app_panel = OPENRIDE_APP_PANEL_NONE;
@@ -4944,7 +4664,7 @@ int main(int argc, char **argv)
                                      sizeof(route_status),
                                      "Touchez la carte pour choisir l'arrivee");
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_CALCULATE) {
+                                   == OPENRIDE_APP_UI_ROUTE_CALCULATE) {
                             if (openride_map_selection_complete(&selection)) {
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
                                 route_dirty = true;
@@ -4954,7 +4674,7 @@ int main(int argc, char **argv)
                                          "choisis un depart et une arrivee");
                             }
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED) {
+                                   == OPENRIDE_APP_UI_ROUTE_DOWNLOAD_REQUIRED) {
 #ifdef __ANDROID__
                             if (route_download_plan.available
                                 && !route_download_plan.downloading
@@ -5004,7 +4724,7 @@ int main(int argc, char **argv)
                             }
 #endif
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED) {
+                                   == OPENRIDE_APP_UI_ROUTE_USE_INSTALLED) {
                             if (route_download_plan.available
                                 && route_download_plan.has_installed_alternative
                                 && !route_download_plan.downloading
@@ -5036,15 +4756,15 @@ int main(int argc, char **argv)
                                              "Impossible de lancer l'alternative");
                                 }
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_FAVORITES) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_FAVORITES) {
                             refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                             app_panel = OPENRIDE_APP_PANEL_FAVORITES;
                             app_panel_selected = 0U;
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_HISTORY) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_HISTORY) {
                             refresh_stored_places(app_storage, false, history_places, &history_count);
                             app_panel = OPENRIDE_APP_PANEL_HISTORY;
                             app_panel_selected = 0U;
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_REGIONS) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_REGIONS) {
                             openride_region_get_status(&platform_paths,
                                                        region,
                                                        &region_status,
@@ -5052,11 +4772,11 @@ int main(int argc, char **argv)
                                                        sizeof(error));
                             app_panel = OPENRIDE_APP_PANEL_REGIONS;
                             app_panel_selected = 0U;
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SETTINGS) {
                             app_panel = OPENRIDE_APP_PANEL_SETTINGS;
                             app_panel_selected = 0U;
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST) {
+                                   == OPENRIDE_APP_UI_MAP_ZOOM_TEST) {
                             if (map_zoom_test.active) {
                                 openride_map_zoom_test_cancel(&map_zoom_test);
                                 snprintf(route_status, sizeof(route_status),
@@ -5069,7 +4789,7 @@ int main(int argc, char **argv)
                                 snprintf(route_status, sizeof(route_status),
                                          "test zoom 9.000 -> 17.000 -> 9.000 | log data/map-zoom-test.csv");
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_PLACE
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_PLACE
                                    && mobile_hit.index >= 0) {
                             const bool favorites_panel = app_panel == OPENRIDE_APP_PANEL_FAVORITES;
                             const uint32_t count = favorites_panel ? favorite_count : history_count;
@@ -5091,11 +4811,11 @@ int main(int argc, char **argv)
                                                            sizeof(route_status));
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_REGION_PREVIOUS
-                                   || mobile_hit.action == OPENRIDE_MOBILE_PANEL_REGION_NEXT) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_REGION_PREVIOUS
+                                   || mobile_hit.action == OPENRIDE_APP_UI_REGION_NEXT) {
                             if (!region_busy) {
                                 region = region_step(region,
-                                                     mobile_hit.action == OPENRIDE_MOBILE_PANEL_REGION_PREVIOUS ? -1 : 1);
+                                                     mobile_hit.action == OPENRIDE_APP_UI_REGION_PREVIOUS ? -1 : 1);
                                 openride_region_get_status(&platform_paths,
                                                            region,
                                                            &region_status,
@@ -5103,7 +4823,7 @@ int main(int argc, char **argv)
                                                            sizeof(error));
                                 region_work_status[0] = '\0';
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_REGION_INSTALL) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_REGION_INSTALL) {
                             if (!region_busy) {
                                 if (openride_region_status_ready(&region_status)
 #ifdef __ANDROID__
@@ -5133,7 +4853,7 @@ int main(int argc, char **argv)
                                                                  sizeof(error));
                                 }
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_REGION_REMOVE) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_REGION_REMOVE) {
                             if (!region_busy) {
                                 if (region == active_region) {
                                     snprintf(region_work_status,
@@ -5159,7 +4879,7 @@ int main(int argc, char **argv)
                                              error);
                                 }
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS_STYLE) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SETTINGS_STYLE) {
                             if (scalable_map) {
                                 map_style = openride_map_style_next(map_style);
                                 if (ormap_map) openride_ormap_renderer_set_style(&ormap_renderer, map_style);
@@ -5172,7 +4892,7 @@ int main(int argc, char **argv)
                                                                  sizeof(error));
                                 }
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS_PROFILE) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SETTINGS_PROFILE) {
                             routing_profile = routing_profile == OPENRIDE_ROUTING_PROFILE_FASTEST
                                 ? OPENRIDE_ROUTING_PROFILE_TOURING
                                 : routing_profile == OPENRIDE_ROUTING_PROFILE_TOURING
@@ -5206,7 +4926,7 @@ int main(int argc, char **argv)
                                     route_dirty = true;
                                 }
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS_FOLLOW) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SETTINGS_FOLLOW) {
                             follow_gps = !follow_gps;
                             if (app_storage) {
                                 openride_app_storage_set_int(app_storage,
@@ -5215,7 +4935,7 @@ int main(int argc, char **argv)
                                                              error,
                                                              sizeof(error));
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS_REROUTE) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SETTINGS_REROUTE) {
                             auto_reroute = !auto_reroute;
                             openride_navigation_session_set_auto_reroute(&navigation_session, auto_reroute);
                             if (app_storage) {
@@ -5225,7 +4945,7 @@ int main(int argc, char **argv)
                                                              error,
                                                              sizeof(error));
                             }
-                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS_VOICE) {
+                        } else if (mobile_hit.action == OPENRIDE_APP_UI_SETTINGS_VOICE) {
                             voice_enabled = !voice_enabled;
                             openride_voice_guidance_set_enabled(&voice_guidance,
                                                                 voice_enabled);
@@ -5240,7 +4960,7 @@ int main(int argc, char **argv)
                                                              sizeof(error));
                             }
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION) {
+                                   == OPENRIDE_APP_UI_SETTINGS_GPS_SIMULATION) {
                             if (simulated_gps_active) {
                                 openride_location_provider_stop(
                                     &simulated_location_provider);
@@ -5314,7 +5034,7 @@ int main(int argc, char **argv)
                                 }
                             }
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION) {
+                                   == OPENRIDE_APP_UI_SETTINGS_GPS_DEVIATION) {
                             if (missed_turn_dev.armed
                                 || missed_turn_dev.active) {
                                 snprintf(route_status,
@@ -5351,7 +5071,7 @@ int main(int argc, char **argv)
                                          "DEV +80 m: attente hors itineraire / recalcul");
                             }
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED) {
+                                   == OPENRIDE_APP_UI_SETTINGS_GPS_SPEED) {
                             const double current =
                                 simulated_location_context.time_scale;
                             const double next =
@@ -5366,7 +5086,7 @@ int main(int argc, char **argv)
                                      "vitesse simulation [DEV] x%.0f",
                                      simulated_location_context.time_scale);
                         } else if (mobile_hit.action
-                                   == OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN) {
+                                   == OPENRIDE_APP_UI_SETTINGS_GPS_MISSED_TURN) {
                             if (missed_turn_dev.armed
                                 || missed_turn_dev.active) {
                                 openride_android_missed_turn_dev_reset(
