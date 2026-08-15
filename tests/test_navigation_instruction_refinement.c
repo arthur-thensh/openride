@@ -62,6 +62,8 @@ static void test_connector_geometry_uses_stable_angle(void)
     assert(instructions.items[1].maneuver == OPENRIDE_MANEUVER_SLIGHT_RIGHT);
     assert(instructions.items[1].turn_angle_deg > 30.0);
     assert(instructions.items[1].turn_angle_deg < 55.0);
+    assert(fabs(instructions.items[1].completion_distance_from_start_m
+                - instructions.items[1].distance_from_start_m) < 1e-9);
     assert(instructions.items[2].maneuver == OPENRIDE_MANEUVER_ARRIVE);
 
     openride_navigation_instructions_destroy(&instructions);
@@ -113,6 +115,8 @@ static void test_redundant_continue_after_roundabout_is_removed(void)
     assert(instructions.items[0].maneuver == OPENRIDE_MANEUVER_DEPART);
     assert(instructions.items[1].maneuver == OPENRIDE_MANEUVER_ROUNDABOUT);
     assert(instructions.items[1].roundabout_exit_number == 2U);
+    assert(instructions.items[1].completion_distance_from_start_m
+           > instructions.items[1].distance_from_start_m);
     assert(instructions.items[2].maneuver == OPENRIDE_MANEUVER_ARRIVE);
 
     openride_navigation_instructions_destroy(&instructions);
@@ -135,6 +139,38 @@ static void test_real_turn_after_roundabout_is_kept(void)
     assert(instructions.items[2].maneuver == OPENRIDE_MANEUVER_RIGHT
            || instructions.items[2].maneuver == OPENRIDE_MANEUVER_SHARP_RIGHT);
     assert(instructions.items[3].maneuver == OPENRIDE_MANEUVER_ARRIVE);
+
+    const OpenRideNavigationInstruction *roundabout = &instructions.items[1];
+    const OpenRideNavigationInstruction *turn = &instructions.items[2];
+    assert(roundabout->completion_distance_from_start_m
+           > roundabout->distance_from_start_m);
+    assert(turn->distance_from_start_m
+           > roundabout->completion_distance_from_start_m);
+    assert(turn->distance_from_start_m
+           - roundabout->completion_distance_from_start_m < 50.0);
+
+    double distance_m = -1.0;
+    const double inside_roundabout =
+        (roundabout->distance_from_start_m
+         + roundabout->completion_distance_from_start_m) * 0.5;
+    const OpenRideNavigationInstruction *next =
+        openride_navigation_instructions_next(
+            &instructions, inside_roundabout, &distance_m);
+    assert(next == roundabout);
+    assert(fabs(distance_m) < 1e-9);
+
+    next = openride_navigation_instructions_next(
+        &instructions,
+        roundabout->completion_distance_from_start_m + 2.0,
+        &distance_m);
+    assert(next == roundabout);
+
+    next = openride_navigation_instructions_next(
+        &instructions,
+        roundabout->completion_distance_from_start_m + 3.0,
+        &distance_m);
+    assert(next == turn);
+    assert(distance_m > 0.0);
 
     openride_navigation_instructions_destroy(&instructions);
     openride_route_destroy(&route);
