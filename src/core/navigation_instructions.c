@@ -11,6 +11,7 @@
 #define OPENRIDE_TURN_NORMAL_DEG 45.0
 #define OPENRIDE_TURN_SHARP_DEG 120.0
 #define OPENRIDE_UTURN_MIN_DEG 165.0
+#define OPENRIDE_CONTINUE_GROUP_MAX_GAP_M 300.0
 
 static void set_error(char *error, size_t error_size, const char *message)
 {
@@ -201,8 +202,30 @@ static bool append_instruction(OpenRideNavigationInstructionList *list,
                                double turn_angle_deg,
                                uint8_t exit_number)
 {
-    if (!list || !list->items || list->count >= capacity || !point) return false;
-    OpenRideNavigationInstruction *item = &list->items[list->count++];
+    if (!list || !list->items || !point) return false;
+
+    OpenRideNavigationInstruction *item = NULL;
+    if (maneuver == OPENRIDE_MANEUVER_CONTINUE && list->count > 0U) {
+        OpenRideNavigationInstruction *previous = &list->items[list->count - 1U];
+        const double gap_m = distance_from_start_m - previous->distance_from_start_m;
+        if (previous->maneuver == OPENRIDE_MANEUVER_CONTINUE
+            && gap_m >= 0.0
+            && gap_m <= OPENRIDE_CONTINUE_GROUP_MAX_GAP_M) {
+            /*
+             * Keep one persistent "continue straight" instruction for a
+             * cluster of nearby straight-through decisions. Updating it to
+             * the last junction makes the single instruction remain active
+             * throughout the whole cluster instead of flashing one per node.
+             */
+            item = previous;
+        }
+    }
+
+    if (!item) {
+        if (list->count >= capacity) return false;
+        item = &list->items[list->count++];
+    }
+
     item->maneuver = maneuver;
     item->geometry_index = geometry_index;
     item->lat = point->lat;

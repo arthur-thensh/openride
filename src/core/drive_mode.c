@@ -98,26 +98,26 @@ double openride_drive_mode_target_zoom(double speed_mps, double maneuver_distanc
     const double speed_kph = fmax(0.0, speed_mps) * 3.6;
 
     /*
-     * Keep the road and immediate navigation context dominant on a phone.
-     * The maneuver look-ahead is handled separately, so this scale can stay
-     * deliberately tighter without sacrificing forward anticipation.
+     * Phone navigation should prioritize the road immediately around the
+     * rider. Forward context is provided by the independent look-ahead, so
+     * keep the map scale deliberately close even at normal road speeds.
      */
-    double zoom = 18.0;
+    double zoom = 18.9;
 
-    if (speed_kph >= 110.0) zoom = 16.0;
-    else if (speed_kph >= 90.0) zoom = 16.4;
-    else if (speed_kph >= 70.0) zoom = 16.8;
-    else if (speed_kph >= 50.0) zoom = 17.2;
-    else if (speed_kph >= 30.0) zoom = 17.5;
-    else if (speed_kph >= 15.0) zoom = 17.8;
+    if (speed_kph >= 110.0) zoom = 16.8;
+    else if (speed_kph >= 90.0) zoom = 17.2;
+    else if (speed_kph >= 70.0) zoom = 17.6;
+    else if (speed_kph >= 50.0) zoom = 18.0;
+    else if (speed_kph >= 30.0) zoom = 18.3;
+    else if (speed_kph >= 15.0) zoom = 18.6;
 
     if (isfinite(maneuver_distance_m)) {
-        if (maneuver_distance_m < 90.0) zoom += 0.8;
-        else if (maneuver_distance_m < 250.0) zoom += 0.5;
-        else if (maneuver_distance_m < 500.0) zoom += 0.25;
+        if (maneuver_distance_m < 90.0) zoom += 0.6;
+        else if (maneuver_distance_m < 250.0) zoom += 0.4;
+        else if (maneuver_distance_m < 500.0) zoom += 0.2;
     }
 
-    return clampd(zoom, 15.6, 18.0);
+    return clampd(zoom, 16.5, 19.0);
 }
 
 double openride_drive_mode_lookahead_m(double speed_mps)

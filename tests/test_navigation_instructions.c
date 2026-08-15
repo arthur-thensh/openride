@@ -136,6 +136,52 @@ static void test_roundabout_exit_number(void)
     openride_routing_graph_destroy(&graph);
 }
 
+static void test_continue_grouping(void)
+{
+    const OpenRideRoutePoint points[] = {
+        {50.0000, 3.0000},
+        {50.0005, 3.0000},
+        {50.0010, 3.0000},
+        {50.0015, 3.0000},
+        {50.0060, 3.0000},
+        {50.0065, 3.0000}
+    };
+    OpenRideRoute route = route_from_points(points, 6U);
+    route.navigation_context = calloc(
+        route.geometry_count, sizeof(*route.navigation_context));
+    assert(route.navigation_context != NULL);
+    route.navigation_context_count = route.geometry_count;
+
+    /* Three nearby straight-through decisions should become one instruction. */
+    route.navigation_context[1].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
+    route.navigation_context[2].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
+    route.navigation_context[3].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
+
+    /* A much later straight decision must stay separate. */
+    route.navigation_context[4].flags = OPENRIDE_ROUTE_NAV_HAS_ALTERNATIVE;
+
+    OpenRideNavigationInstructionList list = {0};
+    char error[128] = {0};
+    assert(openride_navigation_instructions_build(NULL,
+                                                   &route,
+                                                   &list,
+                                                   error,
+                                                   sizeof(error)));
+
+    assert(list.count == 4U);
+    assert(list.items[0].maneuver == OPENRIDE_MANEUVER_DEPART);
+    assert(list.items[1].maneuver == OPENRIDE_MANEUVER_CONTINUE);
+    assert(list.items[1].geometry_index == 3U);
+    assert(list.items[2].maneuver == OPENRIDE_MANEUVER_CONTINUE);
+    assert(list.items[2].geometry_index == 4U);
+    assert(list.items[2].distance_from_start_m
+           - list.items[1].distance_from_start_m > 300.0);
+    assert(list.items[3].maneuver == OPENRIDE_MANEUVER_ARRIVE);
+
+    openride_navigation_instructions_destroy(&list);
+    openride_route_destroy(&route);
+}
+
 static void test_following_instruction(void)
 {
     OpenRideNavigationInstruction items[4];
@@ -185,6 +231,7 @@ int main(void)
 {
     test_right_turn();
     test_roundabout_exit_number();
+    test_continue_grouping();
     test_following_instruction();
     test_distance_format();
     puts("Navigation instructions tests: OK");

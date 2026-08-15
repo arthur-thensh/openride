@@ -22,12 +22,15 @@ static void test_auto_zoom(void)
     const double motorway = openride_drive_mode_target_zoom(33.0, 1000.0);
     const double near_turn = openride_drive_mode_target_zoom(20.0, 50.0);
     const double far_turn = openride_drive_mode_target_zoom(20.0, 1000.0);
+    const double walking = openride_drive_mode_target_zoom(1.0, 1000.0);
 
     assert(city > cruise_60);
     assert(cruise_60 > motorway);
-    assert(fabs(cruise_60 - 17.2) < 1e-9);
-    assert(fabs(motorway - 16.0) < 1e-9);
+    assert(fabs(cruise_60 - 18.0) < 1e-9);
+    assert(fabs(motorway - 16.8) < 1e-9);
+    assert(fabs(walking - 18.9) < 1e-9);
     assert(near_turn > far_turn);
+    assert(near_turn <= 19.0 + 1e-9);
 }
 
 static void test_maneuver_lookahead(void)
