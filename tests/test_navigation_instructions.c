@@ -255,6 +255,37 @@ static void test_continue_grouping(void)
     openride_route_destroy(&route);
 }
 
+static void test_close_maneuver_handoff(void)
+{
+    OpenRideNavigationInstruction items[4];
+    memset(items, 0, sizeof(items));
+
+    items[0].maneuver = OPENRIDE_MANEUVER_DEPART;
+    items[0].distance_from_start_m = 0.0;
+    items[1].maneuver = OPENRIDE_MANEUVER_RIGHT;
+    items[1].distance_from_start_m = 100.0;
+    items[2].maneuver = OPENRIDE_MANEUVER_LEFT;
+    items[2].distance_from_start_m = 135.0;
+    items[3].maneuver = OPENRIDE_MANEUVER_ARRIVE;
+    items[3].distance_from_start_m = 1000.0;
+
+    OpenRideNavigationInstructionList list = {
+        .items = items,
+        .count = 4U,
+        .route_distance_m = 1000.0
+    };
+
+    double distance_m = 0.0;
+    const OpenRideNavigationInstruction *next =
+        openride_navigation_instructions_next(&list, 102.0, &distance_m);
+    assert(next == &items[1]);
+    assert(fabs(distance_m) < 1e-9);
+
+    next = openride_navigation_instructions_next(&list, 103.0, &distance_m);
+    assert(next == &items[2]);
+    assert(distance_m > 30.0 && distance_m < 35.0);
+}
+
 static void test_following_instruction(void)
 {
     OpenRideNavigationInstruction items[4];
@@ -305,6 +336,7 @@ int main(void)
     test_slight_turn_at_real_choice();
     test_roundabout_exit_number();
     test_continue_grouping();
+    test_close_maneuver_handoff();
     test_following_instruction();
     test_distance_format();
     puts("Navigation instructions tests: OK");
