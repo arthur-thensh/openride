@@ -157,6 +157,7 @@ set(OPENRIDE_APP_SOURCES
     src/ui/ui.c
     src/ui/ui_toolbar.c
     src/ui/ui_main_menu.c
+    src/ui/ui_route_panel.c
 )
 
 set_property(

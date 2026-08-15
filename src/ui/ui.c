@@ -438,4 +438,3 @@ bool openride_ui_button(OpenRideUIContext *ui,
     return clicked;
 }
 
-#include "ui_toolbar.c"

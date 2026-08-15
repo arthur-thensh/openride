@@ -1,10 +1,4 @@
-#ifndef OPENRIDE_UI_H
-#define OPENRIDE_UI_TOOLBAR_STANDALONE 1
-#endif
-
 #include "openride/ui_toolbar.h"
-
-#ifdef OPENRIDE_UI_TOOLBAR_STANDALONE
 
 #include <stddef.h>
 
@@ -103,4 +97,3 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
     return clicked;
 }
 
-#endif /* OPENRIDE_UI_TOOLBAR_STANDALONE */
