@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenRide VERSION 0.31.0 LANGUAGES C)
+project(OpenRide VERSION 0.32.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -85,6 +85,7 @@ add_library(openride_core STATIC
     src/map/mbtiles.c
     src/map/ormap.c
     src/map/ormap_builder.c
+    src/map/ormap_builder_v4.c
     src/map/mvt.c
     src/map/map_style.c
 )
@@ -94,6 +95,13 @@ set_source_files_properties(
     PROPERTIES
         COMPILE_DEFINITIONS
             "openride_navigation_instructions_build=openride_navigation_instructions_build_legacy"
+)
+
+set_source_files_properties(
+    src/map/ormap_builder.c
+    PROPERTIES
+        COMPILE_DEFINITIONS
+            "openride_ormap_build=openride_ormap_build_legacy"
 )
 
 target_include_directories(openride_core
@@ -123,6 +131,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
+    src/map/ormap_renderer_v4.c
     src/map/ormap_trig_cache.c
     src/map/map_world.c
 )
@@ -132,6 +141,8 @@ set_property(
     APPEND PROPERTY COMPILE_DEFINITIONS
         cos=openride_ormap_cached_cos
         sin=openride_ormap_cached_sin
+        openride_ormap_renderer_draw_layer=openride_ormap_renderer_draw_layer_legacy
+        openride_ormap_renderer_draw=openride_ormap_renderer_draw_legacy
 )
 
 if(ANDROID)
