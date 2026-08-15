@@ -35,6 +35,7 @@
 #include "openride/touch_input.h"
 #include "openride/app_toolbar.h"
 #include "openride/ui_toolbar.h"
+#include "openride/ui_main_menu.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -2162,6 +2163,50 @@ typedef struct OpenRideMobilePanelHit {
     int index;
 } OpenRideMobilePanelHit;
 
+static OpenRideMobilePanelHit mobile_main_menu_hit_test(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height)
+{
+    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return hit;
+    }
+
+    switch (openride_ui_main_menu_hit_test(&ui, x, y)) {
+        case OPENRIDE_UI_MAIN_MENU_SEARCH:
+            hit.action = OPENRIDE_MOBILE_PANEL_SEARCH;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_FAVORITES:
+            hit.action = OPENRIDE_MOBILE_PANEL_FAVORITES;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_HISTORY:
+            hit.action = OPENRIDE_MOBILE_PANEL_HISTORY;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_REGIONS:
+            hit.action = OPENRIDE_MOBILE_PANEL_REGIONS;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_SETTINGS:
+            hit.action = OPENRIDE_MOBILE_PANEL_SETTINGS;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_MAP_ZOOM_TEST:
+            hit.action = OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_CLOSE:
+            hit.action = OPENRIDE_MOBILE_PANEL_CLOSE;
+            break;
+        case OPENRIDE_UI_MAIN_MENU_NONE:
+        default:
+            break;
+    }
+    openride_ui_end(&ui);
+    return hit;
+}
+
 typedef struct OpenRideMobilePanelLayout {
     SDL_FRect panel;
     SDL_FRect back;
@@ -2466,6 +2511,16 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     int height = 0;
     SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
     if (width <= 0 || height <= 0) return;
+
+    if (panel == OPENRIDE_APP_PANEL_MAIN) {
+        OpenRideUIContext ui;
+        openride_ui_init(&ui);
+        if (openride_ui_begin(&ui, renderer, width, height)) {
+            (void)openride_ui_main_menu_draw(&ui);
+            openride_ui_end(&ui);
+        }
+        return;
+    }
 
     uint32_t rows = 0U;
     if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 6U;
@@ -5728,14 +5783,20 @@ int main(int argc, char **argv)
                             app_panel == OPENRIDE_APP_PANEL_FAVORITES ? favorite_count
                             : app_panel == OPENRIDE_APP_PANEL_HISTORY ? history_count
                             : 0U;
-                        const OpenRideMobilePanelHit mobile_hit = mobile_app_panel_hit_test(
-                            renderer,
-                            app_panel,
-                            x,
-                            y,
-                            width,
-                            height,
-                            mobile_place_count);
+                        const OpenRideMobilePanelHit mobile_hit =
+                            app_panel == OPENRIDE_APP_PANEL_MAIN
+                                ? mobile_main_menu_hit_test(renderer,
+                                                            x,
+                                                            y,
+                                                            width,
+                                                            height)
+                                : mobile_app_panel_hit_test(renderer,
+                                                            app_panel,
+                                                            x,
+                                                            y,
+                                                            width,
+                                                            height,
+                                                            mobile_place_count);
 
                         if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_CLOSE) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
