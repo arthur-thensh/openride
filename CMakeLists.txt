@@ -132,6 +132,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
+    src/map/map_zoom_test_logger.c
     src/map/ormap_renderer_v4.c
     src/map/ormap_trig_cache.c
     src/map/map_world.c

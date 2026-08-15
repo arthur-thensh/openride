@@ -5,6 +5,7 @@
 #include "map/map_renderer.h"
 #include "map/vector_map_renderer.h"
 #include "map/ormap_renderer.h"
+#include "map/map_zoom_test_logger.h"
 #include "map/map_world.h"
 #include "openride/map_camera.h"
 #include "openride/map_selection.h"
@@ -62,11 +63,6 @@
 #define OPENRIDE_APP_LIST_MAX 12U
 #define OPENRIDE_REAL_MAP_PATH "data/maps/nord-pas-de-calais.ormap"
 #define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"
-#define OPENRIDE_MAP_ZOOM_TEST_LAT 50.370800
-#define OPENRIDE_MAP_ZOOM_TEST_LON 3.080200
-#define OPENRIDE_MAP_ZOOM_TEST_MIN 9.0
-#define OPENRIDE_MAP_ZOOM_TEST_MAX 17.0
-#define OPENRIDE_MAP_ZOOM_TEST_SPEED 0.50
 
 typedef enum OpenRideLifecycleSignal {
     OPENRIDE_LIFECYCLE_SIGNAL_NONE = 0,
@@ -79,51 +75,6 @@ typedef enum OpenRideLifecycleSignal {
 typedef struct OpenRideLifecycleWatch {
     SDL_AtomicInt pending_signal;
 } OpenRideLifecycleWatch;
-
-typedef struct OpenRideMapZoomTest {
-    bool active;
-    int direction;
-    double zoom;
-} OpenRideMapZoomTest;
-
-static void openride_map_zoom_test_start(OpenRideMapZoomTest *test,
-                                         OpenRideMapCamera *camera)
-{
-    if (!test || !camera) return;
-    test->active = true;
-    test->direction = 1;
-    test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
-    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
-    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
-    camera->zoom = test->zoom;
-    camera->bearing_deg = 0.0;
-}
-
-static void openride_map_zoom_test_update(OpenRideMapZoomTest *test,
-                                          OpenRideMapCamera *camera,
-                                          double delta_seconds)
-{
-    if (!test || !camera || !test->active) return;
-    if (test->direction == 0) {
-        test->active = false;
-        return;
-    }
-    if (delta_seconds < 0.0) delta_seconds = 0.0;
-    const double delta = OPENRIDE_MAP_ZOOM_TEST_SPEED * delta_seconds;
-    test->zoom += (double)test->direction * delta;
-    if (test->direction > 0 && test->zoom >= OPENRIDE_MAP_ZOOM_TEST_MAX) {
-        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MAX;
-        test->direction = -1;
-    } else if (test->direction < 0
-               && test->zoom <= OPENRIDE_MAP_ZOOM_TEST_MIN) {
-        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
-        test->direction = 0;
-    }
-    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
-    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
-    camera->zoom = test->zoom;
-    camera->bearing_deg = 0.0;
-}
 
 #ifdef __ANDROID__
 typedef struct OpenRideAndroidMissedTurnDev {
@@ -4909,14 +4860,14 @@ int main(int argc, char **argv)
                                 app_panel = OPENRIDE_APP_PANEL_SETTINGS;
                             } else if (event.key.key == SDLK_Z) {
                                 if (map_zoom_test.active) {
-                                    map_zoom_test.active = false;
+                                    openride_map_zoom_test_cancel(&map_zoom_test);
                                     snprintf(route_status, sizeof(route_status),
                                              "test zoom carte annule");
                                 } else {
-                                    openride_map_zoom_test_start(&map_zoom_test, &camera);
+                                    openride_map_zoom_test_start(&map_zoom_test, &camera, &platform_paths);
                                     app_panel = OPENRIDE_APP_PANEL_NONE;
                                     snprintf(route_status, sizeof(route_status),
-                                             "test zoom 9.000 -> 17.000 -> 9.000");
+                                             "test zoom 9.000 -> 17.000 -> 9.000 | log data/map-zoom-test.csv");
                                 }
                             }
                         } else if (app_panel == OPENRIDE_APP_PANEL_ROUTE) {
@@ -6038,15 +5989,15 @@ int main(int argc, char **argv)
                         } else if (mobile_hit.action
                                    == OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST) {
                             if (map_zoom_test.active) {
-                                map_zoom_test.active = false;
+                                openride_map_zoom_test_cancel(&map_zoom_test);
                                 snprintf(route_status, sizeof(route_status),
                                          "test zoom carte annule");
                             } else {
-                                openride_map_zoom_test_start(&map_zoom_test, &camera);
+                                openride_map_zoom_test_start(&map_zoom_test, &camera, &platform_paths);
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
                                 app_panel_selected = 0U;
                                 snprintf(route_status, sizeof(route_status),
-                                         "test zoom 9.000 -> 17.000 -> 9.000");
+                                         "test zoom 9.000 -> 17.000 -> 9.000 | log data/map-zoom-test.csv");
                             }
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_PLACE
                                    && mobile_hit.index >= 0) {
@@ -8450,7 +8401,35 @@ int main(int argc, char **argv)
         }
 
         SDL_RenderPresent(renderer);
+
+        /* Benchmark timing is captured immediately after Present, before any
+         * logging work. Samples stay in RAM and are written only after the
+         * final z9 frame, so instrumentation does not add filesystem I/O to
+         * the measured frames. */
+        if (map_zoom_test.active) {
+            const uint64_t map_zoom_present_ns = SDL_GetTicksNS();
+            OpenRideORMapRoadDebugStats map_zoom_road_debug;
+            OpenRideORMapAreaDebugStats map_zoom_area_debug;
+            memset(&map_zoom_road_debug, 0, sizeof(map_zoom_road_debug));
+            memset(&map_zoom_area_debug, 0, sizeof(map_zoom_area_debug));
+            map_zoom_road_debug.prewarm_zoom = -1;
+            if (ormap_map && renderer_initialized) {
+                openride_ormap_renderer_get_road_debug_stats(
+                    &ormap_renderer, &map_zoom_road_debug);
+                openride_ormap_renderer_get_area_debug_stats(
+                    &ormap_renderer, &map_zoom_area_debug);
+            }
+            (void)openride_map_zoom_test_record_present(
+                &map_zoom_test,
+                map_zoom_present_ns,
+                &map_zoom_road_debug,
+                &map_zoom_area_debug,
+                route_status,
+                sizeof(route_status));
+        }
     }
+
+    openride_map_zoom_test_destroy(&map_zoom_test);
 
 #ifdef __ANDROID__
     if (region_download_started) {
