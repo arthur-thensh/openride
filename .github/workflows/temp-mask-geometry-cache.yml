@@ -58,7 +58,21 @@ jobs:
           fi
 
       - name: Run desktop tests
-        run: ./scripts/test.sh
+        shell: bash
+        run: |
+          set +e
+          output=$(./scripts/test.sh 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            tail_output=$(printf '%s\n' "$output" | tail -n 100)
+            safe=${tail_output//'%'/'%25'}
+            safe=${safe//$'\n'/'%0A'}
+            safe=${safe//$'\r'/'%0D'}
+            echo "::error title=Desktop tests::$safe"
+            exit "$status"
+          fi
 
       - name: Select JDK 17
         uses: actions/setup-java@v4
