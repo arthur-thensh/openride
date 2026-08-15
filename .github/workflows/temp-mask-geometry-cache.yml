@@ -109,7 +109,7 @@ jobs:
       - name: Commit clean candidate
         run: |
           rm -f data/maps/demo.mbtiles
-          git rm .github/temp/apply_mask_geometry_cache.py .github/temp/fix_mask_helper.py .github/workflows/temp-mask-geometry-cache.yml
+          git rm -f .github/temp/apply_mask_geometry_cache.py .github/temp/fix_mask_helper.py .github/workflows/temp-mask-geometry-cache.yml
           git add src/map/ormap_renderer.h src/map/ormap_renderer.c src/map/map_world.c src/map/map_zoom_test_logger.c
           git diff --cached --check
           git config user.name "OpenRide Agent"
