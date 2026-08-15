@@ -72,7 +72,7 @@ def prepare_main(text: str) -> str:
         text,
         "#ifdef __ANDROID__\ntypedef enum OpenRideMobilePanelAction",
         "static void draw_ui_app_panel(",
-        "static void draw_ui_app_panel(",
+        "",
         "V2.0 remove local panel action adapters",
     )
 
@@ -144,6 +144,8 @@ def prepare_main(text: str) -> str:
         if token in text:
             raise RuntimeError(f"V2.0: legacy token remains: {token}")
 
+    if text.count("static void draw_ui_app_panel(") != 1:
+        raise RuntimeError("V2.0: draw_ui_app_panel declaration count changed")
     if text.count("openride_app_ui_main_menu_hit_test(") != 1:
         raise RuntimeError("V2.0: expected one app main-menu hit-test call")
     if text.count("openride_app_ui_route_panel_hit_test(") != 1:
