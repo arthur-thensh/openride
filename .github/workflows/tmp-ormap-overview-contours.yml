@@ -25,6 +25,7 @@ jobs:
         run: |
           git rm .github/workflows/tmp-ormap-overview-contours.yml
           git rm .github/tmp/apply_ormap_overview_contours.py
+          git rm -f .github/tmp/trigger.txt || true
           git config user.name "OpenRide CI"
           git config user.email "actions@users.noreply.github.com"
           git add CMakeLists.txt include/openride/ormap.h src/map/ormap_builder_v4.c
@@ -38,7 +39,11 @@ jobs:
       - name: Install desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libsqlite3-dev zlib1g-dev
+          sudo apt-get install -y \
+            ninja-build libsqlite3-dev zlib1g-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
           ./scripts/bootstrap_sdl.sh
 
       - name: Build and test
