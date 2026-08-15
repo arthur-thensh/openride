@@ -8361,6 +8361,7 @@ int main(int argc, char **argv)
             char zoom_line[96];
             char gps_line[96];
             char road_line[160];
+            char road_work_line[96];
             OpenRideORMapRoadDebugStats road_debug;
             memset(&road_debug, 0, sizeof(road_debug));
             road_debug.prewarm_zoom = -1;
@@ -8385,6 +8386,12 @@ int main(int argc, char **argv)
                      road_debug.draw_loads,
                      road_debug.deferred_loads,
                      road_debug.prewarm_zoom);
+            snprintf(road_work_line,
+                     sizeof(road_work_line),
+                     "T%u S%u B%u",
+                     road_debug.tiles_visited,
+                     road_debug.segments_drawn,
+                     road_debug.batches);
             float badge_width = 330.0f * ui_scale;
             const float max_badge_width = (float)safe.w - 2.0f * margin;
             if (badge_width > max_badge_width) badge_width = max_badge_width;
@@ -8392,7 +8399,7 @@ int main(int argc, char **argv)
                 (float)safe.x + margin,
                 (float)safe.y + margin,
                 badge_width,
-                62.0f * ui_scale
+                80.0f * ui_scale
             };
             SDL_SetRenderDrawColor(renderer, 12, 16, 20, 224);
             SDL_RenderFillRect(renderer, &badge);
@@ -8414,6 +8421,11 @@ int main(int argc, char **argv)
                              badge.y + 43.0f * ui_scale,
                              text_scale,
                              road_line);
+            draw_scaled_text(renderer,
+                             badge.x + 8.0f * ui_scale,
+                             badge.y + 61.0f * ui_scale,
+                             text_scale,
+                             road_work_line);
         }
 
         SDL_RenderPresent(renderer);
