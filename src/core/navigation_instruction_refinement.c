@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define OPENRIDE_PI 3.14159265358979323846264338327950288
 #define OPENRIDE_STABLE_TURN_WINDOW_M 30.0
@@ -13,6 +14,11 @@
 #define OPENRIDE_UTURN_MIN_DEG 165.0
 #define OPENRIDE_CONTINUE_GROUP_MAX_GAP_M 300.0
 #define OPENRIDE_ROUNDABOUT_CONTINUE_SUPPRESS_M 120.0
+#define OPENRIDE_CLOSE_MANEUVER_GAP_M 50.0
+#define OPENRIDE_MEDIUM_MANEUVER_GAP_M 100.0
+#define OPENRIDE_CLOSE_PASS_MARGIN_M 2.5
+#define OPENRIDE_MEDIUM_PASS_MARGIN_M 3.5
+#define OPENRIDE_DEFAULT_PASS_MARGIN_M 5.0
 
 bool openride_navigation_instructions_build_legacy(
     const OpenRideRoutingGraph *graph,
@@ -168,6 +174,17 @@ static OpenRideManeuverType classify_stable_turn(double angle_deg)
     return OPENRIDE_MANEUVER_SLIGHT_RIGHT;
 }
 
+static void initialize_completion_distances(
+    OpenRideNavigationInstructionList *instructions)
+{
+    if (!instructions || !instructions->items) return;
+
+    for (uint32_t i = 0U; i < instructions->count; ++i) {
+        instructions->items[i].completion_distance_from_start_m =
+            instructions->items[i].distance_from_start_m;
+    }
+}
+
 static void refine_directional_angles(
     const OpenRideRoute *route,
     OpenRideNavigationInstructionList *instructions)
@@ -204,6 +221,80 @@ static void refine_directional_angles(
         instruction->turn_angle_deg = angle;
         instruction->maneuver = classify_stable_turn(angle);
     }
+}
+
+static void refine_roundabout_completion(
+    const OpenRideRoute *route,
+    OpenRideNavigationInstructionList *instructions)
+{
+    if (!route_has_navigation_context(route)
+        || !route->geometry
+        || route->geometry_count < 2U
+        || !instructions
+        || !instructions->items) {
+        return;
+    }
+
+    double *cumulative = calloc(route->geometry_count, sizeof(*cumulative));
+    if (!cumulative) return;
+
+    double geometry_total_m = 0.0;
+    for (uint32_t i = 1U; i < route->geometry_count; ++i) {
+        geometry_total_m += openride_geo_distance_m(
+            route->geometry[i - 1U].lat,
+            route->geometry[i - 1U].lon,
+            route->geometry[i].lat,
+            route->geometry[i].lon);
+        cumulative[i] = geometry_total_m;
+    }
+
+    if (!(geometry_total_m > 0.0) || !isfinite(geometry_total_m)) {
+        free(cumulative);
+        return;
+    }
+
+    const double route_total_m =
+        route->distance_m > 0.0 ? route->distance_m : geometry_total_m;
+    const double distance_scale = route_total_m / geometry_total_m;
+
+    for (uint32_t i = 0U; i < instructions->count; ++i) {
+        OpenRideNavigationInstruction *instruction = &instructions->items[i];
+        if (instruction->maneuver != OPENRIDE_MANEUVER_ROUNDABOUT) continue;
+        if (instruction->geometry_index >= route->geometry_count) continue;
+
+        uint32_t exit_index = instruction->geometry_index;
+        bool entered_roundabout = false;
+
+        for (uint32_t g = instruction->geometry_index + 1U;
+             g < route->geometry_count;
+             ++g) {
+            const uint8_t flags = route->navigation_context[g].flags;
+            const bool incoming =
+                (flags & OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT) != 0U;
+            const bool outgoing =
+                (flags & OPENRIDE_ROUTE_NAV_OUTGOING_ROUNDABOUT) != 0U;
+
+            if (incoming) {
+                entered_roundabout = true;
+                exit_index = g;
+                if (!outgoing) break;
+                continue;
+            }
+
+            if (entered_roundabout) break;
+            if (g > instruction->geometry_index + 1U) break;
+        }
+
+        if (exit_index > instruction->geometry_index) {
+            const double completion_m = cumulative[exit_index] * distance_scale;
+            if (isfinite(completion_m)
+                && completion_m > instruction->distance_from_start_m) {
+                instruction->completion_distance_from_start_m = completion_m;
+            }
+        }
+    }
+
+    free(cumulative);
 }
 
 static void compact_instructions(OpenRideNavigationInstructionList *instructions)
@@ -245,6 +336,84 @@ static void compact_instructions(OpenRideNavigationInstructionList *instructions
     instructions->count = write_index;
 }
 
+static double instruction_completion_distance(
+    const OpenRideNavigationInstruction *instruction)
+{
+    if (!instruction) return 0.0;
+
+    const double entry_m = instruction->distance_from_start_m;
+    const double completion_m = instruction->completion_distance_from_start_m;
+    if (isfinite(completion_m) && completion_m >= entry_m) {
+        return completion_m;
+    }
+    return entry_m;
+}
+
+static double instruction_pass_margin_m(
+    const OpenRideNavigationInstructionList *instructions,
+    uint32_t index)
+{
+    if (!instructions || !instructions->items || index >= instructions->count) {
+        return OPENRIDE_DEFAULT_PASS_MARGIN_M;
+    }
+
+    const OpenRideNavigationInstruction *current = &instructions->items[index];
+    if (current->maneuver == OPENRIDE_MANEUVER_ARRIVE) return 0.0;
+
+    const double completion_m = instruction_completion_distance(current);
+    for (uint32_t next_index = index + 1U;
+         next_index < instructions->count;
+         ++next_index) {
+        const OpenRideNavigationInstruction *next = &instructions->items[next_index];
+        if (next->maneuver == OPENRIDE_MANEUVER_DEPART) continue;
+
+        const double gap_m = next->distance_from_start_m - completion_m;
+        if (!isfinite(gap_m) || gap_m < 0.0) {
+            return OPENRIDE_DEFAULT_PASS_MARGIN_M;
+        }
+        if (gap_m <= OPENRIDE_CLOSE_MANEUVER_GAP_M) {
+            return OPENRIDE_CLOSE_PASS_MARGIN_M;
+        }
+        if (gap_m <= OPENRIDE_MEDIUM_MANEUVER_GAP_M) {
+            return OPENRIDE_MEDIUM_PASS_MARGIN_M;
+        }
+        return OPENRIDE_DEFAULT_PASS_MARGIN_M;
+    }
+
+    return OPENRIDE_DEFAULT_PASS_MARGIN_M;
+}
+
+const OpenRideNavigationInstruction *openride_navigation_instructions_next_timed(
+    const OpenRideNavigationInstructionList *instructions,
+    double traveled_m,
+    double *distance_to_instruction_m)
+{
+    if (distance_to_instruction_m) *distance_to_instruction_m = 0.0;
+    if (!instructions || !instructions->items || instructions->count == 0U) {
+        return NULL;
+    }
+    if (!isfinite(traveled_m) || traveled_m < 0.0) traveled_m = 0.0;
+
+    for (uint32_t i = 0U; i < instructions->count; ++i) {
+        const OpenRideNavigationInstruction *item = &instructions->items[i];
+        if (item->maneuver == OPENRIDE_MANEUVER_DEPART) continue;
+
+        const double completion_m = instruction_completion_distance(item);
+        const double pass_margin_m = instruction_pass_margin_m(instructions, i);
+        if (completion_m + pass_margin_m >= traveled_m) {
+            if (distance_to_instruction_m) {
+                const double delta = item->distance_from_start_m - traveled_m;
+                *distance_to_instruction_m = delta > 0.0 ? delta : 0.0;
+            }
+            return item;
+        }
+    }
+
+    const OpenRideNavigationInstruction *last =
+        &instructions->items[instructions->count - 1U];
+    return last->maneuver == OPENRIDE_MANEUVER_ARRIVE ? last : NULL;
+}
+
 bool openride_navigation_instructions_build(
     const OpenRideRoutingGraph *graph,
     const OpenRideRoute *route,
@@ -257,7 +426,9 @@ bool openride_navigation_instructions_build(
         return false;
     }
 
+    initialize_completion_distances(instructions);
     refine_directional_angles(route, instructions);
+    refine_roundabout_completion(route, instructions);
     compact_instructions(instructions);
     return true;
 }
