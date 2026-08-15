@@ -115,14 +115,12 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
         return OPENRIDE_UI_MAIN_MENU_NONE;
     }
 
-    const float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
     SDL_FRect screen = {
         0.0f,
         0.0f,
         (float)ui->viewport_width,
         (float)ui->viewport_height
     };
-    (void)scale;
     SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 115);
     SDL_RenderFillRect(ui->renderer, &screen);
 
