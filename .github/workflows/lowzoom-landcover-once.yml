@@ -14,25 +14,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Apply cartographic pipeline patch
         shell: bash
         run: |
           python3 - <<'PYRUN'
           import subprocess
-          import textwrap
 
           old = subprocess.check_output(
-              ["git", "show", "HEAD^:.github/workflows/lowzoom-landcover-once.yml"],
+              ["git", "show", "HEAD^^:.github/workflows/lowzoom-landcover-once.yml"],
               text=True,
           )
           marker = "          python3 - <<'PY'\n"
           if marker not in old:
               raise SystemExit("previous one-shot patch body not found")
-          body = old.split(marker, 1)[1]
-          body = body.split("\n          PY\n", 1)[0]
-          source = textwrap.dedent(body)
+          body = old.split(marker, 1)[1].split("\n          PY\n", 1)[0]
+          source = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in body.splitlines()
+          )
           exec(compile(source, "lowzoom-landcover-patch.py", "exec"))
           PYRUN
 
