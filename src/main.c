@@ -41,6 +41,7 @@
 #include "openride/ui_regions_panel.h"
 #include "openride/ui_places_panel.h"
 #include "openride/ui_search_overlay.h"
+#include "openride/ui_route_downloads_panel.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -2094,6 +2095,38 @@ static OpenRideMobilePanelHit mobile_route_panel_hit_test(
     return hit;
 }
 
+static OpenRideMobilePanelHit mobile_route_downloads_panel_hit_test(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height)
+{
+    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return hit;
+    }
+
+    switch (openride_ui_route_downloads_panel_hit_test(&ui, x, y)) {
+        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_DOWNLOAD:
+            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_DOWNLOAD_REQUIRED;
+            break;
+        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_USE_INSTALLED:
+            hit.action = OPENRIDE_MOBILE_PANEL_ROUTE_USE_INSTALLED;
+            break;
+        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_BACK:
+            hit.action = OPENRIDE_MOBILE_PANEL_BACK;
+            break;
+        case OPENRIDE_UI_ROUTE_DOWNLOADS_PANEL_NONE:
+        default:
+            break;
+    }
+    openride_ui_end(&ui);
+    return hit;
+}
+
 static OpenRideMobilePanelHit mobile_settings_panel_hit_test(
     SDL_Renderer *renderer,
     double x,
@@ -2539,6 +2572,37 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                 .gps_accuracy_m = gps_accuracy_m
             };
             (void)openride_ui_route_panel_draw(&ui, &state);
+            openride_ui_end(&ui);
+        }
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) {
+        OpenRideUIContext ui;
+        openride_ui_init(&ui);
+        if (openride_ui_begin(&ui, renderer, width, height)) {
+            OpenRideUIRouteDownloadsPanelState state = {
+                .downloading = route_download_plan.downloading,
+                .has_installed_alternative =
+                    route_download_plan.has_installed_alternative,
+                .count = route_download_plan.count,
+                .current_index = route_download_plan.index,
+                .progress = region_progress,
+                .work_status = region_work_status
+            };
+            uint32_t count = route_download_plan.count;
+            if (count > OPENRIDE_UI_ROUTE_DOWNLOADS_MAX_REGIONS) {
+                count = OPENRIDE_UI_ROUTE_DOWNLOADS_MAX_REGIONS;
+            }
+            state.count = count;
+            for (uint32_t i = 0U; i < count; ++i) {
+                const OpenRideRegionDefinition *required =
+                    openride_region_find(route_download_plan.region_ids[i]);
+                state.region_names[i] = required
+                    ? required->name
+                    : route_download_plan.region_ids[i];
+            }
+            (void)openride_ui_route_downloads_panel_draw(&ui, &state);
             openride_ui_end(&ui);
         }
         return;
@@ -5894,6 +5958,12 @@ int main(int argc, char **argv)
                                                               y,
                                                               width,
                                                               height)
+                            : app_panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
+                                ? mobile_route_downloads_panel_hit_test(renderer,
+                                                                        x,
+                                                                        y,
+                                                                        width,
+                                                                        height)
                             : app_panel == OPENRIDE_APP_PANEL_SETTINGS
                                 ? mobile_settings_panel_hit_test(renderer,
                                                                  x,
