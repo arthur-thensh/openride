@@ -7,6 +7,7 @@
 #define OPENRIDE_UI_MAP_OVERLAY_COMPACT_MAX_WIDTH 390.0f
 #define OPENRIDE_UI_MAP_OVERLAY_LINE_HEIGHT 16.0f
 #define OPENRIDE_UI_MAP_OVERLAY_TOOLBAR_CLEARANCE 90.0f
+#define OPENRIDE_UI_MAP_OVERLAY_DESKTOP_CLEARANCE 20.0f
 
 static float minf_openride(float a, float b)
 {
@@ -19,7 +20,10 @@ static void draw_attribution(OpenRideUIContext *ui,
 {
     if (!state->attribution || !state->attribution[0]) return;
 
-    const float y = safe.y + safe.h - OPENRIDE_UI_MAP_OVERLAY_TOOLBAR_CLEARANCE;
+    const float clearance = state->compact
+        ? OPENRIDE_UI_MAP_OVERLAY_TOOLBAR_CLEARANCE
+        : OPENRIDE_UI_MAP_OVERLAY_DESKTOP_CLEARANCE;
+    const float y = safe.y + safe.h - clearance;
     if (y <= safe.y + 24.0f) return;
 
     OpenRideUIRect backing = openride_ui_rect(
