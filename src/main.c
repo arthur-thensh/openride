@@ -44,6 +44,7 @@
 #include "openride/ui_route_downloads_panel.h"
 #include "openride/ui_drive_hud.h"
 #include "openride/ui_map_overlay.h"
+#include "openride/ui_navigation_overlay.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -2667,66 +2668,55 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
                                     int viewport_height)
 {
 #ifdef __ANDROID__
+    /* Android: keep the normal map clear until ui_drive_hud takes over. */
+    (void)renderer;
+    (void)navigation;
+    (void)instructions;
     (void)simulator;
+    (void)route;
+    (void)session;
+    (void)gps_sample_valid;
+    (void)follow_gps;
+    (void)auto_reroute;
     (void)deviation_enabled;
-#endif
+    (void)gpx_navigation;
+    (void)viewport_height;
+    return;
+#else
     if (!gps_sample_valid || !navigation || !navigation->valid) return;
 
-    const float x = 10.0f;
-    const float y = 242.0f;
-    const float w = 540.0f;
-    const float h = 172.0f;
-    if (viewport_height < (int)(y + h + 20.0f)) return;
+    int viewport_width = 0;
+    int queried_height = viewport_height;
+    SDL_GetCurrentRenderOutputSize(renderer, &viewport_width, &queried_height);
+    if (viewport_width <= 0 || queried_height <= 0) return;
+    viewport_height = queried_height;
 
-    SDL_FRect panel = {x, y, w, h};
-    SDL_SetRenderDrawColor(renderer, 24, 28, 32, 226);
-    SDL_RenderFillRect(renderer, &panel);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
-    SDL_RenderRect(renderer, &panel);
+    OpenRideUINavigationOverlayState state = {0};
+    char title[64];
+    char lines[OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES][160] = {{0}};
+    uint32_t line_count = 0U;
 
-    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
-#ifdef __ANDROID__
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 10.0f,
-                              "NAVIGATION GPS REEL%s",
-                              gpx_navigation ? " | GPX" : " | ROUTAGE");
-#else
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 10.0f,
-                              "NAVIGATION GPS SIMULEE%s",
-                              gpx_navigation ? " | GPX" : " | ROUTAGE");
-#endif
+    snprintf(title,
+             sizeof(title),
+             "NAVIGATION GPS SIMULEE%s",
+             gpx_navigation ? " | GPX" : " | ROUTAGE");
+    state.title = title;
 
-    if (navigation->status == OPENRIDE_NAVIGATION_OFF_ROUTE) {
-        SDL_SetRenderDrawColor(renderer, 230, 98, 75, 255);
-    } else if (navigation->status == OPENRIDE_NAVIGATION_ARRIVED) {
-        SDL_SetRenderDrawColor(renderer, 86, 190, 118, 255);
-    } else {
-        SDL_SetRenderDrawColor(renderer, 100, 190, 126, 255);
-    }
-#ifdef __ANDROID__
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 27.0f,
-                              "%s | GPS actif",
-                              openride_navigation_status_name(navigation->status));
-#else
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 27.0f,
-                              "%s%s",
-                              openride_navigation_status_name(navigation->status),
-                              simulator && simulator->active ? " | lecture" : " | pause");
-#endif
+    snprintf(lines[line_count],
+             sizeof(lines[line_count]),
+             "%s%s",
+             openride_navigation_status_name(navigation->status),
+             simulator && simulator->active ? " | lecture" : " | pause");
+    state.lines[line_count] = lines[line_count];
+    ++line_count;
 
     double instruction_distance_m = 0.0;
     const OpenRideNavigationInstruction *next_instruction =
         openride_navigation_instructions_next(instructions,
                                               navigation->traveled_m,
                                               &instruction_distance_m);
-    if (next_instruction) {
+    if (next_instruction
+        && line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
         char maneuver_text[128];
         char distance_text[32];
         openride_navigation_instruction_text_fr(next_instruction,
@@ -2735,80 +2725,104 @@ static void draw_navigation_overlay(SDL_Renderer *renderer,
         openride_navigation_distance_text_fr(instruction_distance_m,
                                              distance_text,
                                              sizeof(distance_text));
-        SDL_SetRenderDrawColor(renderer, 255, 213, 92, 255);
         if (next_instruction->maneuver == OPENRIDE_MANEUVER_ARRIVE) {
-            SDL_RenderDebugTextFormat(renderer,
-                                      x + 12.0f,
-                                      y + 47.0f,
-                                      "ARRIVEE dans %s",
-                                      distance_text);
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "ARRIVEE dans %s",
+                     distance_text);
         } else {
-            SDL_RenderDebugTextFormat(renderer,
-                                      x + 12.0f,
-                                      y + 47.0f,
-                                      "Dans %s | %s",
-                                      distance_text,
-                                      maneuver_text);
+            snprintf(lines[line_count],
+                     sizeof(lines[line_count]),
+                     "Dans %s | %.110s",
+                     distance_text,
+                     maneuver_text);
         }
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
     }
 
     char eta_text[32] = "--";
     if (route && route->distance_m > 0.0 && route->estimated_time_s > 0.0) {
-        const double ratio = clampd(navigation->remaining_m / route->distance_m, 0.0, 1.0);
-        format_duration(route->estimated_time_s * ratio, eta_text, sizeof(eta_text));
+        const double ratio = clampd(navigation->remaining_m / route->distance_m,
+                                    0.0,
+                                    1.0);
+        format_duration(route->estimated_time_s * ratio,
+                        eta_text,
+                        sizeof(eta_text));
     }
 
-    SDL_SetRenderDrawColor(renderer, 220, 225, 229, 255);
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 68.0f,
-                              "reste %.1f km | ETA %s | progression %.1f%%",
-                              navigation->remaining_m / 1000.0,
-                              eta_text,
-                              navigation->progress_ratio * 100.0);
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 84.0f,
-                              "ecart %.1f m | vitesse %.0f km/h",
-                              navigation->distance_from_route_m,
-                              navigation->speed_mps * 3.6);
+    if (line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "reste %.1f km | ETA %s | progression %.1f%%",
+                 navigation->remaining_m / 1000.0,
+                 eta_text,
+                 navigation->progress_ratio * 100.0);
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+    }
 
-    const OpenRideNavigationTripStats *stats = openride_navigation_session_stats(session);
-    if (stats) {
+    if (line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "ecart %.1f m | vitesse %.0f km/h",
+                 navigation->distance_from_route_m,
+                 navigation->speed_mps * 3.6);
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+    }
+
+    const OpenRideNavigationTripStats *stats =
+        openride_navigation_session_stats(session);
+    if (stats && line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
         char elapsed_text[32];
-        format_duration(stats->elapsed_s, elapsed_text, sizeof(elapsed_text));
-        SDL_RenderDebugTextFormat(renderer,
-                                  x + 12.0f,
-                                  y + 103.0f,
-                                  "trajet %.1f km | %s | moy %.0f | max %.0f km/h",
-                                  stats->gps_distance_m / 1000.0,
-                                  elapsed_text,
-                                  stats->average_speed_mps * 3.6,
-                                  stats->max_speed_mps * 3.6);
-        SDL_RenderDebugTextFormat(renderer,
-                                  x + 12.0f,
-                                  y + 119.0f,
-                                  "recalcul auto %s | recalculs %u",
-                                  auto_reroute ? "ON" : "OFF",
-                                  stats->reroute_count);
+        format_duration(stats->elapsed_s,
+                        elapsed_text,
+                        sizeof(elapsed_text));
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "trajet %.1f km | %s | moy %.0f | max %.0f km/h",
+                 stats->gps_distance_m / 1000.0,
+                 elapsed_text,
+                 stats->average_speed_mps * 3.6,
+                 stats->max_speed_mps * 3.6);
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
     }
 
-    SDL_SetRenderDrawColor(renderer, 158, 168, 176, 255);
-#ifdef __ANDROID__
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 145.0f,
-                              "GPS tactile | F suivi %s | A auto %s | R manuel",
-                              follow_gps ? "ON" : "OFF",
-                              auto_reroute ? "ON" : "OFF");
-#else
-    SDL_RenderDebugTextFormat(renderer,
-                              x + 12.0f,
-                              y + 145.0f,
-                              "S lecture | F suivi %s | A auto %s | X deviation %s | R manuel",
-                              follow_gps ? "ON" : "OFF",
-                              auto_reroute ? "ON" : "OFF",
-                              deviation_enabled ? "ON" : "OFF");
+    if (stats && line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "recalcul auto %s | recalculs %u",
+                 auto_reroute ? "ON" : "OFF",
+                 stats->reroute_count);
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+    }
+
+    if (line_count < OPENRIDE_UI_NAVIGATION_OVERLAY_MAX_LINES) {
+        snprintf(lines[line_count],
+                 sizeof(lines[line_count]),
+                 "S lecture | F suivi %s | A auto %s | X deviation %s | R manuel",
+                 follow_gps ? "ON" : "OFF",
+                 auto_reroute ? "ON" : "OFF",
+                 deviation_enabled ? "ON" : "OFF");
+        state.lines[line_count] = lines[line_count];
+        ++line_count;
+    }
+
+    state.line_count = line_count;
+
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui,
+                           renderer,
+                           viewport_width,
+                           viewport_height)) {
+        return;
+    }
+    openride_ui_navigation_overlay_draw(&ui, &state);
+    openride_ui_end(&ui);
 #endif
 }
 
