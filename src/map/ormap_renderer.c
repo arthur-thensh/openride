@@ -13,6 +13,8 @@
 #define ORMAP_CACHE_ASSOCIATIVITY 4U
 #define ORMAP_GEOMETRY_BATCH_VERTEX_LIMIT 16384U
 #define ORMAP_GEOMETRY_BATCH_INDEX_LIMIT 24576U
+#define ORMAP_ROAD_PREWARM_TILE_BUDGET 3U
+#define ORMAP_ROAD_DRAW_LOAD_BUDGET 2U
 
 typedef struct GeometryBatch {
     uint32_t vertex_count;
@@ -394,10 +396,29 @@ static const uint8_t OPENRIDE_ROAD_DRAW_ORDER[] = {
     OPENRIDE_ROAD_UNKNOWN
 };
 
+static bool road_cache_contains(const OpenRideORMapRenderer *renderer,
+                                int zoom,
+                                int x,
+                                int y)
+{
+    if (!renderer) return false;
+    const size_t base = tile_cache_set_base(OPENRIDE_ORMAP_ROAD_CACHE_CAPACITY,
+                                            zoom, x, y);
+    for (size_t i = 0U; i < ORMAP_CACHE_ASSOCIATIVITY; ++i) {
+        const OpenRideORMapRoadCacheEntry *entry = &renderer->roads[base + i];
+        if (entry->occupied && entry->zoom == zoom && entry->x == x && entry->y == y) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *renderer,
                                                      int zoom,
                                                      int x,
-                                                     int y)
+                                                     int y,
+                                                     bool prewarm,
+                                                     bool budgeted_draw_load)
 {
     const size_t base = tile_cache_set_base(OPENRIDE_ORMAP_ROAD_CACHE_CAPACITY,
                                             zoom, x, y);
@@ -407,6 +428,7 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
         OpenRideORMapRoadCacheEntry *entry = &renderer->roads[base + i];
         if (entry->occupied && entry->zoom == zoom && entry->x == x && entry->y == y) {
             entry->last_used = renderer->frame_counter;
+            ++renderer->road_debug.cache_hits;
             return entry;
         }
         if (!entry->occupied && !victim) victim = entry;
@@ -414,6 +436,16 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
             oldest = entry;
         }
     }
+
+    ++renderer->road_debug.cache_misses;
+    if (budgeted_draw_load && !prewarm) {
+        if (renderer->road_draw_load_budget_remaining == 0U) {
+            ++renderer->road_debug.deferred_loads;
+            return NULL;
+        }
+        --renderer->road_draw_load_budget_remaining;
+    }
+
     if (!victim) victim = oldest;
     road_cache_entry_destroy(victim);
     victim->occupied = true;
@@ -421,6 +453,8 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
     victim->x = x;
     victim->y = y;
     victim->last_used = renderer->frame_counter;
+
+    const uint64_t load_started = SDL_GetTicksNS();
     char error[160] = {0};
     if (!openride_ormap_load_road_tile(renderer->map,
                                        zoom,
@@ -432,6 +466,13 @@ static OpenRideORMapRoadCacheEntry *road_cache_slot(OpenRideORMapRenderer *rende
         /* Keep an occupied empty entry to cache absent tiles too. */
     } else {
         (void)road_cache_build_class_index(victim);
+    }
+    renderer->road_debug.load_ms +=
+        (double)(SDL_GetTicksNS() - load_started) / 1000000.0;
+    if (prewarm) {
+        ++renderer->road_debug.prewarm_loads;
+    } else {
+        ++renderer->road_debug.draw_loads;
     }
     return victim;
 }
@@ -1074,13 +1115,27 @@ static void build_road_paint_table(OpenRideORMapRenderer *renderer,
     }
 }
 
+static bool road_paint_table_has_casing(const RoadPaintTable *table)
+{
+    if (!table) return false;
+    for (int road_class = OPENRIDE_ROAD_UNKNOWN;
+         road_class <= OPENRIDE_ROAD_OTHER;
+         ++road_class) {
+        if (!table->visible[road_class]) continue;
+        const OpenRideMapRoadPaint *paint = &table->paints[road_class];
+        if (paint->casing_width > paint->width && paint->casing.a > 0U) return true;
+    }
+    return false;
+}
+
 static void draw_road_pass(OpenRideORMapRenderer *renderer,
                            const OpenRideMapCamera *camera,
                            int width,
                            int height,
                            int zoom,
                            const RoadPaintTable *paint_table,
-                           bool casing_pass)
+                           bool casing_pass,
+                           bool budgeted_draw_load)
 {
     const int count = 1 << zoom;
     const double scale = pow(2.0, camera->zoom - zoom);
@@ -1103,7 +1158,8 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
         if (ty < 0 || ty >= count) continue;
         for (int tx = first_x; tx <= last_x; ++tx) {
             const int qx = wrap_x(tx, count);
-            OpenRideORMapRoadCacheEntry *entry = road_cache_slot(renderer, zoom, qx, ty);
+            OpenRideORMapRoadCacheEntry *entry =
+                road_cache_slot(renderer, zoom, qx, ty, false, budgeted_draw_load);
             if (!entry || entry->tile.count == 0U) continue;
             const double left = width * 0.5 + tx * tile_size - center_x;
             const double top = height * 0.5 + ty * tile_size - center_y;
@@ -1289,6 +1345,87 @@ static int android_road_data_zoom(const OpenRideORMapMetadata *metadata,
     return zoom;
 }
 
+static uint32_t prewarm_road_level(OpenRideORMapRenderer *renderer,
+                                   const OpenRideMapCamera *camera,
+                                   int width,
+                                   int height,
+                                   int zoom,
+                                   uint32_t budget)
+{
+    if (!renderer || !camera || budget == 0U) return 0U;
+    const int count = 1 << zoom;
+    const double scale = pow(2.0, camera->zoom - zoom);
+    const double tile_size = ORMAP_TILE_SIZE * scale;
+    const OpenRidePointD center = openride_mercator_forward(camera->center_lat,
+                                                             camera->center_lon);
+    const double world_size = tile_size * count;
+    const double center_x = center.x * world_size;
+    const double center_y = center.y * world_size;
+    const double bearing = camera->bearing_deg * 3.14159265358979323846 / 180.0;
+    const double half_w = fabs(cos(bearing)) * width * 0.5
+        + fabs(sin(bearing)) * height * 0.5;
+    const double half_h = fabs(sin(bearing)) * width * 0.5
+        + fabs(cos(bearing)) * height * 0.5;
+    const int first_x = (int)floor((center_x - half_w) / tile_size);
+    const int last_x = (int)floor((center_x + half_w) / tile_size);
+    const int first_y = (int)floor((center_y - half_h) / tile_size);
+    const int last_y = (int)floor((center_y + half_h) / tile_size);
+
+    uint32_t loaded = 0U;
+    for (int ty = first_y; ty <= last_y; ++ty) {
+        if (ty < 0 || ty >= count) continue;
+        for (int tx = first_x; tx <= last_x; ++tx) {
+            const int qx = wrap_x(tx, count);
+            if (road_cache_contains(renderer, zoom, qx, ty)) continue;
+            (void)road_cache_slot(renderer, zoom, qx, ty, true, false);
+            if (++loaded >= budget) return loaded;
+        }
+    }
+    return loaded;
+}
+
+static int road_prewarm_target_zoom(OpenRideORMapRenderer *renderer,
+                                    double camera_zoom)
+{
+    if (!renderer) return -1;
+    if (!renderer->road_has_previous_camera_zoom) {
+        renderer->road_previous_camera_zoom = camera_zoom;
+        renderer->road_has_previous_camera_zoom = true;
+        return -1;
+    }
+
+    const double delta = camera_zoom - renderer->road_previous_camera_zoom;
+    renderer->road_previous_camera_zoom = camera_zoom;
+    if (delta > 0.0001) {
+        renderer->road_zoom_direction = 1;
+    } else if (delta < -0.0001) {
+        renderer->road_zoom_direction = -1;
+    }
+
+    if (renderer->road_zoom_direction > 0) {
+        if (camera_zoom >= 12.80 && camera_zoom < 14.40) {
+            return OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM;
+        }
+        if (camera_zoom >= 11.15 && camera_zoom < 12.80) {
+            return OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM;
+        }
+        if (camera_zoom >= 9.95 && camera_zoom < 11.25) {
+            return OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM;
+        }
+    } else if (renderer->road_zoom_direction < 0) {
+        if (camera_zoom <= 15.00 && camera_zoom > 13.40) {
+            return OPENRIDE_ORMAP_ROAD_LOCAL_ZOOM;
+        }
+        if (camera_zoom <= 13.40 && camera_zoom > 11.85) {
+            return OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM;
+        }
+        if (camera_zoom <= 11.85 && camera_zoom > 10.55) {
+            return OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM;
+        }
+    }
+    return -1;
+}
+
 static void draw_roads_legacy(OpenRideORMapRenderer *renderer,
                               const OpenRideMapCamera *camera,
                               int width,
@@ -1298,8 +1435,24 @@ static void draw_roads_legacy(OpenRideORMapRenderer *renderer,
     const int zoom = android_road_data_zoom(metadata, camera->zoom);
     RoadPaintTable paint_table;
     build_road_paint_table(renderer, camera->zoom, 1.0, &paint_table);
-    draw_road_pass(renderer, camera, width, height, zoom, &paint_table, true);
-    draw_road_pass(renderer, camera, width, height, zoom, &paint_table, false);
+    if (road_paint_table_has_casing(&paint_table)) {
+        draw_road_pass(renderer,
+                       camera,
+                       width,
+                       height,
+                       zoom,
+                       &paint_table,
+                       true,
+                       false);
+    }
+    draw_road_pass(renderer,
+                   camera,
+                   width,
+                   height,
+                   zoom,
+                   &paint_table,
+                   false,
+                   false);
 }
 
 static void draw_roads(OpenRideORMapRenderer *renderer,
@@ -1307,11 +1460,30 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
                        int width,
                        int height)
 {
+    if (!renderer) return;
+    const uint64_t roads_started = SDL_GetTicksNS();
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
-    if (!metadata) return;
+    if (!metadata) {
+        renderer->road_debug.roads_ms =
+            (double)(SDL_GetTicksNS() - roads_started) / 1000000.0;
+        return;
+    }
     if (metadata->format_version < 6) {
         draw_roads_legacy(renderer, camera, width, height, metadata);
+        renderer->road_debug.roads_ms =
+            (double)(SDL_GetTicksNS() - roads_started) / 1000000.0;
         return;
+    }
+
+    const int prewarm_zoom = road_prewarm_target_zoom(renderer, camera->zoom);
+    renderer->road_debug.prewarm_zoom = prewarm_zoom;
+    if (prewarm_zoom >= 0) {
+        (void)prewarm_road_level(renderer,
+                                 camera,
+                                 width,
+                                 height,
+                                 prewarm_zoom,
+                                 ORMAP_ROAD_PREWARM_TILE_BUDGET);
     }
 
     const double regional_to_overview =
@@ -1338,21 +1510,26 @@ static void draw_roads(OpenRideORMapRenderer *renderer,
         build_road_paint_table(renderer, camera->zoom, fades[i], &tables[i]);
     }
 
-    /* Keep road hierarchy coherent through a LOD handoff: all casings are
-     * submitted before all coloured strokes, even when two datasets overlap. */
+    /* Keep road hierarchy coherent through a LOD handoff. On Android the
+     * low/mid-zoom style removes all casings, so avoid traversing every tile
+     * for an empty casing pass. */
     for (int pass = 0; pass < 2; ++pass) {
         const bool casing = pass == 0;
         for (int i = 0; i < 4; ++i) {
             if (fades[i] <= 0.001) continue;
+            if (casing && !road_paint_table_has_casing(&tables[i])) continue;
             draw_road_pass(renderer,
                            camera,
                            width,
                            height,
                            zooms[i],
                            &tables[i],
-                           casing);
+                           casing,
+                           true);
         }
     }
+    renderer->road_debug.roads_ms =
+        (double)(SDL_GetTicksNS() - roads_started) / 1000000.0;
 }
 
 static const char *label_kind_name(int kind)
@@ -1639,7 +1816,21 @@ void openride_ormap_renderer_set_style(OpenRideORMapRenderer *renderer,
 
 void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer)
 {
-    if (renderer) ++renderer->frame_counter;
+    if (!renderer) return;
+    ++renderer->frame_counter;
+    memset(&renderer->road_debug, 0, sizeof(renderer->road_debug));
+    renderer->road_debug.prewarm_zoom = -1;
+    renderer->road_draw_load_budget_remaining = ORMAP_ROAD_DRAW_LOAD_BUDGET;
+}
+
+void openride_ormap_renderer_get_road_debug_stats(
+    const OpenRideORMapRenderer *renderer,
+    OpenRideORMapRoadDebugStats *stats)
+{
+    if (!stats) return;
+    memset(stats, 0, sizeof(*stats));
+    stats->prewarm_zoom = -1;
+    if (renderer) *stats = renderer->road_debug;
 }
 
 void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,

@@ -8360,17 +8360,39 @@ int main(int argc, char **argv)
                 : map_zoom_test.direction < 0 ? "ZOOM -" : "FIN";
             char zoom_line[96];
             char gps_line[96];
+            char road_line[160];
+            OpenRideORMapRoadDebugStats road_debug;
+            memset(&road_debug, 0, sizeof(road_debug));
+            road_debug.prewarm_zoom = -1;
+            if (ormap_map && renderer_initialized) {
+                openride_ormap_renderer_get_road_debug_stats(&ormap_renderer,
+                                                              &road_debug);
+            }
             snprintf(zoom_line, sizeof(zoom_line),
                      "TEST LOD  %s  z=%.3f", phase, map_zoom_test.zoom);
             snprintf(gps_line, sizeof(gps_line),
                      "GPS %.6f, %.6f",
                      OPENRIDE_MAP_ZOOM_TEST_LAT,
                      OPENRIDE_MAP_ZOOM_TEST_LON);
+            snprintf(road_line,
+                     sizeof(road_line),
+                     "R %.1fms L%.1f H%u M%u P%u D%u X%u z%d",
+                     road_debug.roads_ms,
+                     road_debug.load_ms,
+                     road_debug.cache_hits,
+                     road_debug.cache_misses,
+                     road_debug.prewarm_loads,
+                     road_debug.draw_loads,
+                     road_debug.deferred_loads,
+                     road_debug.prewarm_zoom);
+            float badge_width = 330.0f * ui_scale;
+            const float max_badge_width = (float)safe.w - 2.0f * margin;
+            if (badge_width > max_badge_width) badge_width = max_badge_width;
             SDL_FRect badge = {
                 (float)safe.x + margin,
                 (float)safe.y + margin,
-                238.0f * ui_scale,
-                44.0f * ui_scale
+                badge_width,
+                62.0f * ui_scale
             };
             SDL_SetRenderDrawColor(renderer, 12, 16, 20, 224);
             SDL_RenderFillRect(renderer, &badge);
@@ -8387,6 +8409,11 @@ int main(int argc, char **argv)
                              badge.y + 25.0f * ui_scale,
                              text_scale,
                              gps_line);
+            draw_scaled_text(renderer,
+                             badge.x + 8.0f * ui_scale,
+                             badge.y + 43.0f * ui_scale,
+                             text_scale,
+                             road_line);
         }
 
         SDL_RenderPresent(renderer);
