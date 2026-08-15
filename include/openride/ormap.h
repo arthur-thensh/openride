@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define OPENRIDE_ORMAP_FORMAT_VERSION 3U
+#define OPENRIDE_ORMAP_FORMAT_VERSION 4U
 #define OPENRIDE_ORMAP_MIN_ROAD_ZOOM 10
 /* Road geometry is detailed enough at z14 and is scaled above that zoom. */
 #define OPENRIDE_ORMAP_ROAD_DATA_MAX_ZOOM 14
@@ -95,6 +95,8 @@ typedef enum OpenRideORMapAreaKind {
  * Filled areas are pre-triangulated by the builder. Coordinates are quantized
  * in a slightly buffered tile-local domain so adjacent tiles overlap by half
  * a data-zoom pixel instead of exposing hairline seams while rotating/scaling.
+ * In v4 this representation is used for water and the coarse urban overview;
+ * detailed built-up coverage stays in the semantic mask instead.
  */
 typedef struct OpenRideORMapAreaTriangle {
     uint16_t x1;
@@ -218,11 +220,11 @@ const OpenRideORMapLabel *openride_ormap_labels(const OpenRideORMap *map,
 
 /*
  * Build OpenRide's compact map from the same regional inputs used by routing
- * and search. Roads and waterways remain vector lines. Water surfaces are
- * stored as vector triangles directly from OSM rings. Buildings and built-up
- * landuse first feed a temporary high-resolution occupancy mask, then the
- * merged mask is converted to simplified vector contours before storage.
- * Individual building footprints are never stored in .ormap.
+ * and search. Roads and waterways remain vector lines. Water surfaces remain
+ * compact vector triangles. v4 stores built-up landuse at two robust LODs:
+ * a coarse rectilinear urban layer for regional views and the merged semantic
+ * occupancy mask for detailed views. This avoids triangulating large merged
+ * city contours; individual building footprints still are not stored.
  */
 bool openride_ormap_build(const char *pbf_path,
                           const char *routing_graph_path,
