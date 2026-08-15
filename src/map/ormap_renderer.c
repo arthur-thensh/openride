@@ -1221,26 +1221,9 @@ static void draw_areas(OpenRideORMapRenderer *renderer,
     if (metadata && metadata->format_version >= 3 && camera->zoom >= 10.0) {
         const bool v6 = metadata->format_version >= 6;
         if (v6) {
-            if (!renderer->area_detail_ready
-                && camera->zoom >= ORMAP_WATER_DETAIL_PREWARM_START) {
-                const double detail_view_zoom =
-                    camera->zoom < ORMAP_WATER_DETAIL_START
-                        ? ORMAP_WATER_DETAIL_START
-                        : camera->zoom;
-                (void)prewarm_area_level(renderer,
-                                         camera,
-                                         width,
-                                         height,
-                                         metadata->area_detail_zoom,
-                                         detail_view_zoom,
-                                         ORMAP_AREA_PREWARM_TILE_BUDGET);
-                renderer->area_detail_ready = area_level_cache_ready(renderer,
-                                                                      camera,
-                                                                      width,
-                                                                      height,
-                                                                      metadata->area_detail_zoom);
-            }
-
+            /* Detail prewarm is owned by draw_masks(), the first surface
+             * layer of the frame. Do not issue a second speculative load
+             * here: the one-tile/frame budget must remain a hard ceiling. */
             const double nominal_detail_mix =
                 ormap_zoom_smoothstep(camera->zoom,
                                       ORMAP_WATER_DETAIL_START,
