@@ -1,0 +1,140 @@
+name: Validate LOD transition V1 retry
+
+on:
+  push:
+    branches:
+      - chatgpt/lod-transition-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reuse and refine LOD source patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/lod_v1_patch.yml').read_text()
+          marker = '      - name: Apply LOD transition patch\n'
+          start = workflow.index(marker)
+          run_marker = '        run: |\n'
+          start = workflow.index(run_marker, start) + len(run_marker)
+          end = workflow.index('\n      - name: Install desktop build dependencies', start)
+          block = workflow[start:end]
+          lines = []
+          for line in block.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply_lod_v1.sh').write_text('\n'.join(lines) + '\n')
+          PY
+          bash /tmp/apply_lod_v1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main = Path('src/main.c')
+          text = main.read_text()
+          old = '\nconst bool world_overview_only = world_available\n            && camera.zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM;'
+          new = '\n        const bool world_overview_only = world_available\n            && camera.zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM;'
+          if old not in text:
+              raise SystemExit('main indentation refinement not found')
+          main.write_text(text.replace(old, new, 1))
+
+          renderer = Path('src/map/ormap_renderer.c')
+          text = renderer.read_text()
+          old = '''    const bool legacy_detail_builtup =\n        metadata->format_version < 4 && camera->zoom >= 13.0;'''
+          new = '''    const bool draw_detail_builtup =\n        camera->zoom >= 13.0;'''
+          if old not in text:
+              raise SystemExit('detail built-up refinement not found')
+          text = text.replace(old, new, 1)
+          if '                        legacy_detail_builtup,\n' not in text:
+              raise SystemExit('detail built-up call not found')
+          text = text.replace('                        legacy_detail_builtup,\n',
+                              '                        draw_detail_builtup,\n', 1)
+          renderer.write_text(text)
+          PY
+
+          git diff --check
+          grep -n "world_overview_only\|overview_handoff\|ormap_detail_handoff_fade\|detail_mix\|draw_detail_builtup\|green_out\|mask_start" \
+            src/main.c src/map/map_world.c src/map/ormap_renderer.c src/map/ormap_renderer_v4.c
+
+      - name: Install desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config libsqlite3-dev zlib1g-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libxss-dev libxtst-dev
+
+      - name: Bootstrap vendored dependencies
+        run: |
+          ./scripts/bootstrap_sdl.sh
+          ./scripts/bootstrap_sqlite.sh
+
+      - name: Neutralize known Linux-only trig alias issue for desktop validation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('CMakeLists.txt')
+          text = path.read_text()
+          old = '''        cos=openride_ormap_cached_cos\n        sin=openride_ormap_cached_sin\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected legacy cos/sin alias block exactly once')
+          path.write_text(text.replace(old, '', 1))
+          PY
+
+      - name: Configure and build desktop
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DOPENRIDE_BUILD_TESTS=ON \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF
+          cmake --build build
+
+      - name: Run desktop tests except external MBTiles fixture
+        run: ctest --test-dir build --output-on-failure -E '^mbtiles$'
+
+      - name: Restore production CMake before Android validation
+        run: git checkout -- CMakeLists.txt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Ensure Android SDK components
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            'ndk;28.2.13676358' \
+            'cmake;3.22.1'
+
+      - name: Build production Android debug APK
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+        run: ./scripts/android_build.sh
+
+      - name: Commit validated LOD V1 source changes
+        shell: bash
+        run: |
+          rm -f .github/workflows/lod_v1_patch.yml .github/workflows/lod_v1_retry.yml
+          git add src/main.c src/map/map_world.h src/map/map_world.c \
+            src/map/ormap_renderer.c src/map/ormap_renderer_v4.c \
+            .github/workflows/lod_v1_patch.yml .github/workflows/lod_v1_retry.yml
+          git diff --cached --check
+          git config user.name 'OpenRide CI'
+          git config user.email 'openride-ci@users.noreply.github.com'
+          git commit -m 'Map: smooth LOD transitions'
+          git push origin HEAD:chatgpt/lod-transition-v1
