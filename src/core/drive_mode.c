@@ -99,8 +99,8 @@ double openride_drive_mode_target_zoom(double speed_mps, double maneuver_distanc
 
     /*
      * Keep the rider closer to the road than the first Android DriveMode
-     * tuning. The look-ahead is intentionally unchanged: we still want useful
-     * visibility in the direction of travel, only with a tighter map scale.
+     * tuning. The look-ahead is handled separately so map scale can stay
+     * stable while the framing anticipates an upcoming maneuver.
      */
     double zoom = 17.8;
 
@@ -124,6 +124,34 @@ double openride_drive_mode_lookahead_m(double speed_mps)
 {
     const double speed_kph = fmax(0.0, speed_mps) * 3.6;
     return clampd(22.0 + speed_kph * 1.35, 25.0, 180.0);
+}
+
+double openride_drive_mode_target_lookahead_m(double speed_mps,
+                                               double maneuver_distance_m)
+{
+    const double base = openride_drive_mode_lookahead_m(speed_mps);
+    if (!isfinite(maneuver_distance_m)
+        || maneuver_distance_m < 0.0
+        || maneuver_distance_m >= 450.0) {
+        return base;
+    }
+
+    /*
+     * Frame more of the road leading into the next maneuver while it is still
+     * far enough away to be useful, then progressively pull the camera target
+     * back toward the rider near the junction. This makes intersections and
+     * roundabouts easier to read without rotating the map before the bike has
+     * actually changed heading.
+     *
+     * At 60 km/h the ordinary look-ahead is about 103 m:
+     *   400 m to maneuver -> about 149 m (anticipation)
+     *   300 m             -> about 135 m
+     *   200 m             -> about 90 m
+     *   100 m             -> about 45 m
+     *    50 m             -> about 35 m
+     */
+    const double maneuver_target = maneuver_distance_m * 0.45;
+    return clampd(maneuver_target, 35.0, base * 1.45);
 }
 
 OpenRideGPSQuality openride_drive_mode_gps_quality(bool gps_active,
@@ -180,7 +208,9 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
         target_bearing = state->heading_up ? state->camera_bearing_deg : 0.0;
     }
 
-    const double lookahead = openride_drive_mode_lookahead_m(speed_mps);
+    const double lookahead =
+        openride_drive_mode_target_lookahead_m(speed_mps,
+                                               maneuver_distance_m);
     double target_lat = lat;
     double target_lon = lon;
     project_ahead(lat, lon, target_bearing, lookahead, &target_lat, &target_lon);

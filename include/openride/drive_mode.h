@@ -32,6 +32,8 @@ void openride_drive_mode_set_auto_zoom(OpenRideDriveModeState *state, bool auto_
 
 double openride_drive_mode_target_zoom(double speed_mps, double maneuver_distance_m);
 double openride_drive_mode_lookahead_m(double speed_mps);
+double openride_drive_mode_target_lookahead_m(double speed_mps,
+                                               double maneuver_distance_m);
 OpenRideGPSQuality openride_drive_mode_gps_quality(bool gps_active,
                                                    bool has_sample,
                                                    double sample_age_s,
