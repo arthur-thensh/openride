@@ -4816,6 +4816,8 @@ int main(int argc, char **argv)
     }
 
     while (running) {
+        uint64_t map_zoom_loop_started_ns =
+            map_zoom_test.active ? SDL_GetTicksNS() : 0U;
         SDL_Event event;
 
         while (SDL_PollEvent(&event)) {
@@ -4865,6 +4867,7 @@ int main(int argc, char **argv)
                                              "test zoom carte annule");
                                 } else {
                                     openride_map_zoom_test_start(&map_zoom_test, &camera, &platform_paths);
+                                    map_zoom_loop_started_ns = SDL_GetTicksNS();
                                     app_panel = OPENRIDE_APP_PANEL_NONE;
                                     snprintf(route_status, sizeof(route_status),
                                              "test zoom 9.000 -> 17.000 -> 9.000 | log data/map-zoom-test.csv");
@@ -5994,6 +5997,7 @@ int main(int argc, char **argv)
                                          "test zoom carte annule");
                             } else {
                                 openride_map_zoom_test_start(&map_zoom_test, &camera, &platform_paths);
+                                    map_zoom_loop_started_ns = SDL_GetTicksNS();
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
                                 app_panel_selected = 0U;
                                 snprintf(route_status, sizeof(route_status),
@@ -8060,6 +8064,13 @@ int main(int argc, char **argv)
             && openride_map_world_region_count(map_world) > 0U;
         const bool world_overview_only = world_available
             && camera.zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM;
+        OpenRideMapZoomFrameProfile map_zoom_profile;
+        OpenRideMapWorldDebugStats map_zoom_world_debug;
+        memset(&map_zoom_profile, 0, sizeof(map_zoom_profile));
+        memset(&map_zoom_world_debug, 0, sizeof(map_zoom_world_debug));
+        map_zoom_world_debug.road.prewarm_zoom = -1;
+        if (map_zoom_test.active && map_world) openride_map_world_debug_begin_frame(map_world);
+        const uint64_t map_zoom_map_started_ns = map_zoom_test.active ? SDL_GetTicksNS() : 0U;
         if (world_overview_only) {
             const OpenRideMapPalette palette = openride_map_palette(map_style);
             SDL_SetRenderDrawColor(renderer,
@@ -8103,6 +8114,23 @@ int main(int argc, char **argv)
                                         NULL,
                                         width,
                                         height);
+            }
+        }
+        const uint64_t map_zoom_map_finished_ns = map_zoom_test.active ? SDL_GetTicksNS() : 0U;
+        if (map_zoom_test.active) {
+            if (map_zoom_loop_started_ns != 0U) map_zoom_profile.update_ms=(double)(map_zoom_map_started_ns-map_zoom_loop_started_ns)/1000000.0;
+            map_zoom_profile.map_ms=(double)(map_zoom_map_finished_ns-map_zoom_map_started_ns)/1000000.0;
+            if (map_world) {
+                openride_map_world_get_debug_stats(map_world,&map_zoom_world_debug);
+                map_zoom_profile.world_overview_ms=map_zoom_world_debug.overview_ms;
+                map_zoom_profile.world_detail_ms=map_zoom_world_debug.detail_ms;
+                map_zoom_profile.masks_ms=map_zoom_world_debug.masks_ms;
+                map_zoom_profile.areas_layer_ms=map_zoom_world_debug.areas_ms;
+                map_zoom_profile.waterways_ms=map_zoom_world_debug.waterways_ms;
+                map_zoom_profile.roads_layer_ms=map_zoom_world_debug.roads_ms;
+                map_zoom_profile.labels_ms=map_zoom_world_debug.labels_ms;
+                map_zoom_profile.visible_detail_regions=map_zoom_world_debug.visible_detail_regions;
+                map_zoom_profile.ormap_stats_valid=map_zoom_world_debug.ormap_stats_valid;
             }
         }
 
@@ -8319,7 +8347,10 @@ int main(int argc, char **argv)
             memset(&road_debug, 0, sizeof(road_debug));
             memset(&area_debug, 0, sizeof(area_debug));
             road_debug.prewarm_zoom = -1;
-            if (ormap_map && renderer_initialized) {
+            if (map_zoom_world_debug.ormap_stats_valid) {
+                road_debug = map_zoom_world_debug.road;
+                area_debug = map_zoom_world_debug.area;
+            } else if (!world_available && ormap_map && renderer_initialized) {
                 openride_ormap_renderer_get_road_debug_stats(&ormap_renderer,
                                                               &road_debug);
                 openride_ormap_renderer_get_area_debug_stats(&ormap_renderer,
@@ -8400,32 +8431,18 @@ int main(int argc, char **argv)
                              area_line);
         }
 
+        const uint64_t map_zoom_ui_finished_ns = map_zoom_test.active ? SDL_GetTicksNS() : 0U;
+        if (map_zoom_test.active) map_zoom_profile.ui_ms=(double)(map_zoom_ui_finished_ns-map_zoom_map_finished_ns)/1000000.0;
         SDL_RenderPresent(renderer);
-
-        /* Benchmark timing is captured immediately after Present, before any
-         * logging work. Samples stay in RAM and are written only after the
-         * final z9 frame, so instrumentation does not add filesystem I/O to
-         * the measured frames. */
         if (map_zoom_test.active) {
-            const uint64_t map_zoom_present_ns = SDL_GetTicksNS();
-            OpenRideORMapRoadDebugStats map_zoom_road_debug;
-            OpenRideORMapAreaDebugStats map_zoom_area_debug;
-            memset(&map_zoom_road_debug, 0, sizeof(map_zoom_road_debug));
-            memset(&map_zoom_area_debug, 0, sizeof(map_zoom_area_debug));
-            map_zoom_road_debug.prewarm_zoom = -1;
-            if (ormap_map && renderer_initialized) {
-                openride_ormap_renderer_get_road_debug_stats(
-                    &ormap_renderer, &map_zoom_road_debug);
-                openride_ormap_renderer_get_area_debug_stats(
-                    &ormap_renderer, &map_zoom_area_debug);
-            }
-            (void)openride_map_zoom_test_record_present(
-                &map_zoom_test,
-                map_zoom_present_ns,
-                &map_zoom_road_debug,
-                &map_zoom_area_debug,
-                route_status,
-                sizeof(route_status));
+            const uint64_t map_zoom_present_ns=SDL_GetTicksNS();
+            map_zoom_profile.present_ms=(double)(map_zoom_present_ns-map_zoom_ui_finished_ns)/1000000.0;
+            OpenRideORMapRoadDebugStats map_zoom_road_debug;OpenRideORMapAreaDebugStats map_zoom_area_debug;
+            memset(&map_zoom_road_debug,0,sizeof(map_zoom_road_debug));memset(&map_zoom_area_debug,0,sizeof(map_zoom_area_debug));map_zoom_road_debug.prewarm_zoom=-1;
+            if(map_zoom_world_debug.ormap_stats_valid){map_zoom_road_debug=map_zoom_world_debug.road;map_zoom_area_debug=map_zoom_world_debug.area;}
+            else if(!world_available&&ormap_map&&renderer_initialized){openride_ormap_renderer_get_road_debug_stats(&ormap_renderer,&map_zoom_road_debug);openride_ormap_renderer_get_area_debug_stats(&ormap_renderer,&map_zoom_area_debug);map_zoom_profile.ormap_stats_valid=true;}
+            if(map_world)openride_map_world_debug_end_frame(map_world);
+            (void)openride_map_zoom_test_record_present(&map_zoom_test,map_zoom_present_ns,&map_zoom_profile,&map_zoom_road_debug,&map_zoom_area_debug,route_status,sizeof(route_status));
         }
     }
 
