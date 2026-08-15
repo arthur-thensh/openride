@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 5
 
       - name: Apply cartographic pipeline patch
         shell: bash
@@ -23,17 +23,22 @@ jobs:
           import subprocess
 
           old = subprocess.check_output(
-              ["git", "show", "HEAD^^:.github/workflows/lowzoom-landcover-once.yml"],
+              ["git", "show", "f57bd05dfcaa805979920402d218fc73812a95e8:.github/workflows/lowzoom-landcover-once.yml"],
               text=True,
           )
           marker = "          python3 - <<'PY'\n"
           if marker not in old:
-              raise SystemExit("previous one-shot patch body not found")
+              raise SystemExit("original one-shot patch body not found")
           body = old.split(marker, 1)[1].split("\n          PY\n", 1)[0]
           source = "\n".join(
               line[10:] if line.startswith("          ") else line
               for line in body.splitlines()
           )
+          needle = '''    if count != 1:\n        raise SystemExit(f"{label}: expected one match, found {count}")\n    return text.replace(old, new, 1)'''
+          replacement = '''    if count != 1:\n        if label == "ormap v4 area comment":\n            return text\n        raise SystemExit(f"{label}: expected one match, found {count}")\n    return text.replace(old, new, 1)'''
+          if needle not in source:
+              raise SystemExit("replace_once guard not found in patch source")
+          source = source.replace(needle, replacement, 1)
           exec(compile(source, "lowzoom-landcover-patch.py", "exec"))
           PYRUN
 
