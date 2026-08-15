@@ -8362,12 +8362,17 @@ int main(int argc, char **argv)
             char gps_line[96];
             char road_line[160];
             char road_work_line[96];
+            char area_line[160];
             OpenRideORMapRoadDebugStats road_debug;
+            OpenRideORMapAreaDebugStats area_debug;
             memset(&road_debug, 0, sizeof(road_debug));
+            memset(&area_debug, 0, sizeof(area_debug));
             road_debug.prewarm_zoom = -1;
             if (ormap_map && renderer_initialized) {
                 openride_ormap_renderer_get_road_debug_stats(&ormap_renderer,
                                                               &road_debug);
+                openride_ormap_renderer_get_area_debug_stats(&ormap_renderer,
+                                                              &area_debug);
             }
             snprintf(zoom_line, sizeof(zoom_line),
                      "TEST LOD  %s  z=%.3f", phase, map_zoom_test.zoom);
@@ -8392,6 +8397,15 @@ int main(int argc, char **argv)
                      road_debug.tiles_visited,
                      road_debug.segments_drawn,
                      road_debug.batches);
+            snprintf(area_line,
+                     sizeof(area_line),
+                     "A %.1fms AL%.1f AT%u AG%u AB%u AP%u",
+                     area_debug.areas_ms,
+                     area_debug.load_ms,
+                     area_debug.tiles_visited,
+                     area_debug.triangles_drawn,
+                     area_debug.batches,
+                     area_debug.mask_prewarm_loads);
             float badge_width = 330.0f * ui_scale;
             const float max_badge_width = (float)safe.w - 2.0f * margin;
             if (badge_width > max_badge_width) badge_width = max_badge_width;
@@ -8399,7 +8413,7 @@ int main(int argc, char **argv)
                 (float)safe.x + margin,
                 (float)safe.y + margin,
                 badge_width,
-                80.0f * ui_scale
+                98.0f * ui_scale
             };
             SDL_SetRenderDrawColor(renderer, 12, 16, 20, 224);
             SDL_RenderFillRect(renderer, &badge);
@@ -8426,6 +8440,11 @@ int main(int argc, char **argv)
                              badge.y + 61.0f * ui_scale,
                              text_scale,
                              road_work_line);
+            draw_scaled_text(renderer,
+                             badge.x + 8.0f * ui_scale,
+                             badge.y + 79.0f * ui_scale,
+                             text_scale,
+                             area_line);
         }
 
         SDL_RenderPresent(renderer);
