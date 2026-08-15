@@ -62,6 +62,11 @@
 #define OPENRIDE_APP_LIST_MAX 12U
 #define OPENRIDE_REAL_MAP_PATH "data/maps/nord-pas-de-calais.ormap"
 #define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"
+#define OPENRIDE_MAP_ZOOM_TEST_LAT 50.370800
+#define OPENRIDE_MAP_ZOOM_TEST_LON 3.080200
+#define OPENRIDE_MAP_ZOOM_TEST_MIN 9.0
+#define OPENRIDE_MAP_ZOOM_TEST_MAX 17.0
+#define OPENRIDE_MAP_ZOOM_TEST_SPEED 0.50
 
 typedef enum OpenRideLifecycleSignal {
     OPENRIDE_LIFECYCLE_SIGNAL_NONE = 0,
@@ -74,6 +79,51 @@ typedef enum OpenRideLifecycleSignal {
 typedef struct OpenRideLifecycleWatch {
     SDL_AtomicInt pending_signal;
 } OpenRideLifecycleWatch;
+
+typedef struct OpenRideMapZoomTest {
+    bool active;
+    int direction;
+    double zoom;
+} OpenRideMapZoomTest;
+
+static void openride_map_zoom_test_start(OpenRideMapZoomTest *test,
+                                         OpenRideMapCamera *camera)
+{
+    if (!test || !camera) return;
+    test->active = true;
+    test->direction = 1;
+    test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
+    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
+    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
+    camera->zoom = test->zoom;
+    camera->bearing_deg = 0.0;
+}
+
+static void openride_map_zoom_test_update(OpenRideMapZoomTest *test,
+                                          OpenRideMapCamera *camera,
+                                          double delta_seconds)
+{
+    if (!test || !camera || !test->active) return;
+    if (test->direction == 0) {
+        test->active = false;
+        return;
+    }
+    if (delta_seconds < 0.0) delta_seconds = 0.0;
+    const double delta = OPENRIDE_MAP_ZOOM_TEST_SPEED * delta_seconds;
+    test->zoom += (double)test->direction * delta;
+    if (test->direction > 0 && test->zoom >= OPENRIDE_MAP_ZOOM_TEST_MAX) {
+        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MAX;
+        test->direction = -1;
+    } else if (test->direction < 0
+               && test->zoom <= OPENRIDE_MAP_ZOOM_TEST_MIN) {
+        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
+        test->direction = 0;
+    }
+    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
+    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
+    camera->zoom = test->zoom;
+    camera->bearing_deg = 0.0;
+}
 
 #ifdef __ANDROID__
 typedef struct OpenRideAndroidMissedTurnDev {
@@ -2150,7 +2200,8 @@ typedef enum OpenRideMobilePanelAction {
     OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SIMULATION,
     OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_DEVIATION,
     OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_SPEED,
-    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN
+    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN,
+    OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST
 } OpenRideMobilePanelAction;
 
 typedef struct OpenRideMobilePanelHit {
@@ -2331,7 +2382,7 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
 {
     OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
     uint32_t rows = 0U;
-    if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
+    if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 9U;
@@ -2372,13 +2423,14 @@ static OpenRideMobilePanelHit mobile_app_panel_hit_test(SDL_Renderer *renderer,
     for (uint32_t i = 0U; i < layout.row_count; ++i) {
         if (!mobile_point_in_rect(x, y, &layout.rows[i])) continue;
         if (panel == OPENRIDE_APP_PANEL_MAIN) {
-            static const OpenRideMobilePanelAction actions[5] = {
-                OPENRIDE_MOBILE_PANEL_SEARCH,
-                OPENRIDE_MOBILE_PANEL_FAVORITES,
-                OPENRIDE_MOBILE_PANEL_HISTORY,
-                OPENRIDE_MOBILE_PANEL_REGIONS,
-                OPENRIDE_MOBILE_PANEL_SETTINGS
-            };
+            static const OpenRideMobilePanelAction actions[6] = {
+      OPENRIDE_MOBILE_PANEL_SEARCH,
+      OPENRIDE_MOBILE_PANEL_FAVORITES,
+      OPENRIDE_MOBILE_PANEL_HISTORY,
+      OPENRIDE_MOBILE_PANEL_REGIONS,
+      OPENRIDE_MOBILE_PANEL_SETTINGS,
+      OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST
+  };
             hit.action = actions[i];
         } else if (panel == OPENRIDE_APP_PANEL_ROUTE) {
             static const OpenRideMobilePanelAction actions[6] = {
@@ -2463,7 +2515,7 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
     if (width <= 0 || height <= 0) return;
 
     uint32_t rows = 0U;
-    if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;
+    if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE) rows = 6U;
     else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS) rows = 2U;
     else if (panel == OPENRIDE_APP_PANEL_SETTINGS) rows = 9U;
@@ -2486,14 +2538,15 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
 
     if (panel == OPENRIDE_APP_PANEL_MAIN) {
         mobile_draw_panel_title(renderer, &layout, "OPENRIDE", "Navigation moto hors ligne");
-        static const char *labels[5] = {
+        static const char *labels[6] = {
             "Rechercher",
             "Favoris",
             "Historique",
             "Cartes hors ligne",
-            "Parametres"
+            "Parametres",
+            "Test zoom carte [DEV]"
         };
-        for (uint32_t i = 0U; i < 5U; ++i) {
+        for (uint32_t i = 0U; i < 6U; ++i) {
             mobile_draw_button(renderer, &layout.rows[i], labels[i], layout.text_scale, false, false);
         }
         mobile_draw_button(renderer, &layout.back, "Fermer", layout.text_scale, false, false);
@@ -2916,6 +2969,7 @@ static void draw_app_panel(SDL_Renderer *renderer,
         SDL_RenderDebugText(renderer, x + 18, y + 108, "H  Historique");
         SDL_RenderDebugText(renderer, x + 18, y + 136, "C  Cartes / donnees installees");
         SDL_RenderDebugText(renderer, x + 18, y + 164, "P  Parametres");
+        SDL_RenderDebugText(renderer, x + 18, y + 192, "Z  Test zoom carte [DEV]");
         SDL_SetRenderDrawColor(renderer, 165, 174, 181, 255);
         SDL_RenderDebugText(renderer, x + 18, y + 322, "Tab/Esc: fermer | V: ajouter la position en favori");
         return;
@@ -4491,6 +4545,7 @@ int main(int argc, char **argv)
     bool vector_map = map && is_vector_map(metadata);
     bool scalable_map = vector_map || ormap_map;
     OpenRideMapCamera camera = camera_from_metadata(metadata);
+    OpenRideMapZoomTest map_zoom_test = {0};
     OpenRideMapSelection selection;
     openride_map_selection_init(&selection);
     OpenRideRoute route = {0};
@@ -4852,6 +4907,17 @@ int main(int argc, char **argv)
                                 app_panel = OPENRIDE_APP_PANEL_REGIONS;
                             } else if (event.key.key == SDLK_P) {
                                 app_panel = OPENRIDE_APP_PANEL_SETTINGS;
+                            } else if (event.key.key == SDLK_Z) {
+                                if (map_zoom_test.active) {
+                                    map_zoom_test.active = false;
+                                    snprintf(route_status, sizeof(route_status),
+                                             "test zoom carte annule");
+                                } else {
+                                    openride_map_zoom_test_start(&map_zoom_test, &camera);
+                                    app_panel = OPENRIDE_APP_PANEL_NONE;
+                                    snprintf(route_status, sizeof(route_status),
+                                             "test zoom 9.000 -> 17.000 -> 9.000");
+                                }
                             }
                         } else if (app_panel == OPENRIDE_APP_PANEL_ROUTE) {
                             if (event.key.key == SDLK_D) {
@@ -5969,6 +6035,19 @@ int main(int argc, char **argv)
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS) {
                             app_panel = OPENRIDE_APP_PANEL_SETTINGS;
                             app_panel_selected = 0U;
+                        } else if (mobile_hit.action
+                                   == OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST) {
+                            if (map_zoom_test.active) {
+                                map_zoom_test.active = false;
+                                snprintf(route_status, sizeof(route_status),
+                                         "test zoom carte annule");
+                            } else {
+                                openride_map_zoom_test_start(&map_zoom_test, &camera);
+                                app_panel = OPENRIDE_APP_PANEL_NONE;
+                                app_panel_selected = 0U;
+                                snprintf(route_status, sizeof(route_status),
+                                         "test zoom 9.000 -> 17.000 -> 9.000");
+                            }
                         } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_PLACE
                                    && mobile_hit.index >= 0) {
                             const bool favorites_panel = app_panel == OPENRIDE_APP_PANEL_FAVORITES;
@@ -7733,6 +7812,8 @@ int main(int argc, char **argv)
         if (delta_seconds < 0.0) delta_seconds = 0.0;
         if (delta_seconds > 0.25) delta_seconds = 0.25;
 
+        openride_map_zoom_test_update(&map_zoom_test, &camera, delta_seconds);
+
 #ifdef __ANDROID__
         if (!simulated_gps_active
             && (missed_turn_dev.armed || missed_turn_dev.active)) {
@@ -7834,7 +7915,7 @@ int main(int argc, char **argv)
                                       &gps_sample,
                                       &gpx_last_recorded_position_m);
                 }
-                if (follow_gps && !drive_mode.active) {
+                if (follow_gps && !map_zoom_test.active && !drive_mode.active) {
                     camera.center_lat = filtered_location.valid
                         ? filtered_location.lat : gps_sample.lat;
                     camera.center_lon = filtered_location.valid
@@ -7879,7 +7960,8 @@ int main(int argc, char **argv)
                                       &gps_sample,
                                       &gpx_last_recorded_position_m);
                 }
-                if (follow_gps && gps_simulator.active && !drive_mode.active) {
+                if (follow_gps && !map_zoom_test.active
+                    && gps_simulator.active && !drive_mode.active) {
                     camera.center_lat = filtered_location.valid ? filtered_location.lat : gps_sample.lat;
                     camera.center_lon = filtered_location.valid ? filtered_location.lon : gps_sample.lon;
                 }
@@ -7989,7 +8071,8 @@ int main(int argc, char **argv)
                 snprintf(route_status, sizeof(route_status), "signal GPS retrouve");
             }
             last_drive_gps_quality = drive_mode.gps_quality;
-            if (follow_gps && drive_mode.initialized
+            if (follow_gps && !map_zoom_test.active
+                && drive_mode.initialized
                 && drive_mode.gps_quality != OPENRIDE_GPS_LOST) {
                 camera.center_lat = drive_mode.camera_lat;
                 camera.center_lon = drive_mode.camera_lon;
@@ -8271,6 +8354,45 @@ int main(int argc, char **argv)
             && app_panel == OPENRIDE_APP_PANEL_NONE) {
             draw_mobile_toolbar(renderer, width, height, route_valid);
         }
+        if (map_zoom_test.active) {
+            const SDL_Rect safe = openride_render_safe_area(renderer, width, height);
+            const float ui_scale = openride_ui_scale(renderer);
+            const float text_scale = ui_scale > 2.0f ? 2.0f : ui_scale;
+            const float margin = 8.0f * ui_scale;
+            const char *phase = map_zoom_test.direction > 0
+                ? "ZOOM +"
+                : map_zoom_test.direction < 0 ? "ZOOM -" : "FIN";
+            char zoom_line[96];
+            char gps_line[96];
+            snprintf(zoom_line, sizeof(zoom_line),
+                     "TEST LOD  %s  z=%.3f", phase, map_zoom_test.zoom);
+            snprintf(gps_line, sizeof(gps_line),
+                     "GPS %.6f, %.6f",
+                     OPENRIDE_MAP_ZOOM_TEST_LAT,
+                     OPENRIDE_MAP_ZOOM_TEST_LON);
+            SDL_FRect badge = {
+                (float)safe.x + margin,
+                (float)safe.y + margin,
+                238.0f * ui_scale,
+                44.0f * ui_scale
+            };
+            SDL_SetRenderDrawColor(renderer, 12, 16, 20, 224);
+            SDL_RenderFillRect(renderer, &badge);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 180);
+            SDL_RenderRect(renderer, &badge);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            draw_scaled_text(renderer,
+                             badge.x + 8.0f * ui_scale,
+                             badge.y + 7.0f * ui_scale,
+                             text_scale,
+                             zoom_line);
+            draw_scaled_text(renderer,
+                             badge.x + 8.0f * ui_scale,
+                             badge.y + 25.0f * ui_scale,
+                             text_scale,
+                             gps_line);
+        }
+
         SDL_RenderPresent(renderer);
     }
 
