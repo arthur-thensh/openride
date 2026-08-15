@@ -1,0 +1,67 @@
+name: TEMP mask geometry cache validation
+
+on:
+  push:
+    branches:
+      - agent/mask-geometry-cache
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply candidate patch
+        run: python3 .github/temp/apply_mask_geometry_cache.py
+
+      - name: Install desktop build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config curl unzip
+
+      - name: Bootstrap dependencies
+        run: |
+          ./scripts/bootstrap_sdl.sh
+          ./scripts/bootstrap_sqlite.sh
+
+      - name: Configure and build desktop
+        run: |
+          ./scripts/configure.sh
+          ./scripts/build.sh
+
+      - name: Run desktop tests
+        run: ./scripts/test.sh
+
+      - name: Validate Android toolchain packages
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install required Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          ./scripts/android_install_sdk_packages.sh
+
+      - name: Build Android
+        run: ./scripts/android_build.sh
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Commit clean candidate
+        run: |
+          git rm .github/temp/apply_mask_geometry_cache.py .github/workflows/temp-mask-geometry-cache.yml
+          git add src/map/ormap_renderer.h src/map/ormap_renderer.c src/map/map_world.c src/map/map_zoom_test_logger.c
+          git diff --cached --check
+          git config user.name "OpenRide Agent"
+          git config user.email "openride-agent@users.noreply.github.com"
+          git commit -m "Map: cache compiled mask geometry"
+          git push origin HEAD:agent/mask-geometry-cache
