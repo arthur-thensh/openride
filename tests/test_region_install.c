@@ -78,12 +78,16 @@ int main(int argc, char **argv)
     OpenRideRegionStatus status;
     assert(openride_region_get_status(&paths, &region, &status, error, sizeof(error)));
     assert(status.ormap_installed);
+    assert(status.ormap_current);
     assert(status.routing_installed);
     assert(status.search_installed);
     assert(!status.source_pbf_present);
 
     OpenRideORMap *map = openride_ormap_open(status.ormap_path, error, sizeof(error));
     assert(map != NULL);
+    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(map);
+    assert(metadata != NULL);
+    assert(metadata->format_version == (int)OPENRIDE_ORMAP_FORMAT_VERSION);
     openride_ormap_close(map);
 
     snprintf(command, sizeof(command), "rm -rf '%s'", root);
