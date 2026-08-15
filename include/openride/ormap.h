@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define OPENRIDE_ORMAP_FORMAT_VERSION 7U
+#define OPENRIDE_ORMAP_FORMAT_VERSION 8U
 /* v6 stores four semantic road LODs instead of regenerating every zoom. */
 #define OPENRIDE_ORMAP_ROAD_REGIONAL_ZOOM 8
 #define OPENRIDE_ORMAP_ROAD_OVERVIEW_ZOOM 10
@@ -18,11 +18,13 @@
 #define OPENRIDE_ORMAP_ROAD_DATA_MAX_ZOOM OPENRIDE_ORMAP_ROAD_DETAIL_ZOOM
 #define OPENRIDE_ORMAP_MAX_ZOOM 16
 /*
- * v7 stores semantic masks at two LODs. The z15 overview cuts the number of
- * mask tiles visible around z13-z14 by roughly four while keeping each cell
- * small enough for a smooth mobile map. z16 remains the detailed source used
- * at close zooms. Both levels keep the same compact 32x32 ORM1 tile encoding.
+ * v8 stores semantic masks at three LODs. z14 is the lightweight regional
+ * source used when masks first appear, z15 takes over through medium zooms,
+ * and z16 remains the detailed source for close views. Every level keeps the
+ * compact 32x32 ORM1 tile encoding, so the runtime cache representation does
+ * not grow when another LOD is added.
  */
+#define OPENRIDE_ORMAP_MASK_REGIONAL_ZOOM 14
 #define OPENRIDE_ORMAP_MASK_OVERVIEW_ZOOM 15
 #define OPENRIDE_ORMAP_MASK_DETAIL_ZOOM 16
 #define OPENRIDE_ORMAP_MASK_ZOOM OPENRIDE_ORMAP_MASK_DETAIL_ZOOM
@@ -258,9 +260,9 @@ const OpenRideORMapLabel *openride_ormap_labels(const OpenRideORMap *map,
 /*
  * Build OpenRide's compact map from the same regional inputs used by routing
  * and search. Roads and waterways remain vector lines. Water surfaces remain
- * compact vector triangles. v7 stores generalized landcover plus two semantic
- * mask LODs: z15 overview for medium zooms and z16 detail for close views.
- * Individual building footprints are still not stored.
+ * compact vector triangles. v8 stores generalized landcover plus three
+ * semantic mask LODs: z14 regional, z15 overview and z16 detail. Individual
+ * building footprints are still not stored.
  */
 bool openride_ormap_build(const char *pbf_path,
                           const char *routing_graph_path,
