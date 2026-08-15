@@ -54,7 +54,8 @@ jobs:
           set -e
           echo "$output"
           if [ "$status" -ne 0 ]; then
-            safe=${output//'%'/'%25'}
+            tail_output=$(printf '%s\n' "$output" | tail -n 120)
+            safe=${tail_output//'%'/'%25'}
             safe=${safe//$'\n'/'%0A'}
             safe=${safe//$'\r'/'%0D'}
             echo "::error title=Desktop build::$safe"
