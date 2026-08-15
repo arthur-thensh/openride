@@ -117,7 +117,6 @@ def prepare_main(text: str) -> str:
     openride_ui_search_overlay_draw(&ui, &state);
     openride_ui_end(&ui);
     return;
-#else
 '''
     text = replace_scoped_block(
         text,
@@ -142,7 +141,6 @@ def prepare_main(text: str) -> str:
         y);
     openride_ui_end(&ui);
     return result;
-#else
 '''
     text = replace_scoped_block(
         text,
