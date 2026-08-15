@@ -1,0 +1,340 @@
+name: Validate deterministic map zoom test v2
+
+on:
+  push:
+    branches:
+      - chatgpt/map-zoom-test
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply zoom test UI and camera driver
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('src/main.c')
+          text = path.read_text()
+
+          def once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 exact match, got {count}')
+              text = text.replace(old, new, 1)
+
+          def count_replace(old, new, expected, label):
+              global text
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f'{label}: expected {expected} matches, got {count}')
+              text = text.replace(old, new)
+
+          once(
+              '#define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"\n',
+              '#define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"\n'
+              '#define OPENRIDE_MAP_ZOOM_TEST_LAT 50.370800\n'
+              '#define OPENRIDE_MAP_ZOOM_TEST_LON 3.080200\n'
+              '#define OPENRIDE_MAP_ZOOM_TEST_MIN 9.0\n'
+              '#define OPENRIDE_MAP_ZOOM_TEST_MAX 17.0\n'
+              '#define OPENRIDE_MAP_ZOOM_TEST_SPEED 0.50\n',
+              'zoom test constants')
+
+          once(
+              'typedef struct OpenRideLifecycleWatch {\n'
+              '    SDL_AtomicInt pending_signal;\n'
+              '} OpenRideLifecycleWatch;\n',
+              'typedef struct OpenRideLifecycleWatch {\n'
+              '    SDL_AtomicInt pending_signal;\n'
+              '} OpenRideLifecycleWatch;\n\n'
+              'typedef struct OpenRideMapZoomTest {\n'
+              '    bool active;\n'
+              '    int direction;\n'
+              '    double zoom;\n'
+              '} OpenRideMapZoomTest;\n\n'
+              'static void openride_map_zoom_test_start(OpenRideMapZoomTest *test,\n'
+              '                                         OpenRideMapCamera *camera)\n'
+              '{\n'
+              '    if (!test || !camera) return;\n'
+              '    test->active = true;\n'
+              '    test->direction = 1;\n'
+              '    test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;\n'
+              '    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;\n'
+              '    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;\n'
+              '    camera->zoom = test->zoom;\n'
+              '    camera->bearing_deg = 0.0;\n'
+              '}\n\n'
+              'static void openride_map_zoom_test_update(OpenRideMapZoomTest *test,\n'
+              '                                          OpenRideMapCamera *camera,\n'
+              '                                          double delta_seconds)\n'
+              '{\n'
+              '    if (!test || !camera || !test->active) return;\n'
+              '    if (test->direction == 0) {\n'
+              '        test->active = false;\n'
+              '        return;\n'
+              '    }\n'
+              '    if (delta_seconds < 0.0) delta_seconds = 0.0;\n'
+              '    const double delta = OPENRIDE_MAP_ZOOM_TEST_SPEED * delta_seconds;\n'
+              '    test->zoom += (double)test->direction * delta;\n'
+              '    if (test->direction > 0 && test->zoom >= OPENRIDE_MAP_ZOOM_TEST_MAX) {\n'
+              '        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MAX;\n'
+              '        test->direction = -1;\n'
+              '    } else if (test->direction < 0\n'
+              '               && test->zoom <= OPENRIDE_MAP_ZOOM_TEST_MIN) {\n'
+              '        test->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;\n'
+              '        test->direction = 0;\n'
+              '    }\n'
+              '    camera->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;\n'
+              '    camera->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;\n'
+              '    camera->zoom = test->zoom;\n'
+              '    camera->bearing_deg = 0.0;\n'
+              '}\n',
+              'zoom test state and driver')
+
+          once(
+              '    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN\n'
+              '} OpenRideMobilePanelAction;',
+              '    OPENRIDE_MOBILE_PANEL_SETTINGS_GPS_MISSED_TURN,\n'
+              '    OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST\n'
+              '} OpenRideMobilePanelAction;',
+              'mobile zoom test action')
+
+          count_replace(
+              'if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 5U;',
+              'if (panel == OPENRIDE_APP_PANEL_MAIN) rows = 6U;',
+              2,
+              'main menu row counts')
+
+          pattern = re.compile(
+              r'static const OpenRideMobilePanelAction actions\[5\] = \{\s*'
+              r'OPENRIDE_MOBILE_PANEL_SEARCH,\s*'
+              r'OPENRIDE_MOBILE_PANEL_FAVORITES,\s*'
+              r'OPENRIDE_MOBILE_PANEL_HISTORY,\s*'
+              r'OPENRIDE_MOBILE_PANEL_REGIONS,\s*'
+              r'OPENRIDE_MOBILE_PANEL_SETTINGS\s*'
+              r'\};')
+          repl = '''static const OpenRideMobilePanelAction actions[6] = {
+                OPENRIDE_MOBILE_PANEL_SEARCH,
+                OPENRIDE_MOBILE_PANEL_FAVORITES,
+                OPENRIDE_MOBILE_PANEL_HISTORY,
+                OPENRIDE_MOBILE_PANEL_REGIONS,
+                OPENRIDE_MOBILE_PANEL_SETTINGS,
+                OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST
+            };'''
+          text, n = pattern.subn(repl, text, count=1)
+          if n != 1:
+              raise SystemExit(f'main menu actions: expected 1 match, got {n}')
+
+          once(
+              '        static const char *labels[5] = {\n'
+              '            "Rechercher",\n'
+              '            "Favoris",\n'
+              '            "Historique",\n'
+              '            "Cartes hors ligne",\n'
+              '            "Parametres"\n'
+              '        };\n'
+              '        for (uint32_t i = 0U; i < 5U; ++i) {',
+              '        static const char *labels[6] = {\n'
+              '            "Rechercher",\n'
+              '            "Favoris",\n'
+              '            "Historique",\n'
+              '            "Cartes hors ligne",\n'
+              '            "Parametres",\n'
+              '            "Test zoom carte [DEV]"\n'
+              '        };\n'
+              '        for (uint32_t i = 0U; i < 6U; ++i) {',
+              'mobile main menu labels')
+
+          once(
+              '        SDL_RenderDebugText(renderer, x + 18, y + 164, "P  Parametres");\n',
+              '        SDL_RenderDebugText(renderer, x + 18, y + 164, "P  Parametres");\n'
+              '        SDL_RenderDebugText(renderer, x + 18, y + 192, "Z  Test zoom carte [DEV]");\n',
+              'desktop menu zoom test label')
+
+          once(
+              '    OpenRideMapCamera camera = camera_from_metadata(metadata);\n',
+              '    OpenRideMapCamera camera = camera_from_metadata(metadata);\n'
+              '    OpenRideMapZoomTest map_zoom_test = {0};\n',
+              'zoom test runtime state')
+
+          once(
+              '                            } else if (event.key.key == SDLK_P) {\n'
+              '                                app_panel = OPENRIDE_APP_PANEL_SETTINGS;\n'
+              '                            }\n',
+              '                            } else if (event.key.key == SDLK_P) {\n'
+              '                                app_panel = OPENRIDE_APP_PANEL_SETTINGS;\n'
+              '                            } else if (event.key.key == SDLK_Z) {\n'
+              '                                if (map_zoom_test.active) {\n'
+              '                                    map_zoom_test.active = false;\n'
+              '                                    snprintf(route_status, sizeof(route_status),\n'
+              '                                             "test zoom carte annule");\n'
+              '                                } else {\n'
+              '                                    openride_map_zoom_test_start(&map_zoom_test, &camera);\n'
+              '                                    app_panel = OPENRIDE_APP_PANEL_NONE;\n'
+              '                                    snprintf(route_status, sizeof(route_status),\n'
+              '                                             "test zoom 9.000 -> 17.000 -> 9.000");\n'
+              '                                }\n'
+              '                            }\n',
+              'desktop zoom test key')
+
+          once(
+              '                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS) {\n'
+              '                            app_panel = OPENRIDE_APP_PANEL_SETTINGS;\n'
+              '                            app_panel_selected = 0U;\n'
+              '                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_PLACE\n',
+              '                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_SETTINGS) {\n'
+              '                            app_panel = OPENRIDE_APP_PANEL_SETTINGS;\n'
+              '                            app_panel_selected = 0U;\n'
+              '                        } else if (mobile_hit.action\n'
+              '                                   == OPENRIDE_MOBILE_PANEL_MAP_ZOOM_TEST) {\n'
+              '                            if (map_zoom_test.active) {\n'
+              '                                map_zoom_test.active = false;\n'
+              '                                snprintf(route_status, sizeof(route_status),\n'
+              '                                         "test zoom carte annule");\n'
+              '                            } else {\n'
+              '                                openride_map_zoom_test_start(&map_zoom_test, &camera);\n'
+              '                                app_panel = OPENRIDE_APP_PANEL_NONE;\n'
+              '                                app_panel_selected = 0U;\n'
+              '                                snprintf(route_status, sizeof(route_status),\n'
+              '                                         "test zoom 9.000 -> 17.000 -> 9.000");\n'
+              '                            }\n'
+              '                        } else if (mobile_hit.action == OPENRIDE_MOBILE_PANEL_PLACE\n',
+              'mobile zoom test action handler')
+
+          once(
+              '        if (delta_seconds > 0.25) delta_seconds = 0.25;\n\n#ifdef __ANDROID__\n',
+              '        if (delta_seconds > 0.25) delta_seconds = 0.25;\n\n'
+              '        openride_map_zoom_test_update(&map_zoom_test, &camera, delta_seconds);\n\n'
+              '#ifdef __ANDROID__\n',
+              'zoom test frame update')
+
+          once(
+              '                if (follow_gps && !drive_mode.active) {',
+              '                if (follow_gps && !map_zoom_test.active && !drive_mode.active) {',
+              'android follow GPS guard')
+          once(
+              '                if (follow_gps && gps_simulator.active && !drive_mode.active) {',
+              '                if (follow_gps && !map_zoom_test.active\n'
+              '                    && gps_simulator.active && !drive_mode.active) {',
+              'desktop simulator follow guard')
+          once(
+              '            if (follow_gps && drive_mode.initialized\n',
+              '            if (follow_gps && !map_zoom_test.active\n'
+              '                && drive_mode.initialized\n',
+              'drive mode follow guard')
+
+          once(
+              '        SDL_RenderPresent(renderer);\n',
+              '        if (map_zoom_test.active) {\n'
+              '            const SDL_Rect safe = openride_render_safe_area(renderer, width, height);\n'
+              '            const float ui_scale = openride_ui_scale(renderer);\n'
+              '            const float text_scale = ui_scale > 2.0f ? 2.0f : ui_scale;\n'
+              '            const float margin = 8.0f * ui_scale;\n'
+              '            const char *phase = map_zoom_test.direction > 0\n'
+              '                ? "ZOOM +"\n'
+              '                : map_zoom_test.direction < 0 ? "ZOOM -" : "FIN";\n'
+              '            char zoom_line[96];\n'
+              '            char gps_line[96];\n'
+              '            snprintf(zoom_line, sizeof(zoom_line),\n'
+              '                     "TEST LOD  %s  z=%.3f", phase, map_zoom_test.zoom);\n'
+              '            snprintf(gps_line, sizeof(gps_line),\n'
+              '                     "GPS %.6f, %.6f",\n'
+              '                     OPENRIDE_MAP_ZOOM_TEST_LAT,\n'
+              '                     OPENRIDE_MAP_ZOOM_TEST_LON);\n'
+              '            SDL_FRect badge = {\n'
+              '                (float)safe.x + margin,\n'
+              '                (float)safe.y + margin,\n'
+              '                238.0f * ui_scale,\n'
+              '                44.0f * ui_scale\n'
+              '            };\n'
+              '            SDL_SetRenderDrawColor(renderer, 12, 16, 20, 224);\n'
+              '            SDL_RenderFillRect(renderer, &badge);\n'
+              '            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 180);\n'
+              '            SDL_RenderRect(renderer, &badge);\n'
+              '            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);\n'
+              '            draw_scaled_text(renderer,\n'
+              '                             badge.x + 8.0f * ui_scale,\n'
+              '                             badge.y + 7.0f * ui_scale,\n'
+              '                             text_scale,\n'
+              '                             zoom_line);\n'
+              '            draw_scaled_text(renderer,\n'
+              '                             badge.x + 8.0f * ui_scale,\n'
+              '                             badge.y + 25.0f * ui_scale,\n'
+              '                             text_scale,\n'
+              '                             gps_line);\n'
+              '        }\n\n'
+              '        SDL_RenderPresent(renderer);\n',
+              'zoom test overlay')
+
+          path.write_text(text)
+          PY
+
+          grep -n "OPENRIDE_MAP_ZOOM_TEST\|MAP_ZOOM_TEST\|TEST LOD\|Test zoom carte" src/main.c
+          grep -n "static void draw_scaled_text" src/main.c
+
+      - name: Install desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config libsqlite3-dev zlib1g-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libxss-dev libxtst-dev
+
+      - name: Bootstrap vendored dependencies
+        run: |
+          ./scripts/bootstrap_sdl.sh
+          ./scripts/bootstrap_sqlite.sh
+
+      - name: Configure desktop
+        run: cmake -S . -B build -G Ninja -DOPENRIDE_BUILD_TESTS=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+
+      - name: Compile main translation unit and core tests
+        shell: bash
+        run: |
+          ninja -C build CMakeFiles/openride.dir/src/main.c.o
+          TEST_TARGETS=$(ninja -C build -t targets all | awk -F: '/^test_[^:]+:/{print $1}')
+          ninja -C build $TEST_TARGETS
+
+      - name: Run tests except repository-external MBTiles fixture
+        run: ctest --test-dir build --output-on-failure -E '^mbtiles$'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Ensure Android SDK components
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+      - name: Build Android debug APK
+        run: ./scripts/android_build.sh
+
+      - name: Commit validated patch and remove temporary workflows
+        shell: bash
+        run: |
+          git config user.name "OpenAI ChatGPT"
+          git config user.email "chatgpt@openai.com"
+          git rm .github/workflows/map_zoom_test_patch.yml .github/workflows/map_zoom_test_patch_v2.yml
+          git add src/main.c
+          git commit -m "Dev: add deterministic map zoom test"
+          git push origin HEAD:chatgpt/map-zoom-test
