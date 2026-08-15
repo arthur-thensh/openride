@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define OPENRIDE_ORMAP_FORMAT_VERSION 4U
+#define OPENRIDE_ORMAP_FORMAT_VERSION 5U
 #define OPENRIDE_ORMAP_MIN_ROAD_ZOOM 10
 /* Road geometry is detailed enough at z14 and is scaled above that zoom. */
 #define OPENRIDE_ORMAP_ROAD_DATA_MAX_ZOOM 14
@@ -17,8 +17,13 @@
 #define OPENRIDE_ORMAP_MASK_GRID 32
 /* Waterways are vector lines and can be scaled cleanly above z13. */
 #define OPENRIDE_ORMAP_WATER_ZOOM 13
-/* Filled vector areas use a compact coarse/detail LOD pair. */
-#define OPENRIDE_ORMAP_AREA_COARSE_ZOOM 11
+/* Generalized landcover is stored at three vector LODs. Relative to a
+ * z11 footprint these correspond to effective 32/64/128-cell grids. */
+#define OPENRIDE_ORMAP_AREA_REGIONAL_ZOOM 9
+#define OPENRIDE_ORMAP_AREA_OVERVIEW_ZOOM 10
+#define OPENRIDE_ORMAP_AREA_LOCAL_ZOOM 11
+/* Compatibility metadata key used by v3/v4 readers: local is the former coarse LOD. */
+#define OPENRIDE_ORMAP_AREA_COARSE_ZOOM OPENRIDE_ORMAP_AREA_LOCAL_ZOOM
 #define OPENRIDE_ORMAP_AREA_DETAIL_ZOOM 14
 /* Half a pixel of overlap at the area data zoom prevents tile-edge seams. */
 #define OPENRIDE_ORMAP_AREA_BUFFER_FRACTION (0.5 / 256.0)
@@ -96,7 +101,7 @@ typedef enum OpenRideORMapAreaKind {
  * Filled areas are pre-triangulated by the builder. Coordinates are quantized
  * in a slightly buffered tile-local domain so adjacent tiles overlap by half
  * a data-zoom pixel instead of exposing hairline seams while rotating/scaling.
- * In v4 this representation is used for water and generalized overview landcover;
+ * In v5 this representation is used for water and generalized overview landcover;
  * detailed built-up coverage stays in the semantic mask instead.
  */
 typedef struct OpenRideORMapAreaTriangle {
@@ -162,6 +167,9 @@ typedef struct OpenRideORMapBuildStats {
     uint64_t water_tiles_written;
     uint64_t area_triangles_written;
     uint64_t area_tiles_written;
+    uint64_t landcover_regional_triangles;
+    uint64_t landcover_overview_triangles;
+    uint64_t landcover_local_triangles;
     uint64_t area_polygons_skipped;
     uint64_t mask_tiles_written;
     uint64_t labels_written;
@@ -222,7 +230,7 @@ const OpenRideORMapLabel *openride_ormap_labels(const OpenRideORMap *map,
 /*
  * Build OpenRide's compact map from the same regional inputs used by routing
  * and search. Roads and waterways remain vector lines. Water surfaces remain
- * compact vector triangles. v4 stores built-up landuse at two robust LODs:
+ * compact vector triangles. v5 stores generalized landcover at three vector LODs plus detailed masks:
  * a generalized contour mesh for overview views and the merged semantic
  * occupancy mask for detailed views. This avoids triangulating large merged
  * city contours; individual building footprints still are not stored.

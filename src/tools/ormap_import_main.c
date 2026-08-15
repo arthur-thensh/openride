@@ -44,6 +44,12 @@ int main(int argc, char **argv)
     printf("  segments eau        : %" PRIu64 "\n", stats.water_records_written);
     printf("  tuiles eau vecteur  : %" PRIu64 "\n", stats.water_tiles_written);
     printf("  triangles surfaces : %" PRIu64 "\n", stats.area_triangles_written);
+    printf("  landcover regional : %" PRIu64 " triangles\n",
+           stats.landcover_regional_triangles);
+    printf("  landcover overview : %" PRIu64 " triangles\n",
+           stats.landcover_overview_triangles);
+    printf("  landcover local    : %" PRIu64 " triangles\n",
+           stats.landcover_local_triangles);
     printf("  tuiles surfaces    : %" PRIu64 "\n", stats.area_tiles_written);
     printf("  contours built-up  : %" PRIu64 "\n", stats.builtup_contours);
     printf("  surfaces ignorees  : %" PRIu64 "\n", stats.area_polygons_skipped);
