@@ -163,6 +163,7 @@ set(OPENRIDE_APP_SOURCES
     src/ui/ui_places_panel.c
     src/ui/ui_search_overlay.c
     src/ui/ui_route_downloads_panel.c
+    src/ui/ui_drive_hud.c
 )
 
 set_property(
