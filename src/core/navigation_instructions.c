@@ -8,7 +8,8 @@
 
 #define OPENRIDE_PI 3.14159265358979323846264338327950288
 #define OPENRIDE_TURN_MIN_DEG 25.0
-#define OPENRIDE_TURN_NORMAL_DEG 45.0
+#define OPENRIDE_TURN_NORMAL_DEG 55.0
+#define OPENRIDE_TURN_FALLBACK_EMIT_DEG 45.0
 #define OPENRIDE_TURN_SHARP_DEG 120.0
 #define OPENRIDE_UTURN_MIN_DEG 165.0
 #define OPENRIDE_CONTINUE_GROUP_MAX_GAP_M 300.0
@@ -211,12 +212,6 @@ static bool append_instruction(OpenRideNavigationInstructionList *list,
         if (previous->maneuver == OPENRIDE_MANEUVER_CONTINUE
             && gap_m >= 0.0
             && gap_m <= OPENRIDE_CONTINUE_GROUP_MAX_GAP_M) {
-            /*
-             * Keep one persistent "continue straight" instruction for a
-             * cluster of nearby straight-through decisions. Updating it to
-             * the last junction makes the single instruction remain active
-             * throughout the whole cluster instead of flashing one per node.
-             */
             item = previous;
         }
     }
@@ -309,12 +304,14 @@ bool openride_navigation_instructions_build(
                                              &route->geometry[i + 1U]);
         const double magnitude = fabs(angle);
         const int32_t route_node_index = route_node_index_for_geometry(route, i);
+        bool topology_known = false;
         bool has_alternative = false;
         bool roundabout_entry = false;
         bool roundabout_member = false;
         uint8_t exit_number = 0U;
 
         if (route_has_navigation_context(route)) {
+            topology_known = true;
             const uint8_t flags = route->navigation_context[i].flags;
             const bool incoming_roundabout =
                 (flags & OPENRIDE_ROUTE_NAV_INCOMING_ROUNDABOUT) != 0U;
@@ -325,8 +322,7 @@ bool openride_navigation_instructions_build(
             roundabout_member = incoming_roundabout || outgoing_roundabout;
             roundabout_entry = !incoming_roundabout && outgoing_roundabout;
             if (roundabout_entry) {
-                exit_number =
-                    roundabout_exit_number_from_context(route, i);
+                exit_number = roundabout_exit_number_from_context(route, i);
             }
         } else if (graph && route_node_index >= 0
                    && (uint32_t)route_node_index < route->node_count) {
@@ -341,18 +337,20 @@ bool openride_navigation_instructions_build(
                 && next != OPENRIDE_ROUTING_NODE_NONE) {
                 const OpenRideRoutingEdge *incoming = find_edge(graph, previous, current);
                 const OpenRideRoutingEdge *outgoing = find_edge(graph, current, next);
-                const bool incoming_roundabout =
-                    edge_is_roundabout(incoming);
-                const bool outgoing_roundabout =
-                    edge_is_roundabout(outgoing);
-                roundabout_member =
-                    incoming_roundabout || outgoing_roundabout;
-                roundabout_entry =
-                    !incoming_roundabout && outgoing_roundabout;
+                topology_known = incoming != NULL && outgoing != NULL;
+                const bool incoming_roundabout = edge_is_roundabout(incoming);
+                const bool outgoing_roundabout = edge_is_roundabout(outgoing);
+                roundabout_member = incoming_roundabout || outgoing_roundabout;
+                roundabout_entry = !incoming_roundabout && outgoing_roundabout;
                 if (roundabout_entry) {
                     exit_number = roundabout_exit_number(graph, route, ni);
                 }
-                has_alternative = node_has_alternative(graph, current, previous, next);
+                if (topology_known) {
+                    has_alternative = node_has_alternative(graph,
+                                                           current,
+                                                           previous,
+                                                           next);
+                }
             }
         }
 
@@ -362,17 +360,17 @@ bool openride_navigation_instructions_build(
             maneuver = OPENRIDE_MANEUVER_ROUNDABOUT;
             emit = true;
         } else if (roundabout_member) {
-            /*
-             * The roundabout instruction already describes the complete
-             * maneuver, including the selected exit. Geometry inside the
-             * roundabout and at its exit must not create ordinary turn
-             * instructions.
-             */
             emit = false;
         } else if (magnitude >= OPENRIDE_TURN_MIN_DEG) {
             maneuver = classify_turn(angle);
-            emit = magnitude >= OPENRIDE_TURN_NORMAL_DEG || has_alternative;
-        } else if (has_alternative && magnitude < OPENRIDE_TURN_MIN_DEG) {
+            if (maneuver == OPENRIDE_MANEUVER_UTURN) {
+                emit = true;
+            } else if (topology_known) {
+                emit = has_alternative;
+            } else {
+                emit = magnitude >= OPENRIDE_TURN_FALLBACK_EMIT_DEG;
+            }
+        } else if (topology_known && has_alternative) {
             maneuver = OPENRIDE_MANEUVER_CONTINUE;
             emit = true;
         }
@@ -449,8 +447,7 @@ const OpenRideNavigationInstruction *openride_navigation_instructions_after(
         if (item->maneuver == OPENRIDE_MANEUVER_DEPART) continue;
         if (item->distance_from_start_m > after_distance_m + 0.5) {
             if (distance_after_m) {
-                *distance_after_m =
-                    item->distance_from_start_m - after_distance_m;
+                *distance_after_m = item->distance_from_start_m - after_distance_m;
             }
             return item;
         }
