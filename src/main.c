@@ -39,6 +39,7 @@
 #include "openride/ui_route_panel.h"
 #include "openride/ui_settings_panel.h"
 #include "openride/ui_regions_panel.h"
+#include "openride/ui_places_panel.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -2345,6 +2346,34 @@ static OpenRideMobilePanelHit mobile_regions_panel_hit_test(
     return hit;
 }
 
+static OpenRideMobilePanelHit mobile_places_panel_hit_test(
+    SDL_Renderer *renderer,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height,
+    uint32_t item_count)
+{
+    OpenRideMobilePanelHit hit = {OPENRIDE_MOBILE_PANEL_NONE, -1};
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return hit;
+    }
+
+    const OpenRideUIPlacesPanelHit places_hit =
+        openride_ui_places_panel_hit_test(&ui, item_count, x, y);
+    if (places_hit.action == OPENRIDE_UI_PLACES_PANEL_PLACE) {
+        hit.action = OPENRIDE_MOBILE_PANEL_PLACE;
+        hit.index = places_hit.index;
+    } else if (places_hit.action == OPENRIDE_UI_PLACES_PANEL_BACK) {
+        hit.action = OPENRIDE_MOBILE_PANEL_BACK;
+    }
+
+    openride_ui_end(&ui);
+    return hit;
+}
+
 typedef struct OpenRideMobilePanelLayout {
     SDL_FRect panel;
     SDL_FRect back;
@@ -2717,6 +2746,36 @@ static void draw_mobile_app_panel(SDL_Renderer *renderer,
                 .work_status = region_work_status
             };
             (void)openride_ui_regions_panel_draw(&ui, &state);
+            openride_ui_end(&ui);
+        }
+        return;
+    }
+
+    if (panel == OPENRIDE_APP_PANEL_FAVORITES
+        || panel == OPENRIDE_APP_PANEL_HISTORY) {
+        OpenRideUIContext ui;
+        openride_ui_init(&ui);
+        if (openride_ui_begin(&ui, renderer, width, height)) {
+            const bool favorites_panel =
+                panel == OPENRIDE_APP_PANEL_FAVORITES;
+            const OpenRideStoredPlace *items =
+                favorites_panel ? favorites : history;
+            uint32_t count = favorites_panel ? favorite_count : history_count;
+            if (count > OPENRIDE_UI_PLACES_PANEL_MAX_ITEMS) {
+                count = OPENRIDE_UI_PLACES_PANEL_MAX_ITEMS;
+            }
+
+            OpenRideUIPlacesPanelState state = {
+                .mode = favorites_panel
+                    ? OPENRIDE_UI_PLACES_PANEL_FAVORITES
+                    : OPENRIDE_UI_PLACES_PANEL_HISTORY,
+                .count = count,
+                .selected = selected
+            };
+            for (uint32_t i = 0U; i < count; ++i) {
+                state.items[i] = items[i].name;
+            }
+            (void)openride_ui_places_panel_draw(&ui, &state);
             openride_ui_end(&ui);
         }
         return;
@@ -6008,6 +6067,14 @@ int main(int argc, char **argv)
                                                                 y,
                                                                 width,
                                                                 height)
+                            : app_panel == OPENRIDE_APP_PANEL_FAVORITES
+                              || app_panel == OPENRIDE_APP_PANEL_HISTORY
+                                ? mobile_places_panel_hit_test(renderer,
+                                                               x,
+                                                               y,
+                                                               width,
+                                                               height,
+                                                               mobile_place_count)
                                 : mobile_app_panel_hit_test(renderer,
                                                             app_panel,
                                                             x,
