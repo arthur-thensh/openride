@@ -231,7 +231,12 @@ bool openride_region_network_installed_mask(
                                           &status,
                                           local_error,
                                           sizeof(local_error))) {
-            installed[i] = openride_region_status_ready(&status);
+            /* Routing availability is independent from the cartographic
+             * format revision. A v3 map may need rebuilding for display, but
+             * its installed graph/search data remain fully routable. */
+            installed[i] = status.map_installed
+                && status.routing_installed
+                && status.search_installed;
         }
     }
 
