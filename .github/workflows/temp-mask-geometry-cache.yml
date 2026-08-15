@@ -19,7 +19,20 @@ jobs:
           fetch-depth: 0
 
       - name: Apply candidate patch
-        run: python3 .github/temp/apply_mask_geometry_cache.py
+        shell: bash
+        run: |
+          set +e
+          output=$(python3 .github/temp/apply_mask_geometry_cache.py 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            safe=${output//'%'/'%25'}
+            safe=${safe//$'\n'/'%0A'}
+            safe=${safe//$'\r'/'%0D'}
+            echo "::error title=Mask patch helper::$safe"
+            exit "$status"
+          fi
 
       - name: Install desktop build prerequisites
         run: |
