@@ -14,7 +14,7 @@
 #define V4_PI 3.14159265358979323846
 #define V4_MASK_LAYER_BYTES \
     (((OPENRIDE_ORMAP_MASK_GRID * OPENRIDE_ORMAP_MASK_GRID) + 7U) / 8U)
-#define V4_COARSE_GRID 64U
+#define V4_COARSE_GRID 128U
 #define V4_COARSE_LAYER_BYTES ((V4_COARSE_GRID * V4_COARSE_GRID + 7U) / 8U)
 #define V4_AREA_RECORD_SIZE 14U
 
@@ -44,6 +44,7 @@ typedef struct V4CoarseMap {
 
 typedef struct V4BuildContext {
     V4UrbanMaskMap urban;
+    V4UrbanMaskMap green;
 } V4BuildContext;
 
 bool openride_ormap_build_legacy(const char *pbf_path,
@@ -359,32 +360,41 @@ static bool v4_rasterize_polygon(V4UrbanMaskMap *map,
     return ok;
 }
 
-static bool v4_collect_builtup(OpenRideOSMMapFeatureKind kind,
-                               const double *latitudes,
-                               const double *longitudes,
-                               uint32_t point_count,
-                               void *userdata)
+static bool v4_collect_landcover(OpenRideOSMMapFeatureKind kind,
+                         const double *latitudes,
+                         const double *longitudes,
+                         uint32_t point_count,
+                         void *userdata)
 {
     V4BuildContext *context = userdata;
-    if (!context || kind != OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA
-        || point_count == 0U) {
+    if (!context || point_count == 0U) return true;
+
+    V4UrbanMaskMap *target = NULL;
+    if (kind == OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA) {
+        target = &context->urban;
+    } else if (kind == OPENRIDE_OSM_MAP_FEATURE_FOREST_AREA) {
+        target = &context->green;
+    } else {
         return true;
     }
 
+    /* Individual buildings arrive as a single representative point. They are
+     * useful to consolidate urban fabric, but greenery must always be an area. */
     if (point_count == 1U) {
+        if (kind != OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA) return true;
         const double cells = (double)(1U << OPENRIDE_ORMAP_MASK_ZOOM)
-            * OPENRIDE_ORMAP_MASK_GRID;
+  * OPENRIDE_ORMAP_MASK_GRID;
         const int64_t gx =
-            (int64_t)floor(v4_mercator_x(longitudes[0]) * cells);
+  (int64_t)floor(v4_mercator_x(longitudes[0]) * cells);
         const int64_t gy =
-            (int64_t)floor(v4_mercator_y(latitudes[0]) * cells);
-        return v4_set_global(&context->urban, gx, gy);
+  (int64_t)floor(v4_mercator_y(latitudes[0]) * cells);
+        return v4_set_global(target, gx, gy);
     }
 
-    return v4_rasterize_polygon(&context->urban,
-                                latitudes,
-                                longitudes,
-                                point_count);
+    return v4_rasterize_polygon(target,
+                      latitudes,
+                      longitudes,
+                      point_count);
 }
 
 static bool v4_merge_urban(V4UrbanMaskMap *map)
@@ -517,36 +527,98 @@ static bool v4_coarse_set(V4CoarseMap *map,
     return true;
 }
 
-static bool v4_build_coarse_map(const V4UrbanMaskMap *urban,
-                                V4CoarseMap *coarse)
+static bool v4_build_coarse_map(const V4UrbanMaskMap *source,
+                      V4CoarseMap *coarse)
 {
-    if (!urban || !coarse) return false;
-    /* z16 * 32 = z21 semantic cells; z11 * 64 = z17 overview cells. */
-    const unsigned shift = 4U;
-    for (uint32_t b = 0U; b < urban->capacity; ++b) {
-        const V4UrbanMaskBucket *bucket = &urban->buckets[b];
+    if (!source || !coarse) return false;
+    /* z16 * 32 = z21 semantic cells; z11 * 128 = z18 overview cells. */
+    const unsigned shift = 3U;
+    for (uint32_t b = 0U; b < source->capacity; ++b) {
+        const V4UrbanMaskBucket *bucket = &source->buckets[b];
         if (!bucket->used) continue;
         int tx = 0;
         int ty = 0;
         v4_decode_tile_key(bucket->key, &tx, &ty);
         for (uint32_t y = 0U; y < OPENRIDE_ORMAP_MASK_GRID; ++y) {
-            for (uint32_t x = 0U; x < OPENRIDE_ORMAP_MASK_GRID; ++x) {
-                if (!v4_bit_get(bucket->bits,
-                                y * OPENRIDE_ORMAP_MASK_GRID + x)) {
-                    continue;
-                }
-                const int64_t high_x =
-                    (int64_t)tx * OPENRIDE_ORMAP_MASK_GRID + x;
-                const int64_t high_y =
-                    (int64_t)ty * OPENRIDE_ORMAP_MASK_GRID + y;
-                if (!v4_coarse_set(coarse,
-                                   high_x >> shift,
-                                   high_y >> shift)) {
-                    return false;
-                }
-            }
+  for (uint32_t x = 0U; x < OPENRIDE_ORMAP_MASK_GRID; ++x) {
+      if (!v4_bit_get(bucket->bits,
+                      y * OPENRIDE_ORMAP_MASK_GRID + x)) {
+          continue;
+      }
+      const int64_t high_x =
+          (int64_t)tx * OPENRIDE_ORMAP_MASK_GRID + x;
+      const int64_t high_y =
+          (int64_t)ty * OPENRIDE_ORMAP_MASK_GRID + y;
+      if (!v4_coarse_set(coarse,
+                         high_x >> shift,
+                         high_y >> shift)) {
+          return false;
+      }
+  }
         }
     }
+    return true;
+}
+
+static bool v4_coarse_get_global(const V4CoarseMap *map,
+                       int64_t gx,
+                       int64_t gy)
+{
+    if (!map || map->capacity == 0U || gx < 0 || gy < 0) return false;
+    const int64_t global_cells =
+        (int64_t)(1U << OPENRIDE_ORMAP_AREA_COARSE_ZOOM) * V4_COARSE_GRID;
+    if (gx >= global_cells || gy >= global_cells) return false;
+    const int tx = (int)(gx / V4_COARSE_GRID);
+    const int ty = (int)(gy / V4_COARSE_GRID);
+    const uint64_t key = v4_tile_key(tx, ty);
+    uint32_t slot = v4_hash64(key) & (map->capacity - 1U);
+    while (map->buckets[slot].used) {
+        const V4CoarseBucket *bucket = &map->buckets[slot];
+        if (bucket->key == key) {
+  const uint32_t x = (uint32_t)(gx % V4_COARSE_GRID);
+  const uint32_t y = (uint32_t)(gy % V4_COARSE_GRID);
+  return v4_bit_get(bucket->bits, y * V4_COARSE_GRID + x);
+        }
+        slot = (slot + 1U) & (map->capacity - 1U);
+    }
+    return false;
+}
+
+static bool v4_smooth_coarse(V4CoarseMap *map)
+{
+    if (!map || map->capacity == 0U) return true;
+    V4CoarseMap filtered = {0};
+    for (uint32_t b = 0U; b < map->capacity; ++b) {
+        const V4CoarseBucket *bucket = &map->buckets[b];
+        if (!bucket->used) continue;
+        int tx = 0;
+        int ty = 0;
+        v4_decode_tile_key(bucket->key, &tx, &ty);
+        for (uint32_t y = 0U; y < V4_COARSE_GRID; ++y) {
+  for (uint32_t x = 0U; x < V4_COARSE_GRID; ++x) {
+      if (!v4_bit_get(bucket->bits, y * V4_COARSE_GRID + x)) continue;
+      const int64_t gx = (int64_t)tx * V4_COARSE_GRID + x;
+      const int64_t gy = (int64_t)ty * V4_COARSE_GRID + y;
+      unsigned neighbours = 0U;
+      for (int dy = -1; dy <= 1; ++dy) {
+          for (int dx = -1; dx <= 1; ++dx) {
+              if (v4_coarse_get_global(map, gx + dx, gy + dy)) {
+                  ++neighbours;
+              }
+          }
+      }
+      /* Majority-ish cleanup: preserve coherent edges while dropping
+       * one-cell teeth and isolated raster artefacts. */
+      if (neighbours >= 3U
+          && !v4_coarse_set(&filtered, gx, gy)) {
+          v4_coarse_destroy(&filtered);
+          return false;
+      }
+  }
+        }
+    }
+    v4_coarse_destroy(map);
+    *map = filtered;
     return true;
 }
 
@@ -740,10 +812,11 @@ done:
     return ok;
 }
 
-static bool v4_append_coarse_builtup(sqlite3 *db,
-                                     const V4CoarseMap *coarse,
-                                     char *error,
-                                     size_t error_size)
+static bool v4_append_coarse_layer(sqlite3 *db,
+                         const V4CoarseMap *coarse,
+                         uint8_t kind,
+                         char *error,
+                         size_t error_size)
 {
     sqlite3_stmt *select = NULL;
     sqlite3_stmt *upsert = NULL;
@@ -829,7 +902,7 @@ static bool v4_append_coarse_builtup(sqlite3 *db,
         if (old_count > UINT32_MAX - add_count) {
             free(old_raw);
             ok = false;
-            v4_set_error(error, error_size, "coarse built-up area overflow");
+            v4_set_error(error, error_size, "coarse landcover area overflow");
             break;
         }
         const uint32_t total_count = old_count + add_count;
@@ -838,7 +911,7 @@ static bool v4_append_coarse_builtup(sqlite3 *db,
         if (!raw) {
             free(old_raw);
             ok = false;
-            v4_set_error(error, error_size, "out of memory building coarse urban tile");
+            v4_set_error(error, error_size, "out of memory building coarse landcover tile");
             break;
         }
         memcpy(raw, "ORA1", 4U);
@@ -876,14 +949,14 @@ static bool v4_append_coarse_builtup(sqlite3 *db,
                                      x0, y0,
                                      x1, y0,
                                      x1, y1,
-                                     OPENRIDE_ORMAP_AREA_BUILTUP);
+                                     kind);
                 record = raw + 12U
                     + (size_t)record_index++ * V4_AREA_RECORD_SIZE;
                 v4_write_area_record(record,
                                      x0, y0,
                                      x1, y1,
                                      x0, y1,
-                                     OPENRIDE_ORMAP_AREA_BUILTUP);
+                                     kind);
             }
         }
 
@@ -892,7 +965,7 @@ static bool v4_append_coarse_builtup(sqlite3 *db,
         ok = v4_compress_blob(raw, raw_size, &compressed, &compressed_size);
         free(raw);
         if (!ok) {
-            v4_set_error(error, error_size, "unable to compress coarse urban tile");
+            v4_set_error(error, error_size, "unable to compress coarse landcover tile");
             break;
         }
         sqlite3_reset(upsert);
@@ -1019,82 +1092,110 @@ done:
 }
 
 static bool v4_postprocess(const char *pbf_path,
-                           const char *output_path,
-                           char *error,
-                           size_t error_size)
+                 const char *output_path,
+                 char *error,
+                 size_t error_size)
 {
     V4BuildContext context = {0};
     OpenRideOSMMapFeatureStats feature_stats = {0};
     if (!openride_osm_pbf_visit_map_features(pbf_path,
-                                              v4_collect_builtup,
-                                              &context,
-                                              &feature_stats,
-                                              error,
-                                              error_size)) {
+                                    v4_collect_landcover,
+                                    &context,
+                                    &feature_stats,
+                                    error,
+                                    error_size)) {
+        v4_urban_destroy(&context.green);
         v4_urban_destroy(&context.urban);
-        return false;
-    }
-    if (!v4_merge_urban(&context.urban)
-        || !v4_filter_sparse(&context.urban)) {
-        v4_urban_destroy(&context.urban);
-        v4_set_error(error, error_size, "unable to prepare v4 built-up mask");
         return false;
     }
 
-    V4CoarseMap coarse = {0};
-    if (!v4_build_coarse_map(&context.urban, &coarse)) {
+    if (!v4_merge_urban(&context.urban)
+        || !v4_filter_sparse(&context.urban)
+        || !v4_merge_urban(&context.green)
+        || !v4_filter_sparse(&context.green)) {
+        v4_urban_destroy(&context.green);
         v4_urban_destroy(&context.urban);
-        v4_coarse_destroy(&coarse);
-        v4_set_error(error, error_size, "unable to prepare v4 coarse urban layer");
+        v4_set_error(error, error_size, "unable to prepare v4 landcover masks");
+        return false;
+    }
+
+    V4CoarseMap coarse_urban = {0};
+    V4CoarseMap coarse_green = {0};
+    if (!v4_build_coarse_map(&context.urban, &coarse_urban)
+        || !v4_build_coarse_map(&context.green, &coarse_green)
+        || !v4_smooth_coarse(&coarse_urban)
+        || !v4_smooth_coarse(&coarse_green)) {
+        v4_coarse_destroy(&coarse_green);
+        v4_coarse_destroy(&coarse_urban);
+        v4_urban_destroy(&context.green);
+        v4_urban_destroy(&context.urban);
+        v4_set_error(error, error_size, "unable to prepare v4 coarse landcover");
         return false;
     }
 
     sqlite3 *db = NULL;
     bool ok = sqlite3_open_v2(output_path,
-                              &db,
-                              SQLITE_OPEN_READWRITE,
-                              NULL) == SQLITE_OK;
+                    &db,
+                    SQLITE_OPEN_READWRITE,
+                    NULL) == SQLITE_OK;
     if (!ok) {
         v4_set_error(error,
-                     error_size,
-                     db ? sqlite3_errmsg(db) : "unable to reopen .ormap for v4");
+           error_size,
+           db ? sqlite3_errmsg(db) : "unable to reopen .ormap for v4");
     }
     if (ok) {
         ok = sqlite3_exec(db, "BEGIN", NULL, NULL, NULL) == SQLITE_OK;
         if (!ok) v4_set_error(error, error_size, sqlite3_errmsg(db));
     }
     if (ok) ok = v4_filter_detail_builtup(db, error, error_size);
-    if (ok) ok = v4_append_coarse_builtup(db, &coarse, error, error_size);
+    /* Green first, urban second: urban remains visually dominant where the
+     * simplified backgrounds overlap. Water stays in the legacy vector layer. */
+    if (ok) {
+        ok = v4_append_coarse_layer(db,
+                          &coarse_green,
+                          OPENRIDE_ORMAP_AREA_GREEN,
+                          error,
+                          error_size);
+    }
+    if (ok) {
+        ok = v4_append_coarse_layer(db,
+                          &coarse_urban,
+                          OPENRIDE_ORMAP_AREA_BUILTUP,
+                          error,
+                          error_size);
+    }
     if (ok) ok = v4_write_urban_masks(db, &context.urban, error, error_size);
     if (ok) {
         sqlite3_stmt *metadata = NULL;
         ok = sqlite3_prepare_v2(
-            db,
-            "INSERT INTO metadata(name,value) VALUES('format_version',?1) "
-            "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
-            -1,
-            &metadata,
-            NULL) == SQLITE_OK;
+  db,
+  "INSERT INTO metadata(name,value) VALUES('format_version',?1) "
+  "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+  -1,
+  &metadata,
+  NULL) == SQLITE_OK;
         if (ok) {
-            char version[16];
-            snprintf(version, sizeof(version), "%u", OPENRIDE_ORMAP_FORMAT_VERSION);
-            sqlite3_bind_text(metadata, 1, version, -1, SQLITE_TRANSIENT);
-            ok = sqlite3_step(metadata) == SQLITE_DONE;
+  char version[16];
+  snprintf(version, sizeof(version), "%u", OPENRIDE_ORMAP_FORMAT_VERSION);
+  sqlite3_bind_text(metadata, 1, version, -1, SQLITE_TRANSIENT);
+  ok = sqlite3_step(metadata) == SQLITE_DONE;
         }
         if (!ok) v4_set_error(error, error_size, sqlite3_errmsg(db));
         if (metadata) sqlite3_finalize(metadata);
     }
     if (db) {
         if (ok) {
-            ok = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK;
-            if (!ok) v4_set_error(error, error_size, sqlite3_errmsg(db));
+  ok = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK;
+  if (!ok) v4_set_error(error, error_size, sqlite3_errmsg(db));
         } else {
-            sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+  sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
         }
         sqlite3_close(db);
     }
 
-    v4_coarse_destroy(&coarse);
+    v4_coarse_destroy(&coarse_green);
+    v4_coarse_destroy(&coarse_urban);
+    v4_urban_destroy(&context.green);
     v4_urban_destroy(&context.urban);
     return ok;
 }

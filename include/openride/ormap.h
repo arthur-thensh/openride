@@ -88,7 +88,8 @@ typedef struct OpenRideORMapWaterTile {
 
 typedef enum OpenRideORMapAreaKind {
     OPENRIDE_ORMAP_AREA_BUILTUP = 1,
-    OPENRIDE_ORMAP_AREA_WATER = 2
+    OPENRIDE_ORMAP_AREA_WATER = 2,
+    OPENRIDE_ORMAP_AREA_GREEN = 3
 } OpenRideORMapAreaKind;
 
 /*
