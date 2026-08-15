@@ -408,6 +408,33 @@ const OpenRideNavigationInstruction *openride_navigation_instructions_next(
     return last->maneuver == OPENRIDE_MANEUVER_ARRIVE ? last : NULL;
 }
 
+const OpenRideNavigationInstruction *openride_navigation_instructions_after(
+    const OpenRideNavigationInstructionList *instructions,
+    double after_distance_m,
+    double *distance_after_m)
+{
+    if (distance_after_m) *distance_after_m = 0.0;
+    if (!instructions || !instructions->items || instructions->count == 0U) {
+        return NULL;
+    }
+    if (!isfinite(after_distance_m) || after_distance_m < 0.0) {
+        after_distance_m = 0.0;
+    }
+
+    for (uint32_t i = 0U; i < instructions->count; ++i) {
+        const OpenRideNavigationInstruction *item = &instructions->items[i];
+        if (item->maneuver == OPENRIDE_MANEUVER_DEPART) continue;
+        if (item->distance_from_start_m > after_distance_m + 0.5) {
+            if (distance_after_m) {
+                *distance_after_m =
+                    item->distance_from_start_m - after_distance_m;
+            }
+            return item;
+        }
+    }
+    return NULL;
+}
+
 const char *openride_maneuver_name(OpenRideManeuverType maneuver)
 {
     switch (maneuver) {

@@ -53,6 +53,18 @@ const OpenRideNavigationInstruction *openride_navigation_instructions_next(
     double traveled_m,
     double *distance_to_instruction_m);
 
+/*
+ * Return the first instruction strictly after a route distance.
+ * distance_after_m receives the along-route gap from after_distance_m.
+ *
+ * This is intentionally independent from traveled_m so DriveMode can preview
+ * a maneuver that follows the currently displayed one.
+ */
+const OpenRideNavigationInstruction *openride_navigation_instructions_after(
+    const OpenRideNavigationInstructionList *instructions,
+    double after_distance_m,
+    double *distance_after_m);
+
 const char *openride_maneuver_name(OpenRideManeuverType maneuver);
 
 void openride_navigation_instruction_text_fr(

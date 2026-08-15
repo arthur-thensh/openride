@@ -3843,6 +3843,24 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
                                                 sizeof(maneuver_text));
     }
 
+    double following_gap_m = INFINITY;
+    const OpenRideNavigationInstruction *following_instruction = NULL;
+    if (next_instruction
+        && next_instruction->maneuver != OPENRIDE_MANEUVER_ARRIVE) {
+        following_instruction =
+            openride_navigation_instructions_after(
+                instructions,
+                next_instruction->distance_from_start_m,
+                &following_gap_m);
+    }
+    const bool show_following_instruction =
+        following_instruction
+        && isfinite(following_gap_m)
+        && following_gap_m <= 300.0
+        && navigation
+        && navigation->status != OPENRIDE_NAVIGATION_OFF_ROUTE
+        && navigation->status != OPENRIDE_NAVIGATION_ARRIVED;
+
     const float big_scale = ui_scale > 2.2f ? 3.0f : ui_scale * 1.35f;
     const float normal_scale = ui_scale > 2.2f ? 2.2f : ui_scale;
     const float small_scale = ui_scale > 1.8f ? 1.8f : ui_scale;
@@ -3902,6 +3920,45 @@ static void draw_drive_mode_ui(SDL_Renderer *renderer,
                          top.y + 47.0f * ui_scale,
                          normal_scale,
                          maneuver_text);
+    }
+
+    if (show_following_instruction) {
+        const float preview_h = 28.0f * ui_scale;
+        SDL_FRect preview = {
+            top.x,
+            top.y + top.h + margin,
+            top.w,
+            preview_h
+        };
+        SDL_SetRenderDrawColor(renderer, 20, 25, 30, 224);
+        SDL_RenderFillRect(renderer, &preview);
+        SDL_SetRenderDrawColor(renderer, 255, 214, 83, 85);
+        SDL_RenderRect(renderer, &preview);
+
+        char following_distance_text[32];
+        char following_maneuver_text[128];
+        char following_text[180];
+        openride_navigation_distance_text_fr(
+            following_gap_m,
+            following_distance_text,
+            sizeof(following_distance_text));
+        openride_navigation_instruction_text_fr(
+            following_instruction,
+            following_maneuver_text,
+            sizeof(following_maneuver_text));
+        snprintf(following_text,
+                 sizeof(following_text),
+                 "PUIS %s | %.120s",
+                 following_distance_text,
+                 following_maneuver_text);
+
+        const float preview_scale = ui_scale > 1.8f ? 1.8f : ui_scale;
+        SDL_SetRenderDrawColor(renderer, 245, 223, 153, 255);
+        draw_scaled_text(renderer,
+                         preview.x + 10.0f * ui_scale,
+                         preview.y + 8.0f * ui_scale,
+                         preview_scale,
+                         following_text);
     }
 
     char gps_text[80];

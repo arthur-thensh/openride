@@ -136,6 +136,42 @@ static void test_roundabout_exit_number(void)
     openride_routing_graph_destroy(&graph);
 }
 
+static void test_following_instruction(void)
+{
+    OpenRideNavigationInstruction items[4];
+    memset(items, 0, sizeof(items));
+
+    items[0].maneuver = OPENRIDE_MANEUVER_DEPART;
+    items[0].distance_from_start_m = 0.0;
+    items[1].maneuver = OPENRIDE_MANEUVER_RIGHT;
+    items[1].distance_from_start_m = 100.0;
+    items[2].maneuver = OPENRIDE_MANEUVER_LEFT;
+    items[2].distance_from_start_m = 250.0;
+    items[3].maneuver = OPENRIDE_MANEUVER_ARRIVE;
+    items[3].distance_from_start_m = 1000.0;
+
+    OpenRideNavigationInstructionList list = {
+        .items = items,
+        .count = 4U,
+        .route_distance_m = 1000.0
+    };
+
+    double gap = 0.0;
+    const OpenRideNavigationInstruction *following =
+        openride_navigation_instructions_after(&list, 100.0, &gap);
+    assert(following == &items[2]);
+    assert(fabs(gap - 150.0) < 1e-9);
+
+    following =
+        openride_navigation_instructions_after(&list, 250.0, &gap);
+    assert(following == &items[3]);
+    assert(fabs(gap - 750.0) < 1e-9);
+
+    following =
+        openride_navigation_instructions_after(&list, 1000.0, &gap);
+    assert(following == NULL);
+}
+
 static void test_distance_format(void)
 {
     char text[32];
@@ -149,6 +185,7 @@ int main(void)
 {
     test_right_turn();
     test_roundabout_exit_number();
+    test_following_instruction();
     test_distance_format();
     puts("Navigation instructions tests: OK");
     return 0;
