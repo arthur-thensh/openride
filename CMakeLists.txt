@@ -161,6 +161,7 @@ set(OPENRIDE_APP_SOURCES
     src/ui/ui_settings_panel.c
     src/ui/ui_regions_panel.c
     src/ui/ui_places_panel.c
+    src/ui/ui_search_overlay.c
 )
 
 set_property(

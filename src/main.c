@@ -40,6 +40,7 @@
 #include "openride/ui_settings_panel.h"
 #include "openride/ui_regions_panel.h"
 #include "openride/ui_places_panel.h"
+#include "openride/ui_search_overlay.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -1641,98 +1642,6 @@ static bool refresh_place_search(OpenRidePlaceWorld *world,
     return true;
 }
 
-#ifdef __ANDROID__
-typedef struct OpenRideMobilePlaceSearchLayout {
-    SDL_FRect panel;
-    SDL_FRect query;
-    SDL_FRect rows[OPENRIDE_SEARCH_MAX_RESULTS];
-    uint32_t row_count;
-    float ui_scale;
-    float title_scale;
-    float text_scale;
-    float secondary_scale;
-} OpenRideMobilePlaceSearchLayout;
-
-static OpenRideMobilePlaceSearchLayout mobile_place_search_layout(
-    SDL_Renderer *renderer,
-    int viewport_width,
-    int viewport_height,
-    uint32_t result_count)
-{
-    OpenRideMobilePlaceSearchLayout layout;
-    memset(&layout, 0, sizeof(layout));
-
-    const SDL_Rect safe = openride_render_safe_area(renderer,
-                                                     viewport_width,
-                                                     viewport_height);
-    const float ui_scale = openride_ui_scale(renderer);
-    const float margin = 8.0f * ui_scale;
-    const float gap = 6.0f * ui_scale;
-    const float title_h = 38.0f * ui_scale;
-    const float query_h = 50.0f * ui_scale;
-    const float footer_h = 12.0f * ui_scale;
-    const float desired_row_h = 54.0f * ui_scale;
-    const float min_row_h = 31.0f * ui_scale;
-
-    layout.ui_scale = ui_scale;
-    layout.title_scale = ui_scale > 2.15f ? 2.15f : ui_scale;
-    layout.text_scale = ui_scale > 1.85f ? 1.85f : ui_scale;
-    layout.secondary_scale = ui_scale > 1.45f ? 1.45f : ui_scale;
-
-    layout.panel.x = (float)safe.x + margin;
-    layout.panel.y = (float)safe.y + margin;
-    layout.panel.w = (float)safe.w - margin * 2.0f;
-
-    /*
-     * Android IMEs often cover the lower part of portrait rendering without
-     * changing SDL's output size. Keep results in the upper 57% so they remain
-     * visible and touchable while the keyboard is open.
-     */
-    const float max_panel_h = (float)safe.h * 0.57f;
-    const uint32_t visible_rows = result_count > 0U ? result_count : 1U;
-    const float desired_h =
-        title_h + gap + query_h + gap
-        + desired_row_h * (float)visible_rows
-        + footer_h + margin;
-
-    layout.panel.h = desired_h < max_panel_h ? desired_h : max_panel_h;
-    if (layout.panel.h < 190.0f * ui_scale) {
-        layout.panel.h = 190.0f * ui_scale;
-    }
-    if (layout.panel.h > (float)safe.h - margin * 2.0f) {
-        layout.panel.h = (float)safe.h - margin * 2.0f;
-    }
-
-    layout.query.x = layout.panel.x + margin;
-    layout.query.y = layout.panel.y + title_h + gap;
-    layout.query.w = layout.panel.w - margin * 2.0f;
-    layout.query.h = query_h;
-
-    if (result_count > OPENRIDE_SEARCH_MAX_RESULTS) {
-        result_count = OPENRIDE_SEARCH_MAX_RESULTS;
-    }
-    layout.row_count = result_count;
-
-    const float rows_top = layout.query.y + layout.query.h + gap;
-    const float rows_bottom =
-        layout.panel.y + layout.panel.h - footer_h - margin;
-    float row_h = result_count > 0U
-        ? (rows_bottom - rows_top) / (float)result_count
-        : desired_row_h;
-    if (row_h > desired_row_h) row_h = desired_row_h;
-    if (row_h < min_row_h) row_h = min_row_h;
-
-    for (uint32_t i = 0U; i < result_count; ++i) {
-        layout.rows[i].x = layout.panel.x + margin;
-        layout.rows[i].y = rows_top + row_h * (float)i;
-        layout.rows[i].w = layout.panel.w - margin * 2.0f;
-        layout.rows[i].h = row_h - 2.0f * ui_scale;
-    }
-
-    return layout;
-}
-#endif
-
 static void draw_place_search_overlay(SDL_Renderer *renderer,
                                       bool active,
                                       bool available,
@@ -1752,109 +1661,42 @@ static void draw_place_search_overlay(SDL_Renderer *renderer,
     if (queried_width > 0) viewport_width = queried_width;
     if (viewport_height <= 0) return;
 
-    const OpenRideMobilePlaceSearchLayout layout =
-        mobile_place_search_layout(renderer,
-                                   viewport_width,
-                                   viewport_height,
-                                   result_count);
-
-    SDL_FRect screen = {0.0f, 0.0f, (float)viewport_width, (float)viewport_height};
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 72);
-    SDL_RenderFillRect(renderer, &screen);
-
-    SDL_SetRenderDrawColor(renderer, 17, 21, 25, 250);
-    SDL_RenderFillRect(renderer, &layout.panel);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 55);
-    SDL_RenderRect(renderer, &layout.panel);
-
-    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
-    draw_scaled_text(renderer,
-                     layout.panel.x + 12.0f * layout.ui_scale,
-                     layout.panel.y + 10.0f * layout.ui_scale,
-                     layout.title_scale,
-                     title && title[0] ? title : "RECHERCHER UN LIEU");
-
-    SDL_SetRenderDrawColor(renderer, 39, 46, 53, 255);
-    SDL_RenderFillRect(renderer, &layout.query);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 75);
-    SDL_RenderRect(renderer, &layout.query);
-
-    SDL_SetRenderDrawColor(renderer, 247, 248, 249, 255);
-    char query_text[96];
-    snprintf(query_text,
-             sizeof(query_text),
-             "%s%s",
-             query && query[0] ? query : "Tapez un lieu",
-             query && query[0] ? "_" : "");
-    draw_scaled_text(renderer,
-                     layout.query.x + 12.0f * layout.ui_scale,
-                     layout.query.y + 14.0f * layout.ui_scale,
-                     layout.text_scale,
-                     query_text);
-
-    if (!available) {
-        SDL_SetRenderDrawColor(renderer, 226, 158, 74, 255);
-        draw_scaled_text(renderer,
-                         layout.query.x,
-                         layout.query.y + layout.query.h + 16.0f * layout.ui_scale,
-                         layout.secondary_scale,
-                         "Aucun index de recherche regional installe");
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
         return;
     }
 
-    if (result_count == 0U) {
-        SDL_SetRenderDrawColor(renderer, 163, 173, 181, 255);
-        draw_scaled_text(
-            renderer,
-            layout.query.x,
-            layout.query.y + layout.query.h + 16.0f * layout.ui_scale,
-            layout.secondary_scale,
-            (query && strlen(query) >= 2U)
-                ? "Aucun resultat"
-                : "Saisissez au moins 2 caracteres");
-        return;
+    uint32_t count = result_count;
+    if (count > OPENRIDE_UI_SEARCH_OVERLAY_MAX_RESULTS) {
+        count = OPENRIDE_UI_SEARCH_OVERLAY_MAX_RESULTS;
     }
-
-    for (uint32_t i = 0U; i < layout.row_count; ++i) {
-        const SDL_FRect *row = &layout.rows[i];
-
-        SDL_SetRenderDrawColor(renderer,
-                               i == selected_result ? 45 : 29,
-                               i == selected_result ? 83 : 35,
-                               i == selected_result ? 112 : 41,
-                               248);
-        SDL_RenderFillRect(renderer, row);
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 38);
-        SDL_RenderRect(renderer, row);
-
-        char name[64];
-        snprintf(name, sizeof(name), "%.44s", results[i].name);
-        SDL_SetRenderDrawColor(renderer, 242, 245, 247, 255);
-        draw_scaled_text(renderer,
-                         row->x + 12.0f * layout.ui_scale,
-                         row->y + 7.0f * layout.ui_scale,
-                         layout.text_scale,
-                         name);
-
-        char kind[96];
+    OpenRideUISearchOverlayState state = {
+        .available = available,
+        .title = title,
+        .query = query,
+        .count = count,
+        .selected = selected_result
+    };
+    char secondary[OPENRIDE_UI_SEARCH_OVERLAY_MAX_RESULTS][96];
+    for (uint32_t i = 0U; i < count; ++i) {
         const OpenRideRegionDefinition *result_region =
             results[i].region_id[0] != '\0'
                 ? openride_region_find(results[i].region_id)
                 : NULL;
-        snprintf(kind,
-                 sizeof(kind),
+        snprintf(secondary[i],
+                 sizeof(secondary[i]),
                  "%s%s%s%s",
                  openride_place_kind_name(results[i].kind),
                  result_region ? " - " : "",
                  result_region ? result_region->name : "",
                  results[i].bundled_lite ? " - France" : "");
-        SDL_SetRenderDrawColor(renderer, 166, 177, 186, 255);
-        draw_scaled_text(renderer,
-                         row->x + 12.0f * layout.ui_scale,
-                         row->y + row->h - 14.0f * layout.ui_scale,
-                         layout.secondary_scale,
-                         kind);
+        state.items[i].name = results[i].name;
+        state.items[i].secondary = secondary[i];
     }
+    openride_ui_search_overlay_draw(&ui, &state);
+    openride_ui_end(&ui);
+    return;
 #else
     const float w = 620.0f;
     const float x = viewport_width > (int)w ? ((float)viewport_width - w) * 0.5f : 8.0f;
@@ -1944,21 +1786,18 @@ static int place_search_result_at(SDL_Renderer *renderer,
     if (result_count == 0U) return -1;
 
 #ifdef __ANDROID__
-    const OpenRideMobilePlaceSearchLayout layout =
-        mobile_place_search_layout(renderer,
-                                   viewport_width,
-                                   viewport_height,
-                                   result_count);
-    for (uint32_t i = 0U; i < layout.row_count; ++i) {
-        const SDL_FRect *row = &layout.rows[i];
-        if (x >= (double)row->x
-            && x < (double)(row->x + row->w)
-            && y >= (double)row->y
-            && y < (double)(row->y + row->h)) {
-            return (int)i;
-        }
+    OpenRideUIContext ui;
+    openride_ui_init(&ui);
+    if (!openride_ui_begin(&ui, renderer, viewport_width, viewport_height)) {
+        return -1;
     }
-    return -1;
+    const int result = openride_ui_search_overlay_result_at(
+        &ui,
+        result_count,
+        x,
+        y);
+    openride_ui_end(&ui);
+    return result;
 #else
     (void)renderer;
     (void)viewport_height;
