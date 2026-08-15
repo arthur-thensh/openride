@@ -66,11 +66,27 @@ typedef struct OpenRideORMapAreaCacheEntry {
     OpenRideORMapAreaTile tile;
 } OpenRideORMapAreaCacheEntry;
 
+typedef struct OpenRideORMapRoadDebugStats {
+    double roads_ms;
+    double load_ms;
+    uint32_t cache_hits;
+    uint32_t cache_misses;
+    uint32_t prewarm_loads;
+    uint32_t draw_loads;
+    uint32_t deferred_loads;
+    int prewarm_zoom;
+} OpenRideORMapRoadDebugStats;
+
 typedef struct OpenRideORMapRenderer {
     SDL_Renderer *renderer;
     OpenRideORMap *map;
     OpenRideMapStyle style;
     uint64_t frame_counter;
+    OpenRideORMapRoadDebugStats road_debug;
+    uint32_t road_draw_load_budget_remaining;
+    double road_previous_camera_zoom;
+    bool road_has_previous_camera_zoom;
+    int road_zoom_direction;
     OpenRideORMapRoadCacheEntry roads[OPENRIDE_ORMAP_ROAD_CACHE_CAPACITY];
     OpenRideORMapMaskCacheEntry masks[OPENRIDE_ORMAP_MASK_CACHE_CAPACITY];
     OpenRideORMapWaterCacheEntry waters[OPENRIDE_ORMAP_WATER_CACHE_CAPACITY];
@@ -90,6 +106,9 @@ void openride_ormap_renderer_destroy(OpenRideORMapRenderer *renderer);
 void openride_ormap_renderer_set_style(OpenRideORMapRenderer *renderer,
                                        OpenRideMapStyle style);
 void openride_ormap_renderer_begin_frame(OpenRideORMapRenderer *renderer);
+void openride_ormap_renderer_get_road_debug_stats(
+    const OpenRideORMapRenderer *renderer,
+    OpenRideORMapRoadDebugStats *stats);
 void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
                                         const OpenRideMapCamera *camera,
                                         int viewport_width,
