@@ -129,7 +129,7 @@ def polish_route(text):
     return text
 
 
-def center_panel(text, prefix, max_width, max_height, label):
+def center_panel(text, max_width, max_height, label):
     old = '''    layout.panel = safe;\n    layout.title = openride_ui_rect(safe.x + 14.0f,\n                                    safe.y + 8.0f,\n                                    safe.w - 28.0f,\n                                    28.0f);\n    layout.subtitle = openride_ui_rect(safe.x + 14.0f,\n                                       safe.y + 34.0f,\n                                       safe.w - 28.0f,\n                                       18.0f);\n'''
     new = '''    const float panel_w = safe.w < %s ? safe.w : %s;\n    const float panel_h = safe.h < %s ? safe.h : %s;\n    layout.panel = openride_ui_rect(safe.x + (safe.w - panel_w) * 0.5f,\n                                    safe.y + (safe.h - panel_h) * 0.5f,\n                                    panel_w,\n                                    panel_h);\n    safe = layout.panel;\n    layout.title = openride_ui_rect(safe.x + 48.0f,\n                                    safe.y + 8.0f,\n                                    safe.w - 62.0f,\n                                    28.0f);\n    layout.subtitle = openride_ui_rect(safe.x + 48.0f,\n                                       safe.y + 34.0f,\n                                       safe.w - 62.0f,\n                                       18.0f);\n''' % (max_width, max_width, max_height, max_height)
     return replace_once(text, old, new, label)
@@ -149,7 +149,6 @@ def polish_regions(text):
         "regions constants",
     )
     text = center_panel(text,
-                        "regions",
                         "OPENRIDE_UI_REGIONS_MAX_WIDTH",
                         "OPENRIDE_UI_REGIONS_MAX_HEIGHT",
                         "regions centered panel")
@@ -182,7 +181,6 @@ def polish_settings(text):
         "settings constants",
     )
     text = center_panel(text,
-                        "settings",
                         "OPENRIDE_UI_SETTINGS_MAX_WIDTH",
                         "OPENRIDE_UI_SETTINGS_MAX_HEIGHT",
                         "settings centered panel")
@@ -246,14 +244,13 @@ def polish_drive(text):
         '''    SDL_SetRenderDrawColor(renderer, 22, 26, 29, 232);\n    SDL_RenderFillRect(renderer, &stats);\n    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 28);\n''',
         "drive stats surface",
     )
-    old_attr = '''    if (state->show_attribution) {\n        SDL_SetRenderDrawColor(renderer, 65, 68, 70, 255);\n        drive_draw_scaled_text(renderer,\n                               stats.x + 3.0f * ui_scale,\n                               stats.y - 13.0f * ui_scale,\n                               ui_scale > 1.4f ? 1.4f : ui_scale,\n                               "(c) OpenStreetMap contributors | ODbL");\n    }\n'''
-    new_attr = '''    if (state->show_attribution) {\n        SDL_SetRenderDrawColor(renderer, 155, 163, 167, 70);\n        drive_draw_scaled_text(renderer,\n                               controls.x + 4.0f * ui_scale,\n                               controls.y + controls.h + 2.0f * ui_scale,\n                               ui_scale > 1.15f ? 1.15f : ui_scale,\n                               "(c) OpenStreetMap contributors | ODbL");\n    }\n'''
-    text = replace_once(text, old_attr, new_attr, "drive attribution placement")
+    old_attr = '''    if (state->show_attribution) {\n        SDL_SetRenderDrawColor(renderer, 65, 68, 70, 255);\n        drive_draw_scaled_text(renderer,\n                               stats.x + 3.0f * ui_scale,\n                               stats.y - 13.0f * ui_scale,\n                               ui_scale > 1.4f ? 1.4f : ui_scale,\n                               "(c) OpenStreetMap contributors | ODbL");\n    }\n\n'''
+    text = replace_once(text, old_attr, "", "drive old attribution removal")
     text = replace_once(
         text,
-        '''    SDL_SetRenderDrawColor(renderer, 13, 17, 21, 238);\n    SDL_RenderFillRect(renderer, &controls);\n    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 65);\n''',
-        '''    SDL_SetRenderDrawColor(renderer, 13, 16, 18, 242);\n    SDL_RenderFillRect(renderer, &controls);\n    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);\n''',
-        "drive controls surface",
+        '''    SDL_SetRenderDrawColor(renderer, 13, 17, 21, 238);\n    SDL_RenderFillRect(renderer, &controls);\n    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 65);\n    SDL_RenderRect(renderer, &controls);\n\n    const char *labels[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {\n''',
+        '''    SDL_SetRenderDrawColor(renderer, 13, 16, 18, 242);\n    SDL_RenderFillRect(renderer, &controls);\n    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);\n    SDL_RenderRect(renderer, &controls);\n\n    if (state->show_attribution) {\n        SDL_SetRenderDrawColor(renderer, 155, 163, 167, 70);\n        drive_draw_scaled_text(renderer,\n                               controls.x + 4.0f * ui_scale,\n                               controls.y + controls.h + 2.0f * ui_scale,\n                               ui_scale > 1.15f ? 1.15f : ui_scale,\n                               "(c) OpenStreetMap contributors | ODbL");\n    }\n\n    const char *labels[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {\n''',
+        "drive controls and attribution",
     )
     old_controls = '''    const float item_width = controls.w / (float)OPENRIDE_UI_DRIVE_CONTROL_COUNT;\n    const float control_scale = ui_scale > 2.4f ? 2.4f : ui_scale;\n    for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {\n        const float item_x = controls.x + item_width * (float)i;\n        if (i > 0U) {\n            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 38);\n            SDL_RenderLine(renderer,\n                           item_x,\n                           controls.y + 10.0f * ui_scale,\n                           item_x,\n                           controls.y + controls.h - 10.0f * ui_scale);\n        }\n        const float label_width =\n            (float)drive_glyph_count(labels[i]) * 8.0f * control_scale;\n        const float label_height = 8.0f * control_scale;\n        SDL_SetRenderDrawColor(renderer, 243, 245, 247, 255);\n        drive_draw_scaled_text(renderer,\n                               item_x + (item_width - label_width) * 0.5f,\n                               controls.y + (controls.h - label_height) * 0.5f,\n                               control_scale,\n                               labels[i]);\n    }\n'''
     new_controls = '''    static const OpenRideUIIcon control_icons[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {\n        OPENRIDE_UI_ICON_MAP,\n        OPENRIDE_UI_ICON_LOCATION,\n        OPENRIDE_UI_ICON_COMPASS,\n        OPENRIDE_UI_ICON_GPS\n    };\n    for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {\n        const OpenRideUIRect item = layout.control_items[i];\n        const OpenRideUIColor tint = i == 1U\n            ? ui->theme.primary\n            : ui->theme.text_secondary;\n        openride_ui_icon_draw(ui,\n                              control_icons[i],\n                              openride_ui_rect(item.x + (item.w - 22.0f) * 0.5f,\n                                               item.y + 8.0f,\n                                               22.0f,\n                                               22.0f),\n                              tint,\n                              1.65f);\n        openride_ui_text_color(ui,\n                               openride_ui_rect(item.x + 2.0f,\n                                                item.y + item.h - 22.0f,\n                                                item.w - 4.0f,\n                                                16.0f),\n                               labels[i],\n                               OPENRIDE_UI_TEXT_CAPTION,\n                               OPENRIDE_UI_TEXT_ALIGN_CENTER,\n                               tint);\n    }\n'''
