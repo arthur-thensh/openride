@@ -164,6 +164,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/ormap_trig_cache.c
     src/map/map_world.c
     src/ui/ui.c
+    src/ui/ui_icon.c
     src/ui/ui_toolbar.c
     src/ui/ui_main_menu.c
     src/ui/ui_route_panel.c
