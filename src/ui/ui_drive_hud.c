@@ -1,5 +1,6 @@
 #include "openride/ui_drive_hud.h"
 #include "openride/ui_icon.h"
+#include "openride/ui_font.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -13,18 +14,7 @@
 #define OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT 64.0f
 #define OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT 14.0f
 #define OPENRIDE_UI_DRIVE_CONTROL_COUNT 4U
-
-static size_t drive_glyph_count(const char *text)
-{
-    if (!text) return 0U;
-    size_t count = 0U;
-    const unsigned char *cursor = (const unsigned char *)text;
-    while (*cursor) {
-        if ((*cursor & 0xc0U) != 0x80U) ++count;
-        ++cursor;
-    }
-    return count;
-}
+#define OPENRIDE_UI_FONT_COMPAT_HEIGHT 10.5f
 
 static void drive_draw_scaled_text(SDL_Renderer *renderer,
                                    float x,
@@ -33,12 +23,18 @@ static void drive_draw_scaled_text(SDL_Renderer *renderer,
                                    const char *text)
 {
     if (!renderer || !text || !text[0] || scale <= 0.0f) return;
-    float old_x = 1.0f;
-    float old_y = 1.0f;
-    if (!SDL_GetRenderScale(renderer, &old_x, &old_y)) return;
-    if (!SDL_SetRenderScale(renderer, old_x * scale, old_y * scale)) return;
-    SDL_RenderDebugText(renderer, x / scale, y / scale, text);
-    SDL_SetRenderScale(renderer, old_x, old_y);
+    Uint8 r = 255U;
+    Uint8 g = 255U;
+    Uint8 b = 255U;
+    Uint8 a = 255U;
+    SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
+    const OpenRideUIColor color = {r, g, b, a};
+    (void)openride_ui_font_draw(renderer,
+                                x,
+                                y,
+                                OPENRIDE_UI_FONT_COMPAT_HEIGHT * scale,
+                                text,
+                                color);
 }
 
 static float drive_fit_scale(const char *text,
@@ -48,7 +44,8 @@ static float drive_fit_scale(const char *text,
     if (!text || !text[0] || requested_scale <= 0.0f || max_width <= 0.0f) {
         return requested_scale;
     }
-    const float natural = (float)drive_glyph_count(text) * 8.0f * requested_scale;
+    const float natural = openride_ui_font_measure_width(
+        text, OPENRIDE_UI_FONT_COMPAT_HEIGHT * requested_scale);
     if (natural <= max_width || natural <= 0.0f) return requested_scale;
     float fitted = requested_scale * max_width / natural;
     if (fitted < 1.0f) fitted = 1.0f;
@@ -437,7 +434,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
         const float max_gps_width = top.w * 0.48f;
         gps_scale = drive_fit_scale(state->gps_text, gps_scale, max_gps_width);
         const float gps_width =
-            (float)drive_glyph_count(state->gps_text) * 8.0f * gps_scale;
+            openride_ui_font_measure_width(state->gps_text, OPENRIDE_UI_FONT_COMPAT_HEIGHT * gps_scale);
         const float gps_y = state->status == OPENRIDE_UI_DRIVE_HUD_OFF_ROUTE
             ? top.y + 67.0f * ui_scale
             : top.y + 10.0f * ui_scale;
@@ -499,7 +496,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
         char reroutes[32];
         snprintf(reroutes, sizeof(reroutes), "recalcul %u", state->reroute_count);
         const float reroute_width =
-            (float)drive_glyph_count(reroutes) * 8.0f * label_scale;
+            openride_ui_font_measure_width(reroutes, OPENRIDE_UI_FONT_COMPAT_HEIGHT * label_scale);
         SDL_SetRenderDrawColor(renderer, 170, 178, 185, 255);
         drive_draw_scaled_text(renderer,
                                stats.x + stats.w - reroute_width - 6.0f * ui_scale,

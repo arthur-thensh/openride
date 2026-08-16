@@ -17,6 +17,12 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/SDL/CMakeLists.txt")
         "Expected: vendor/SDL/CMakeLists.txt")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb/stb_truetype.h"
+   OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ui-font/roboto_data.inc")
+    message(FATAL_ERROR
+        "UI font dependencies are missing. Run: ./scripts/bootstrap_ui_font.sh")
+endif()
+
 if(ANDROID)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite/sqlite3.c")
         message(FATAL_ERROR
@@ -165,6 +171,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/map_world.c
     src/ui/ui.c
     src/ui/ui_icon.c
+    src/ui/ui_font.c
     src/ui/ui_toolbar.c
     src/ui/ui_main_menu.c
     src/ui/ui_route_panel.c

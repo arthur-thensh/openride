@@ -1,8 +1,11 @@
 #include "openride/ui.h"
+#include "openride/ui_font.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
+
+#define OPENRIDE_UI_FONT_COMPAT_HEIGHT 10.5f
 
 static float ui_clampf(float value, float min_value, float max_value)
 {
@@ -136,18 +139,6 @@ static void ui_stroke_rounded_rect(SDL_Renderer *renderer,
                 radius, 1.57079632679f, 3.14159265359f);
 }
 
-static size_t ui_utf8_glyph_count(const char *text)
-{
-    if (!text) return 0U;
-    size_t count = 0U;
-    const unsigned char *cursor = (const unsigned char *)text;
-    while (*cursor) {
-        if ((*cursor & 0xc0U) != 0x80U) ++count;
-        ++cursor;
-    }
-    return count;
-}
-
 static void ui_draw_scaled_text(SDL_Renderer *renderer,
                                 float x,
                                 float y,
@@ -155,12 +146,18 @@ static void ui_draw_scaled_text(SDL_Renderer *renderer,
                                 const char *text)
 {
     if (!renderer || !text || !text[0] || scale <= 0.0f) return;
-    float old_x = 1.0f;
-    float old_y = 1.0f;
-    if (!SDL_GetRenderScale(renderer, &old_x, &old_y)) return;
-    if (!SDL_SetRenderScale(renderer, old_x * scale, old_y * scale)) return;
-    SDL_RenderDebugText(renderer, x / scale, y / scale, text);
-    SDL_SetRenderScale(renderer, old_x, old_y);
+    Uint8 r = 255U;
+    Uint8 g = 255U;
+    Uint8 b = 255U;
+    Uint8 a = 255U;
+    SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
+    const OpenRideUIColor color = {r, g, b, a};
+    (void)openride_ui_font_draw(renderer,
+                                x,
+                                y,
+                                OPENRIDE_UI_FONT_COMPAT_HEIGHT * scale,
+                                text,
+                                color);
 }
 
 static float ui_text_style_scale(const OpenRideUIContext *ui,
@@ -456,8 +453,9 @@ void openride_ui_text_color(OpenRideUIContext *ui,
     }
 
     const float scale = ui_text_style_scale(ui, style);
-    const float width = (float)ui_utf8_glyph_count(text) * 8.0f * scale;
-    const float height = 8.0f * scale;
+    const float pixel_height = OPENRIDE_UI_FONT_COMPAT_HEIGHT * scale;
+    const float width = openride_ui_font_measure_width(text, pixel_height);
+    const float height = openride_ui_font_line_height(pixel_height);
     const SDL_FRect pixels = openride_ui_rect_pixels(ui, rect);
     float x = pixels.x;
     if (align == OPENRIDE_UI_TEXT_ALIGN_CENTER) {
@@ -560,16 +558,16 @@ bool openride_ui_button(OpenRideUIContext *ui,
 
     if (label && label[0]) {
         float text_scale = ui->text_scale;
-        const float natural_width =
-            (float)ui_utf8_glyph_count(label) * 8.0f * text_scale;
+        float pixel_height = OPENRIDE_UI_FONT_COMPAT_HEIGHT * text_scale;
+        const float natural_width = openride_ui_font_measure_width(label, pixel_height);
         const float max_width = pixels.w - 24.0f * ui->scale;
         if (natural_width > max_width && natural_width > 0.0f && max_width > 0.0f) {
             text_scale *= max_width / natural_width;
             if (text_scale < 1.0f) text_scale = 1.0f;
+            pixel_height = OPENRIDE_UI_FONT_COMPAT_HEIGHT * text_scale;
         }
-        const float text_width =
-            (float)ui_utf8_glyph_count(label) * 8.0f * text_scale;
-        const float text_height = 8.0f * text_scale;
+        const float text_width = openride_ui_font_measure_width(label, pixel_height);
+        const float text_height = openride_ui_font_line_height(pixel_height);
         ui_set_draw_color(ui->renderer, text);
         ui_draw_scaled_text(ui->renderer,
                             pixels.x + (pixels.w - text_width) * 0.5f,
