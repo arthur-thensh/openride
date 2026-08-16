@@ -19,6 +19,7 @@ typedef enum OpenRideUIIcon {
     OPENRIDE_UI_ICON_MAP,
     OPENRIDE_UI_ICON_COMPASS,
     OPENRIDE_UI_ICON_LOCATION,
+    OPENRIDE_UI_ICON_LOADING,
     OPENRIDE_UI_ICON_COUNT
 } OpenRideUIIcon;
 
@@ -38,5 +39,13 @@ bool openride_ui_icon_draw(OpenRideUIContext *ui,
                            OpenRideUIRect rect,
                            OpenRideUIColor color,
                            float stroke_width);
+
+/* Render the same cached SVG after rotating it around the target center. */
+bool openride_ui_icon_draw_rotated(OpenRideUIContext *ui,
+                                   OpenRideUIIcon icon,
+                                   OpenRideUIRect rect,
+                                   OpenRideUIColor color,
+                                   float stroke_width,
+                                   float angle_degrees);
 
 #endif
