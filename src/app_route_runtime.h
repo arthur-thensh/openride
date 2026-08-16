@@ -112,6 +112,29 @@ bool openride_app_route_generate_loop(
     char *status,
     size_t status_size);
 
+bool openride_app_route_generate_loop_proposals(
+    const OpenRideRoutingGraph *graph,
+    bool graph_loaded,
+    const OpenRideMapSelection *selection,
+    OpenRideRoutingProfile profile,
+    double target_distance_m,
+    OpenRideLoopDirection direction,
+    uint32_t seed,
+    OpenRideLoopProposalSet *proposals,
+    OpenRideRoutingSnap *start_snap,
+    char *status,
+    size_t status_size);
+
+bool openride_app_route_take_loop_proposal(
+    OpenRideLoopProposalSet *proposals,
+    uint32_t index,
+    OpenRideRoute *route,
+    OpenRideLoopStats *stats,
+    OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS],
+    uint32_t *waypoint_count,
+    char *status,
+    size_t status_size);
+
 void openride_app_route_clear_navigation_session(
     OpenRideNavigationEngine *navigation,
     OpenRideGPSSimulator *simulator,
