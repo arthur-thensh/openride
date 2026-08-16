@@ -6,4 +6,10 @@ typedef enum OpenRideRidePlannerMode {
     OPENRIDE_RIDE_PLANNER_LOOP
 } OpenRideRidePlannerMode;
 
+typedef enum OpenRideRidePlannerBusy {
+    OPENRIDE_RIDE_PLANNER_IDLE = 0,
+    OPENRIDE_RIDE_PLANNER_CALCULATING_ROUTE,
+    OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS
+} OpenRideRidePlannerBusy;
+
 #endif
