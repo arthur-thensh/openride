@@ -43,46 +43,57 @@ static void ui_fill_rounded_rect(SDL_Renderer *renderer,
                                  OpenRideUIColor color)
 {
     if (!renderer || rect.w <= 0.0f || rect.h <= 0.0f) return;
+
     const float max_radius = fminf(rect.w, rect.h) * 0.5f;
     radius = ui_clampf(radius, 0.0f, max_radius);
     ui_set_draw_color(renderer, color);
+
     if (radius < 1.0f) {
         SDL_RenderFillRect(renderer, &rect);
         return;
     }
 
-    SDL_FRect horizontal = {
-        rect.x + radius,
-        rect.y,
-        rect.w - radius * 2.0f,
-        rect.h
-    };
-    SDL_FRect vertical = {
-        rect.x,
-        rect.y + radius,
-        rect.w,
-        rect.h - radius * 2.0f
-    };
-    if (horizontal.w > 0.0f) SDL_RenderFillRect(renderer, &horizontal);
-    if (vertical.h > 0.0f) SDL_RenderFillRect(renderer, &vertical);
+    /* OpenRide rounded fill: exactly one blend operation per scanline.
+       The previous implementation composed horizontal + vertical rectangles
+       and corner scanlines. With translucent UI colors those shapes overlapped,
+       causing visibly darker bands around rounded edges. */
+    const int rows = (int)ceilf(rect.h);
+    const float bottom = rect.y + rect.h;
 
-    const int rows = (int)ceilf(radius);
     for (int row = 0; row < rows; ++row) {
-        const float y_from_center = radius - ((float)row + 0.5f);
-        const float inside = radius * radius - y_from_center * y_from_center;
-        const float span = inside > 0.0f ? sqrtf(inside) : 0.0f;
-        SDL_FRect top = {
-            rect.x + radius - span,
-            rect.y + (float)row,
-            rect.w - radius * 2.0f + span * 2.0f,
-            1.0f
+        const float y = rect.y + (float)row;
+        float row_h = bottom - y;
+        if (row_h > 1.0f) row_h = 1.0f;
+        if (row_h <= 0.0f) continue;
+
+        const float center_y = (float)row + row_h * 0.5f;
+        float inset = 0.0f;
+
+        if (center_y < radius) {
+            const float dy = radius - center_y;
+            const float inside = radius * radius - dy * dy;
+            const float span = inside > 0.0f ? sqrtf(inside) : 0.0f;
+            inset = radius - span;
+        } else if (center_y > rect.h - radius) {
+            const float dy = center_y - (rect.h - radius);
+            const float inside = radius * radius - dy * dy;
+            const float span = inside > 0.0f ? sqrtf(inside) : 0.0f;
+            inset = radius - span;
+        }
+
+        const float width = rect.w - inset * 2.0f;
+        if (width <= 0.0f) continue;
+
+        const SDL_FRect scanline = {
+            rect.x + inset,
+            y,
+            width,
+            row_h
         };
-        SDL_FRect bottom = top;
-        bottom.y = rect.y + rect.h - (float)row - 1.0f;
-        if (top.w > 0.0f) SDL_RenderFillRect(renderer, &top);
-        if (bottom.w > 0.0f) SDL_RenderFillRect(renderer, &bottom);
+        SDL_RenderFillRect(renderer, &scanline);
     }
 }
+
 
 static void ui_draw_arc(SDL_Renderer *renderer,
                         float cx,
@@ -423,12 +434,13 @@ void openride_ui_panel(OpenRideUIContext *ui,
         * scale;
 
     if (elevated) {
+        /* Keep depth without a visible dark strip under cards/toolbars. */
         SDL_FRect shadow = pixels;
-        shadow.y += 3.0f * scale;
+        shadow.y += 2.0f * scale;
         ui_fill_rounded_rect(ui->renderer,
                              shadow,
                              radius,
-                             ui_color(0U, 0U, 0U, 72U));
+                             ui_color(0U, 0U, 0U, 28U));
     }
     ui_fill_rounded_rect(ui->renderer,
                          pixels,
