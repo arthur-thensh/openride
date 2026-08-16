@@ -34,6 +34,11 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def patch_worker(text: str) -> str:
+    if "#include <stdio.h>\n" not in text:
+        text = replace_once(text,
+                            '#include "app_planner_async_runtime.h"\n\n#include <string.h>\n',
+                            '#include "app_planner_async_runtime.h"\n\n#include <stdio.h>\n#include <string.h>\n',
+                            "planner worker stdio include")
     old = '''    } else if (context->kind == OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS) {
         ok = openride_app_route_generate_loop_proposals(
             context->graph,
@@ -217,7 +222,7 @@ def main() -> int:
     }
 
     required = {
-        "worker": ["attempt < 3U", "RidePlanner: loop generation failed"],
+        "worker": ["#include <stdio.h>", "attempt < 3U", "RidePlanner: loop generation failed"],
         "async": ["keeping loop failure feedback"],
         "route_header": ["const char *feedback;"],
         "route_ui": ["state->feedback", "ui->theme.danger"],
