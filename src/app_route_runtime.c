@@ -330,6 +330,85 @@ bool openride_app_route_world_request_matches(
     return true;
 }
 
+static bool app_route_snap_loop_start(const OpenRideRoutingGraph *graph,
+                                      double lat,
+                                      double lon,
+                                      OpenRideRoutingSnap *snap,
+                                      char *status,
+                                      size_t status_size)
+{
+    if (!graph || !snap) return false;
+
+    if (openride_routing_graph_snap_to_segment(graph,
+                                               lat,
+                                               lon,
+                                               OPENRIDE_MAX_SNAP_DISTANCE_M,
+                                               snap)) {
+        SDL_Log("RidePlanner: loop start snap indexed lat=%.7f lon=%.7f distance=%.1fm segment=%u",
+                lat, lon, snap->distance_m, snap->segment_id);
+        return true;
+    }
+
+    OpenRideRoutingSnap linear = {0};
+    linear.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    if (openride_routing_graph_snap_to_segment_linear(graph,
+                                                      lat,
+                                                      lon,
+                                                      OPENRIDE_MAX_SNAP_DISTANCE_M,
+                                                      &linear)) {
+        *snap = linear;
+        SDL_Log("RidePlanner: segment index missed loop start; linear fallback succeeded "
+                "lat=%.7f lon=%.7f distance=%.1fm segment=%u",
+                lat, lon, linear.distance_m, linear.segment_id);
+        return true;
+    }
+
+    double nearest_node_m = INFINITY;
+    const OpenRideRoutingNodeId nearest_node =
+        openride_routing_graph_nearest_node_linear(graph,
+                                                   lat,
+                                                   lon,
+                                                   &nearest_node_m);
+
+    const OpenRideRoutingSpatialIndex *grid = &graph->spatial_index;
+    const double min_lat = (double)grid->min_lat_e7 / 10000000.0;
+    const double min_lon = (double)grid->min_lon_e7 / 10000000.0;
+    const double max_lat = ((double)grid->min_lat_e7
+                            + (double)grid->rows * (double)grid->cell_size_e7)
+                         / 10000000.0;
+    const double max_lon = ((double)grid->min_lon_e7
+                            + (double)grid->columns * (double)grid->cell_size_e7)
+                         / 10000000.0;
+
+    SDL_Log("RidePlanner: loop start snap failed lat=%.7f lon=%.7f "
+            "nearest_node=%u nearest=%.1fm limit=%.0fm "
+            "graph_bounds=[%.5f,%.5f]-[%.5f,%.5f] nodes=%u segments=%u",
+            lat,
+            lon,
+            nearest_node,
+            nearest_node_m,
+            OPENRIDE_MAX_SNAP_DISTANCE_M,
+            min_lat,
+            min_lon,
+            max_lat,
+            max_lon,
+            graph->node_count,
+            graph->segment_index.segment_count);
+
+    if (nearest_node != OPENRIDE_ROUTING_NODE_NONE && isfinite(nearest_node_m)) {
+        snprintf(status,
+                 status_size,
+                 "Depart hors du reseau moto: route la plus proche a %.0f m",
+                 nearest_node_m);
+    } else {
+        snprintf(status,
+                 status_size,
+                 "Depart introuvable dans le graphe routier actif");
+    }
+    snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    return false;
+}
+
 bool openride_app_route_generate_loop(const OpenRideRoutingGraph *graph,
                                 bool graph_loaded,
                                 const OpenRideMapSelection *selection,
@@ -364,12 +443,12 @@ bool openride_app_route_generate_loop(const OpenRideRoutingGraph *graph,
 
     OpenRideRoutingSnap local_start = {0};
     local_start.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-    if (!openride_routing_graph_snap_to_segment(graph,
-                                                selection->start.lat,
-                                                selection->start.lon,
-                                                OPENRIDE_MAX_SNAP_DISTANCE_M,
-                                                &local_start)) {
-        snprintf(status, status_size, "depart trop loin du reseau routier");
+    if (!app_route_snap_loop_start(graph,
+                                   selection->start.lat,
+                                   selection->start.lon,
+                                   &local_start,
+                                   status,
+                                   status_size)) {
         return false;
     }
 
@@ -414,6 +493,112 @@ bool openride_app_route_generate_loop(const OpenRideRoutingGraph *graph,
              generated.stats.successful_candidates,
              generated.stats.attempted_candidates);
     openride_loop_result_destroy(&generated);
+    return true;
+}
+
+bool openride_app_route_generate_loop_proposals(
+    const OpenRideRoutingGraph *graph,
+    bool graph_loaded,
+    const OpenRideMapSelection *selection,
+    OpenRideRoutingProfile profile,
+    double target_distance_m,
+    OpenRideLoopDirection direction,
+    uint32_t seed,
+    OpenRideLoopProposalSet *proposals,
+    OpenRideRoutingSnap *start_snap,
+    char *status,
+    size_t status_size)
+{
+    if (!proposals) return false;
+    openride_loop_proposal_set_destroy(proposals);
+    if (start_snap) {
+        memset(start_snap, 0, sizeof(*start_snap));
+        start_snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    }
+    if (!graph_loaded) {
+        snprintf(status, status_size, "graphe routier non installe");
+        return false;
+    }
+    if (!selection || !selection->has_start) {
+        snprintf(status, status_size, "choisis d'abord un point de depart");
+        return false;
+    }
+
+    OpenRideRoutingSnap local_start = {0};
+    local_start.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
+    if (!app_route_snap_loop_start(graph,
+                                   selection->start.lat,
+                                   selection->start.lon,
+                                   &local_start,
+                                   status,
+                                   status_size)) {
+        return false;
+    }
+
+    OpenRideLoopRequest request = openride_loop_request_default();
+    request.start = local_start;
+    request.profile = profile;
+    request.direction = direction;
+    request.target_distance_m = target_distance_m;
+    request.candidate_count = 9U;
+    request.seed = seed;
+
+    char loop_error[256] = {0};
+    if (!openride_loop_generator_generate_proposals(graph,
+                                                    &request,
+                                                    proposals,
+                                                    loop_error,
+                                                    sizeof(loop_error))) {
+        snprintf(status, status_size, "boucle impossible: %.180s",
+                 loop_error[0] ? loop_error : "erreur inconnue");
+        return false;
+    }
+    if (start_snap) *start_snap = local_start;
+    snprintf(status, status_size,
+             "%u propositions de balade autour de %.0f km",
+             proposals->count,
+             target_distance_m / 1000.0);
+    return true;
+}
+
+bool openride_app_route_take_loop_proposal(
+    OpenRideLoopProposalSet *proposals,
+    uint32_t index,
+    OpenRideRoute *route,
+    OpenRideLoopStats *stats,
+    OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS],
+    uint32_t *waypoint_count,
+    char *status,
+    size_t status_size)
+{
+    if (!proposals || index >= proposals->count || !route) return false;
+    OpenRideLoopStats generation = proposals->generation_stats;
+    OpenRideLoopCandidateStats chosen = {0};
+    uint32_t source_index = UINT32_MAX;
+    if (!openride_loop_proposal_set_take(proposals,
+                                         index,
+                                         route,
+                                         waypoints,
+                                         waypoint_count,
+                                         &chosen,
+                                         &source_index)) {
+        return false;
+    }
+    if (stats) {
+        *stats = generation;
+        stats->score = chosen.score;
+        stats->distance_error_ratio = chosen.distance_error_ratio;
+        stats->overlap_ratio = chosen.overlap_ratio;
+        stats->max_waypoint_snap_distance_m = chosen.max_waypoint_snap_distance_m;
+        stats->shape_score = chosen.shape_score;
+        stats->waypoint_quality_score = chosen.waypoint_quality_score;
+        stats->selected_candidate_index = source_index;
+    }
+    snprintf(status, status_size,
+             "balade choisie: %.1f km | score %.0f | repetition %.0f%%",
+             route->distance_m / 1000.0,
+             chosen.score,
+             chosen.overlap_ratio * 100.0);
     return true;
 }
 

@@ -160,6 +160,7 @@ set(OPENRIDE_APP_SOURCES
     src/app_support_runtime.c
     src/app_event_runtime.c
     src/app_async_runtime.c
+    src/app_planner_async_runtime.c
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
@@ -175,6 +176,7 @@ set(OPENRIDE_APP_SOURCES
     src/ui/ui_toolbar.c
     src/ui/ui_main_menu.c
     src/ui/ui_route_panel.c
+    src/ui/ui_loop_proposals_panel.c
     src/ui/ui_settings_panel.c
     src/ui/ui_regions_panel.c
     src/ui/ui_places_panel.c

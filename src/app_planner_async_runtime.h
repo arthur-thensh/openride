@@ -5,6 +5,8 @@
 #include <SDL3/SDL_atomic.h>
 
 #include "app_route_runtime.h"
+#include "openride/platform_paths.h"
+#include "openride/region_manager.h"
 #include "openride/ride_planner.h"
 
 #include <stdbool.h>
@@ -15,6 +17,8 @@ typedef struct OpenRidePlannerAsyncContext {
     OpenRideRidePlannerBusy kind;
     const OpenRideRoutingGraph *graph;
     bool graph_loaded;
+    OpenRidePlatformPaths paths;
+    const OpenRideRegionDefinition *active_region;
     OpenRideMapSelection selection;
     OpenRideRoutingProfile profile;
     double loop_target_distance_m;
@@ -42,6 +46,8 @@ SDL_Thread *openride_app_planner_async_start_route(
 
 SDL_Thread *openride_app_planner_async_start_loops(
     OpenRidePlannerAsyncContext *context,
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
     const OpenRideRoutingGraph *graph,
     bool graph_loaded,
     const OpenRideMapSelection *selection,

@@ -30,6 +30,7 @@ typedef enum OpenRideUIRoutePanelAction {
 typedef struct OpenRideUIRoutePanelState {
     OpenRideRidePlannerMode mode;
     OpenRideRidePlannerBusy busy;
+    const char *feedback;
     bool has_start;
     bool has_destination;
     bool gps_valid;

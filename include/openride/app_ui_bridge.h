@@ -173,6 +173,7 @@ void openride_app_ui_draw_panel(
     double gps_accuracy_m,
     OpenRideRidePlannerMode planner_mode,
     OpenRideRidePlannerBusy planner_busy,
+    const char *planner_feedback,
     double loop_target_distance_m,
     OpenRideLoopDirection loop_direction,
     const OpenRideLoopProposalSet *loop_proposals,

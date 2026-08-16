@@ -4,6 +4,7 @@
 #include "openride/ui_toolbar.h"
 #include "openride/ui_main_menu.h"
 #include "openride/ui_route_panel.h"
+#include "openride/ui_loop_proposals_panel.h"
 #include "openride/ui_settings_panel.h"
 #include "openride/ui_regions_panel.h"
 #include "openride/ui_places_panel.h"
@@ -468,6 +469,12 @@ static void draw_ui_app_panel(SDL_Renderer *renderer,
                                   const OpenRideMapSelection *selection,
                                   bool gps_valid,
                                   double gps_accuracy_m,
+                                  OpenRideRidePlannerMode planner_mode,
+                                  OpenRideRidePlannerBusy planner_busy,
+                                  const char *planner_feedback,
+                                  double loop_target_distance_m,
+                                  OpenRideLoopDirection loop_direction,
+                                  const OpenRideLoopProposalSet *loop_proposals,
                                   const OpenRideRouteDownloadPlan *route_download_plan_state,
                                   int viewport_width)
 {
@@ -503,10 +510,29 @@ static void draw_ui_app_panel(SDL_Renderer *renderer,
             const OpenRideUIRoutePanelState state = {
                 .has_start = selection && selection->has_start,
                 .has_destination = selection && selection->has_destination,
+                .mode = planner_mode,
+                .busy = planner_busy,
+                .feedback = planner_feedback,
                 .gps_valid = gps_valid,
-                .gps_accuracy_m = gps_accuracy_m
+                .gps_accuracy_m = gps_accuracy_m,
+                .profile = profile,
+                .loop_target_distance_m = loop_target_distance_m,
+                .loop_direction = loop_direction
             };
             (void)openride_ui_route_panel_draw(&ui, &state);
+            openride_ui_end(&ui);
+        }
+        return;
+    }
+
+
+    if (panel == OPENRIDE_APP_PANEL_LOOP_PROPOSALS) {
+        OpenRideUIContext ui;
+        openride_ui_init(&ui);
+        if (openride_ui_begin(&ui, renderer, width, height)) {
+            (void)openride_ui_loop_proposals_draw(&ui,
+                                                  loop_proposals,
+                                                  loop_target_distance_m);
             openride_ui_end(&ui);
         }
         return;
@@ -666,6 +692,12 @@ void openride_app_ui_draw_panel(SDL_Renderer *renderer,
                            const OpenRideMapSelection *selection,
                            bool gps_valid,
                            double gps_accuracy_m,
+                           OpenRideRidePlannerMode planner_mode,
+                           OpenRideRidePlannerBusy planner_busy,
+                           const char *planner_feedback,
+                           double loop_target_distance_m,
+                           OpenRideLoopDirection loop_direction,
+                           const OpenRideLoopProposalSet *loop_proposals,
                            const OpenRideRouteDownloadPlan *route_download_plan_state,
                            int viewport_width)
 {
@@ -696,6 +728,12 @@ void openride_app_ui_draw_panel(SDL_Renderer *renderer,
                       selection,
                       gps_valid,
                       gps_accuracy_m,
+                      planner_mode,
+                      planner_busy,
+                      planner_feedback,
+                      loop_target_distance_m,
+                      loop_direction,
+                      loop_proposals,
                       route_download_plan_state,
                       viewport_width);
 }

@@ -61,6 +61,7 @@ typedef struct OpenRideUISVGDocument {
 } OpenRideUISVGDocument;
 
 static OpenRideUISVGDocument icon_cache[OPENRIDE_UI_ICON_COUNT];
+static float icon_rotation_radians = 0.0f;
 
 /*
  * Canonical SVG documents. Geometry stays deliberately simple and neutral:
@@ -144,6 +145,10 @@ static const char *icon_sources[OPENRIDE_UI_ICON_COUNT] = {
         "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\">"
         "<circle cx=\"12\" cy=\"9\" r=\"3\"/>"
         "<polyline points=\"12,21 6,13 5,9 6,5 9,3 12,2 15,3 18,5 19,9 18,13 12,21\"/>"
+        "</svg>",
+    [OPENRIDE_UI_ICON_LOADING] =
+        "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\">"
+        "<polyline points=\"12,3 15.5,3.8 18.2,6.2 20,9.5 20.5,12 19.8,15.5 17.5,18.3 14.2,20 10.5,20.5 7.2,19 4.8,16.5\"/>"
         "</svg>"
 };
 
@@ -340,6 +345,16 @@ static OpenRideUISVGPoint svg_transform_point(const OpenRideUISVGDocument *docum
         origin_x + x * scale,
         origin_y + y * scale
     };
+    if (fabsf(icon_rotation_radians) > 0.0001f) {
+        const float center_x = target->x + target->w * 0.5f;
+        const float center_y = target->y + target->h * 0.5f;
+        const float dx = point.x - center_x;
+        const float dy = point.y - center_y;
+        const float c = cosf(icon_rotation_radians);
+        const float s = sinf(icon_rotation_radians);
+        point.x = center_x + dx * c - dy * s;
+        point.y = center_y + dx * s + dy * c;
+    }
     return point;
 }
 
@@ -460,3 +475,18 @@ bool openride_ui_icon_draw(OpenRideUIContext *ui,
     }
     return true;
 }
+
+bool openride_ui_icon_draw_rotated(OpenRideUIContext *ui,
+                                   OpenRideUIIcon icon,
+                                   OpenRideUIRect rect,
+                                   OpenRideUIColor color,
+                                   float stroke_width,
+                                   float angle_degrees)
+{
+    const float previous = icon_rotation_radians;
+    icon_rotation_radians = angle_degrees * 0.01745329251994329577f;
+    const bool ok = openride_ui_icon_draw(ui, icon, rect, color, stroke_width);
+    icon_rotation_radians = previous;
+    return ok;
+}
+

@@ -958,6 +958,12 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
 
     #ifdef __ANDROID__
                         if (!(*context->place_search_active) && (*context->app_panel) != OPENRIDE_APP_PANEL_NONE) {
+                            if ((*context->planner_busy) != OPENRIDE_RIDE_PLANNER_IDLE
+                                && ((*context->app_panel) == OPENRIDE_APP_PANEL_ROUTE
+                                    || (*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS)) {
+                                openride_touch_input_cancel(&(*context->touch_input));
+                                break;
+                            }
                             const uint32_t mobile_place_count =
                                 (*context->app_panel) == OPENRIDE_APP_PANEL_FAVORITES ? (*context->favorite_count)
                                 : (*context->app_panel) == OPENRIDE_APP_PANEL_HISTORY ? (*context->history_count)
@@ -971,10 +977,15 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                                                 height)
                                 : (*context->app_panel) == OPENRIDE_APP_PANEL_ROUTE
                                     ? openride_app_ui_route_panel_hit_test(context->renderer,
+                                                                  (int)(*context->planner_mode),
                                                                   x,
                                                                   y,
                                                                   width,
                                                                   height)
+                                : (*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS
+                                    ? openride_app_ui_loop_proposals_hit_test(context->renderer,
+                                                                      (*context->loop_proposals).count,
+                                                                      x, y, width, height)
                                 : (*context->app_panel) == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
                                     ? openride_app_ui_route_downloads_panel_hit_test(context->renderer,
                                                                             x,
@@ -1011,7 +1022,8 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                 (*context->app_panel_selected) = 0U;
                             } else if (mobile_hit.action == OPENRIDE_APP_UI_BACK) {
                                 (*context->app_panel) =
-                                    (*context->app_panel) == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
+                                    ((*context->app_panel) == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
+                                     || (*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS)
                                         ? OPENRIDE_APP_PANEL_ROUTE
                                         : OPENRIDE_APP_PANEL_MAIN;
                                 (*context->app_panel_selected) = 0U;
@@ -1027,6 +1039,47 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                                   &(*context->place_search_selected),
                                                   context->route_status,
                                                   context->route_status_size);
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_ROUTE_MODE_ROUTE) {
+                                (*context->planner_mode) = OPENRIDE_RIDE_PLANNER_ROUTE;
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_ROUTE_MODE_LOOP) {
+                                (*context->planner_mode) = OPENRIDE_RIDE_PLANNER_LOOP;
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_ROUTE_PROFILE_FASTEST
+                                       || mobile_hit.action == OPENRIDE_APP_UI_ROUTE_PROFILE_TOURING
+                                       || mobile_hit.action == OPENRIDE_APP_UI_ROUTE_PROFILE_TRAIL) {
+                                (*context->routing_profile) =
+                                    mobile_hit.action == OPENRIDE_APP_UI_ROUTE_PROFILE_FASTEST
+                                        ? OPENRIDE_ROUTING_PROFILE_FASTEST
+                                        : mobile_hit.action == OPENRIDE_APP_UI_ROUTE_PROFILE_TRAIL
+                                            ? OPENRIDE_ROUTING_PROFILE_TRAIL
+                                            : OPENRIDE_ROUTING_PROFILE_TOURING;
+                                openride_loop_proposal_set_destroy(context->loop_proposals);
+                                if (context->app_storage) {
+                                    openride_app_storage_set_int(context->app_storage,
+                                                                 "routing_profile",
+                                                                 (int)(*context->routing_profile),
+                                                                 context->error,
+                                                                 context->error_size);
+                                }
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_ROUTE_LOOP_DISTANCE_DOWN
+                                       || mobile_hit.action == OPENRIDE_APP_UI_ROUTE_LOOP_DISTANCE_UP) {
+                                const double delta = mobile_hit.action
+                                        == OPENRIDE_APP_UI_ROUTE_LOOP_DISTANCE_UP
+                                    ? OPENRIDE_LOOP_DISTANCE_STEP_M
+                                    : -OPENRIDE_LOOP_DISTANCE_STEP_M;
+                                (*context->loop_target_distance_m) = openride_app_support_clampd(
+                                    (*context->loop_target_distance_m) + delta,
+                                    OPENRIDE_LOOP_DISTANCE_MIN_M,
+                                    OPENRIDE_LOOP_DISTANCE_MAX_M);
+                                openride_loop_proposal_set_destroy(context->loop_proposals);
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_ROUTE_LOOP_DIRECTION) {
+                                (*context->loop_direction) =
+                                    openride_loop_direction_next((*context->loop_direction));
+                                openride_loop_proposal_set_destroy(context->loop_proposals);
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_ROUTE_GPS_START) {
                                 (*context->route_map_pick_marker) = OPENRIDE_MARKER_NONE;
@@ -1111,13 +1164,133 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                          "Touchez la carte pour choisir l'arrivee");
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_ROUTE_CALCULATE) {
-                                if (openride_map_selection_complete(&(*context->selection))) {
-                                    (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
-                                    (*context->route_dirty) = true;
+                                if ((*context->planner_busy) != OPENRIDE_RIDE_PLANNER_IDLE
+                                    || (*context->planner_async_thread)) {
+                                    /* A planner job is already running. */
+                                } else if ((*context->planner_mode) == OPENRIDE_RIDE_PLANNER_LOOP) {
+                                    if (!(*context->selection).has_start) {
+                                        snprintf(context->route_status,
+                                                 context->route_status_size,
+                                                 "choisis un depart pour la balade");
+                                    } else {
+                                        if ((*context->selection).has_destination) {
+                                            openride_map_selection_remove(&(*context->selection),
+                                                                          OPENRIDE_MARKER_DESTINATION);
+                                        }
+                                        (*context->destination_snap).segment_id =
+                                            OPENRIDE_ROUTING_SEGMENT_NONE;
+                                        (*context->planner_async_thread) =
+                                            openride_app_planner_async_start_loops(
+                                                context->planner_async_context,
+                                                &(*context->platform_paths),
+                                                (*context->active_region),
+                                                &(*context->routing_graph),
+                                                (*context->graph_loaded),
+                                                &(*context->selection),
+                                                (*context->routing_profile),
+                                                (*context->loop_target_distance_m),
+                                                (*context->loop_direction),
+                                                (*context->loop_seed)++);
+                                        if ((*context->planner_async_thread)) {
+                                            (*context->planner_busy) =
+                                                OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS;
+                                            (*context->route_dirty) = false;
+                                            snprintf(context->route_status,
+                                                     context->route_status_size,
+                                                     "Recherche de balades en cours...");
+                                        } else {
+                                            snprintf(context->route_status,
+                                                     context->route_status_size,
+                                                     "Impossible de lancer la recherche de balades");
+                                        }
+                                    }
+                                } else if (openride_map_selection_complete(&(*context->selection))) {
+                                    openride_loop_proposal_set_destroy(context->loop_proposals);
+                                    (*context->loop_active) = false;
+                                    (*context->route_dirty) = false;
+                                    (*context->planner_async_thread) =
+                                        openride_app_planner_async_start_route(
+                                            context->planner_async_context,
+                                            &(*context->routing_graph),
+                                            (*context->graph_loaded),
+                                            &(*context->selection),
+                                            (*context->routing_profile));
+                                    if ((*context->planner_async_thread)) {
+                                        (*context->planner_busy) =
+                                            OPENRIDE_RIDE_PLANNER_CALCULATING_ROUTE;
+                                        snprintf(context->route_status,
+                                                 context->route_status_size,
+                                                 "Calcul de l'itineraire en cours...");
+                                    } else {
+                                        snprintf(context->route_status,
+                                                 context->route_status_size,
+                                                 "Impossible de lancer le calcul de l'itineraire");
+                                    }
                                 } else {
                                     snprintf(context->route_status,
                                              context->route_status_size,
                                              "choisis un depart et une arrivee");
+                                }
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_LOOP_PROPOSALS_REGENERATE) {
+                                if ((*context->planner_busy) == OPENRIDE_RIDE_PLANNER_IDLE
+                                    && !(*context->planner_async_thread)) {
+                                    (*context->planner_async_thread) =
+                                        openride_app_planner_async_start_loops(
+                                            context->planner_async_context,
+                                            &(*context->platform_paths),
+                                            (*context->active_region),
+                                            &(*context->routing_graph),
+                                            (*context->graph_loaded),
+                                            &(*context->selection),
+                                            (*context->routing_profile),
+                                            (*context->loop_target_distance_m),
+                                            (*context->loop_direction),
+                                            (*context->loop_seed)++);
+                                    if ((*context->planner_async_thread)) {
+                                        (*context->planner_busy) =
+                                            OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS;
+                                        (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
+                                        snprintf(context->route_status,
+                                                 context->route_status_size,
+                                                 "Recherche de nouvelles balades...");
+                                    } else {
+                                        snprintf(context->route_status,
+                                                 context->route_status_size,
+                                                 "Impossible de relancer la recherche de balades");
+                                    }
+                                }
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_LOOP_PROPOSAL_SELECT
+                                       && mobile_hit.index >= 0) {
+                                openride_app_route_clear_navigation_session(
+                                    &(*context->navigation),
+                                    &(*context->gps_simulator),
+                                    &(*context->navigation_state),
+                                    &(*context->gps_sample),
+                                    &(*context->gps_sample_valid));
+                                openride_navigation_session_reset(&(*context->navigation_session));
+                                openride_location_filter_reset(&(*context->location_filter));
+                                (*context->route_valid) = openride_app_route_take_loop_proposal(
+                                    context->loop_proposals,
+                                    (uint32_t)mobile_hit.index,
+                                    &(*context->route),
+                                    &(*context->loop_stats),
+                                    context->loop_waypoints,
+                                    &(*context->loop_waypoint_count),
+                                    context->route_status,
+                                    context->route_status_size);
+                                (*context->loop_active) = (*context->route_valid);
+                                if ((*context->route_valid)) {
+                                    openride_app_route_prepare_navigation_session(
+                                        &(*context->navigation),
+                                        &(*context->gps_simulator),
+                                        &(*context->navigation_instructions),
+                                        &(*context->routing_graph),
+                                        &(*context->route),
+                                        context->route_status,
+                                        context->route_status_size);
+                                    (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
                                 }
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_ROUTE_DOWNLOAD_REQUIRED) {
@@ -2180,57 +2353,20 @@ void openride_app_events_dispatch_pending(OpenRideAppEventContext *context)
                             }
                         }
                     } else {
+                        (*context->planner_mode) = OPENRIDE_RIDE_PLANNER_ROUTE;
                         (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
                         (*context->app_panel_selected) = 0U;
                     }
     #else
+                    (*context->planner_mode) = OPENRIDE_RIDE_PLANNER_ROUTE;
                     (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
                     (*context->app_panel_selected) = 0U;
     #endif
                 } else if (action == OPENRIDE_TOOLBAR_LOOP) {
-                    if (!(*context->selection).has_start) {
-                        snprintf(context->route_status, context->route_status_size, "choisis d'abord le depart de la boucle");
-                    } else {
-                        if ((*context->selection).has_destination) {
-                            openride_map_selection_remove(&(*context->selection), OPENRIDE_MARKER_DESTINATION);
-                        }
-                        (*context->destination_snap).segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-                        (*context->route_dirty) = false;
-                        openride_app_route_clear_navigation_session(&(*context->navigation),
-                                                 &(*context->gps_simulator),
-                                                 &(*context->navigation_state),
-                                                 &(*context->gps_sample),
-                                                 &(*context->gps_sample_valid));
-                        (*context->simulator_deviation) = false;
-                        (*context->gpx_navigation_active) = false;
-                        openride_navigation_session_reset(&(*context->navigation_session));
-                        openride_location_filter_reset(&(*context->location_filter));
-                        memset(&(*context->filtered_location), 0, sizeof((*context->filtered_location)));
-                        (*context->route_valid) = openride_app_route_generate_loop(&(*context->routing_graph),
-                                                          (*context->graph_loaded),
-                                                          &(*context->selection),
-                                                          (*context->routing_profile),
-                                                          (*context->loop_target_distance_m),
-                                                          (*context->loop_direction),
-                                                          (*context->loop_seed)++,
-                                                          &(*context->route),
-                                                          &(*context->loop_stats),
-                                                          context->loop_waypoints,
-                                                          &(*context->loop_waypoint_count),
-                                                          &(*context->start_snap),
-                                                          context->route_status,
-                                                          context->route_status_size);
-                        (*context->loop_active) = (*context->route_valid);
-                        if ((*context->route_valid)) {
-                            openride_app_route_prepare_navigation_session(&(*context->navigation),
-                                                       &(*context->gps_simulator),
-                                                       &(*context->navigation_instructions),
-                                                       &(*context->routing_graph),
-                                                       &(*context->route),
-                                                       context->route_status,
-                                                       context->route_status_size);
-                        }
-                    }
+                    (*context->planner_mode) = OPENRIDE_RIDE_PLANNER_LOOP;
+                    (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
+                    (*context->app_panel_selected) = 0U;
+                    (*context->route_map_pick_marker) = OPENRIDE_MARKER_NONE;
                 } else if (action == OPENRIDE_TOOLBAR_GPS) {
     #ifdef __ANDROID__
                     if ((*context->simulated_gps_active)) {

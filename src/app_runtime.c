@@ -328,6 +328,11 @@ int openride_app_run(int argc, char **argv)
     uint32_t loop_waypoint_count = 0U;
     uint32_t loop_seed = 1U;
     bool loop_active = false;
+    OpenRideRidePlannerMode planner_mode = OPENRIDE_RIDE_PLANNER_ROUTE;
+    OpenRideRidePlannerBusy planner_busy = OPENRIDE_RIDE_PLANNER_IDLE;
+    OpenRidePlannerAsyncContext planner_async_context = {0};
+    SDL_Thread *planner_async_thread = NULL;
+    OpenRideLoopProposalSet loop_proposals = {0};
     bool route_valid = false;
     bool route_dirty = false;
     OpenRideRoutingSnap start_snap = {0};
@@ -614,6 +619,11 @@ int openride_app_run(int argc, char **argv)
         .gpx_import_path = gpx_import_path,
         .gpx_route_export_path = gpx_route_export_path,
         .gpx_recording_export_path = gpx_recording_export_path,
+        .planner_mode = &planner_mode,
+        .planner_busy = &planner_busy,
+        .planner_async_context = &planner_async_context,
+        .planner_async_thread = &planner_async_thread,
+        .loop_proposals = &loop_proposals,
         .loop_target_distance_m = &loop_target_distance_m,
         .loop_direction = &loop_direction,
         .loop_stats = &loop_stats,
@@ -1310,6 +1320,13 @@ int openride_app_run(int argc, char **argv)
 #else
                        gps_sample_valid ? 5.0 : 0.0,
 #endif
+                       planner_mode,
+                       planner_busy,
+                       planner_async_context.status[0]
+                           ? planner_async_context.status : NULL,
+                       loop_target_distance_m,
+                       loop_direction,
+                       &loop_proposals,
                        &route_download_plan,
                        width);
         const char *place_search_title =
@@ -1480,6 +1497,13 @@ int openride_app_run(int argc, char **argv)
     openride_android_voice_guidance_shutdown();
 #endif
 
+    if (planner_async_thread) {
+        SDL_WaitThread(planner_async_thread, NULL);
+        planner_async_thread = NULL;
+    }
+    openride_app_planner_async_reset(&planner_async_context);
+    planner_busy = OPENRIDE_RIDE_PLANNER_IDLE;
+
     if (routing_world_thread) {
         SDL_WaitThread(routing_world_thread, NULL);
         routing_world_thread = NULL;
@@ -1506,6 +1530,7 @@ int openride_app_run(int argc, char **argv)
     openride_gpx_document_destroy(&gpx_overlay);
     openride_gps_simulator_destroy(&gps_simulator);
     openride_navigation_engine_destroy(&navigation);
+    openride_loop_proposal_set_destroy(&loop_proposals);
     openride_route_destroy(&route);
     openride_routing_graph_destroy(&routing_graph);
     SDL_DestroyRenderer(renderer);

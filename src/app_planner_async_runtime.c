@@ -1,5 +1,9 @@
 #include "app_planner_async_runtime.h"
 
+#include "openride/france_regions_lite.h"
+#include "openride/region_manager.h"
+
+#include <stdio.h>
 #include <string.h>
 
 static bool selection_matches(const OpenRideMapSelection *a,
@@ -32,6 +36,105 @@ void openride_app_planner_async_reset(OpenRidePlannerAsyncContext *context)
     context->destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
 }
 
+static bool same_region(const OpenRideRegionDefinition *a,
+                        const OpenRideRegionDefinition *b)
+{
+    return a && b && a->id && b->id && strcmp(a->id, b->id) == 0;
+}
+
+static const OpenRideRoutingGraph *resolve_loop_graph(
+    OpenRidePlannerAsyncContext *context,
+    OpenRideRoutingGraph *owned_graph,
+    bool *owned_loaded)
+{
+    if (owned_loaded) *owned_loaded = false;
+    if (!context || !owned_graph || !owned_loaded) return NULL;
+
+    const char *region_id = openride_france_regions_lite_region_id(
+        context->selection.start.lat,
+        context->selection.start.lon);
+    if (!region_id || !region_id[0]) {
+        snprintf(context->status,
+                 sizeof(context->status),
+                 "Aucune region OpenRide ne couvre ce point de depart");
+        SDL_Log("RidePlanner: no region coverage for loop start lat=%.7f lon=%.7f",
+                context->selection.start.lat,
+                context->selection.start.lon);
+        return NULL;
+    }
+
+    const OpenRideRegionDefinition *start_region = openride_region_find(region_id);
+    if (!start_region) {
+        snprintf(context->status,
+                 sizeof(context->status),
+                 "Region de depart inconnue: %.80s",
+                 region_id);
+        SDL_Log("RidePlanner: unknown loop start region id=%s", region_id);
+        return NULL;
+    }
+
+    if (same_region(start_region, context->active_region)
+        && context->graph_loaded
+        && context->graph) {
+        SDL_Log("RidePlanner: loop region=%s uses active routing graph",
+                start_region->id);
+        return context->graph;
+    }
+
+    OpenRideRegionStatus status;
+    char region_error[256] = {0};
+    if (!openride_region_get_status(&context->paths,
+                                    start_region,
+                                    &status,
+                                    region_error,
+                                    sizeof(region_error))) {
+        snprintf(context->status,
+                 sizeof(context->status),
+                 "Impossible de verifier la region %.80s",
+                 start_region->name ? start_region->name : start_region->id);
+        SDL_Log("RidePlanner: region status failed id=%s error=%s",
+                start_region->id,
+                region_error[0] ? region_error : "unknown error");
+        return NULL;
+    }
+
+    if (!status.routing_installed || !status.routing_path[0]) {
+        snprintf(context->status,
+                 sizeof(context->status),
+                 "Installe la region %.90s pour generer cette balade",
+                 start_region->name ? start_region->name : start_region->id);
+        SDL_Log("RidePlanner: routing graph not installed for loop region=%s",
+                start_region->id);
+        return NULL;
+    }
+
+    char graph_error[256] = {0};
+    if (!openride_routing_graph_load(owned_graph,
+                                     status.routing_path,
+                                     graph_error,
+                                     sizeof(graph_error))) {
+        snprintf(context->status,
+                 sizeof(context->status),
+                 "Impossible de charger le routage de %.80s",
+                 start_region->name ? start_region->name : start_region->id);
+        SDL_Log("RidePlanner: failed loading loop graph region=%s path=%s error=%s",
+                start_region->id,
+                status.routing_path,
+                graph_error[0] ? graph_error : "unknown error");
+        return NULL;
+    }
+
+    *owned_loaded = true;
+    SDL_Log("RidePlanner: loop start region=%s active=%s -> temporary graph loaded "
+            "nodes=%u segments=%u",
+            start_region->id,
+            context->active_region && context->active_region->id
+                ? context->active_region->id : "none",
+            owned_graph->node_count,
+            owned_graph->segment_index.segment_count);
+    return owned_graph;
+}
+
 static int SDLCALL planner_thread_main(void *userdata)
 {
     OpenRidePlannerAsyncContext *context = userdata;
@@ -49,18 +152,48 @@ static int SDLCALL planner_thread_main(void *userdata)
                                             context->status,
                                             sizeof(context->status));
     } else if (context->kind == OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS) {
-        ok = openride_app_route_generate_loop_proposals(
-            context->graph,
-            context->graph_loaded,
-            &context->selection,
-            context->profile,
-            context->loop_target_distance_m,
-            context->loop_direction,
-            context->loop_seed,
-            &context->proposals,
-            &context->start_snap,
-            context->status,
-            sizeof(context->status));
+        OpenRideRoutingGraph owned_graph = {0};
+        bool owned_loaded = false;
+        const OpenRideRoutingGraph *loop_graph =
+            resolve_loop_graph(context, &owned_graph, &owned_loaded);
+
+        if (loop_graph) {
+            /*
+             * A single random seed can occasionally fail to produce a routable
+             * shape. Retry only that transient case; validation/snap errors
+             * remain immediate and visible.
+             */
+            for (uint32_t attempt = 0U; attempt < 3U; ++attempt) {
+                context->status[0] = '\0';
+                ok = openride_app_route_generate_loop_proposals(
+                    loop_graph,
+                    true,
+                    &context->selection,
+                    context->profile,
+                    context->loop_target_distance_m,
+                    context->loop_direction,
+                    context->loop_seed + attempt * 0x9e3779b9U,
+                    &context->proposals,
+                    &context->start_snap,
+                    context->status,
+                    sizeof(context->status));
+                if (ok) break;
+                if (!strstr(context->status, "no loop candidate")) break;
+            }
+            if (!ok && strstr(context->status, "no loop candidate")) {
+                snprintf(context->status,
+                         sizeof(context->status),
+                         "Aucune balade trouvee avec ces reglages. Essaie 50 km ou le profil Balade.");
+            }
+        }
+
+        if (owned_loaded) {
+            openride_routing_graph_destroy(&owned_graph);
+        }
+        if (!ok) {
+            SDL_Log("RidePlanner: loop generation failed: %s",
+                    context->status[0] ? context->status : "unknown error");
+        }
     }
 
     SDL_SetAtomicInt(&context->success, ok ? 1 : 0);
@@ -119,6 +252,8 @@ SDL_Thread *openride_app_planner_async_start_route(
 
 SDL_Thread *openride_app_planner_async_start_loops(
     OpenRidePlannerAsyncContext *context,
+    const OpenRidePlatformPaths *paths,
+    const OpenRideRegionDefinition *active_region,
     const OpenRideRoutingGraph *graph,
     bool graph_loaded,
     const OpenRideMapSelection *selection,
@@ -127,7 +262,7 @@ SDL_Thread *openride_app_planner_async_start_loops(
     OpenRideLoopDirection direction,
     uint32_t seed)
 {
-    if (!selection || !selection->has_start) return NULL;
+    if (!paths || !selection || !selection->has_start) return NULL;
     if (!prepare_job(context,
                      OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS,
                      graph,
@@ -136,6 +271,8 @@ SDL_Thread *openride_app_planner_async_start_loops(
                      profile)) {
         return NULL;
     }
+    context->paths = *paths;
+    context->active_region = active_region;
     context->loop_target_distance_m = target_distance_m;
     context->loop_direction = direction;
     context->loop_seed = seed;

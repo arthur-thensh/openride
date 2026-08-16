@@ -553,6 +553,15 @@ void openride_loop_result_destroy(OpenRideLoopResult *result)
     memset(result, 0, sizeof(*result));
 }
 
+void openride_loop_proposal_set_destroy(OpenRideLoopProposalSet *proposals)
+{
+    if (!proposals) return;
+    for (uint32_t i = 0U; i < OPENRIDE_LOOP_MAX_PROPOSALS; ++i) {
+        openride_route_destroy(&proposals->items[i].route);
+    }
+    memset(proposals, 0, sizeof(*proposals));
+}
+
 static bool validate_request(const OpenRideRoutingGraph *graph,
                              const OpenRideLoopRequest *request,
                              char *error,
@@ -605,73 +614,192 @@ static bool validate_request(const OpenRideRoutingGraph *graph,
     return true;
 }
 
+static void proposal_fill_stats(OpenRideLoopCandidateStats *stats,
+                                const OpenRideLoopCandidate *candidate)
+{
+    stats->successful = true;
+    stats->distance_m = candidate->route.distance_m;
+    stats->score = candidate->score;
+    stats->distance_error_ratio = candidate->distance_error_ratio;
+    stats->overlap_ratio = candidate->overlap_ratio;
+    stats->max_waypoint_snap_distance_m = candidate->max_waypoint_snap_distance_m;
+    stats->shape_score = candidate->shape_score;
+    stats->waypoint_quality_score = candidate->waypoint_quality_score;
+}
+
+static void proposal_move_candidate(OpenRideLoopProposal *proposal,
+                                    OpenRideLoopCandidate *candidate,
+                                    uint32_t source_index)
+{
+    memset(proposal, 0, sizeof(*proposal));
+    proposal_fill_stats(&proposal->stats, candidate);
+    proposal->route = candidate->route;
+    memset(&candidate->route, 0, sizeof(candidate->route));
+    memcpy(proposal->waypoints, candidate->waypoints, sizeof(proposal->waypoints));
+    proposal->waypoint_count = OPENRIDE_LOOP_MAX_WAYPOINTS;
+    proposal->source_candidate_index = source_index;
+}
+
+static void proposal_insert_ranked(OpenRideLoopProposalSet *proposals,
+                                   OpenRideLoopCandidate *candidate,
+                                   uint32_t source_index)
+{
+    uint32_t position = proposals->count;
+    if (position > OPENRIDE_LOOP_MAX_PROPOSALS) position = OPENRIDE_LOOP_MAX_PROPOSALS;
+    for (uint32_t i = 0U; i < proposals->count; ++i) {
+        if (candidate->score > proposals->items[i].stats.score) {
+            position = i;
+            break;
+        }
+    }
+
+    if (proposals->count >= OPENRIDE_LOOP_MAX_PROPOSALS
+        && position >= OPENRIDE_LOOP_MAX_PROPOSALS) {
+        return;
+    }
+
+    uint32_t new_count = proposals->count;
+    if (new_count < OPENRIDE_LOOP_MAX_PROPOSALS) {
+        ++new_count;
+    } else {
+        openride_route_destroy(&proposals->items[OPENRIDE_LOOP_MAX_PROPOSALS - 1U].route);
+        memset(&proposals->items[OPENRIDE_LOOP_MAX_PROPOSALS - 1U],
+               0,
+               sizeof(proposals->items[0]));
+    }
+
+    for (uint32_t i = new_count - 1U; i > position; --i) {
+        proposals->items[i] = proposals->items[i - 1U];
+        memset(&proposals->items[i - 1U], 0, sizeof(proposals->items[i - 1U]));
+    }
+    proposal_move_candidate(&proposals->items[position], candidate, source_index);
+    proposals->count = new_count;
+}
+
+bool openride_loop_generator_generate_proposals(
+    const OpenRideRoutingGraph *graph,
+    const OpenRideLoopRequest *request,
+    OpenRideLoopProposalSet *proposals,
+    char *error,
+    size_t error_size)
+{
+    if (!proposals || !validate_request(graph, request, error, error_size)) return false;
+
+    OpenRideLoopProposalSet generated;
+    memset(&generated, 0, sizeof(generated));
+    generated.generation_stats.attempted_candidates = request->candidate_count;
+    generated.generation_stats.selected_candidate_index = UINT32_MAX;
+    generated.generation_stats.candidate_stat_count = request->candidate_count;
+
+    uint32_t random_state = request->seed == 0U ? 0x4f70656eU : request->seed;
+    for (uint32_t i = 0U; i < request->candidate_count; ++i) {
+        OpenRideLoopCandidate candidate;
+        memset(&candidate, 0, sizeof(candidate));
+        OpenRideLoopCandidateStats *candidate_stats =
+            &generated.generation_stats.candidates[i];
+        if (!generate_candidate(graph, request, i, &random_state, &candidate)) {
+            candidate_stats->successful = false;
+            continue;
+        }
+        ++generated.generation_stats.successful_candidates;
+        proposal_fill_stats(candidate_stats, &candidate);
+        proposal_insert_ranked(&generated, &candidate, i);
+        openride_route_destroy(&candidate.route);
+    }
+
+    if (generated.count == 0U) {
+        openride_loop_proposal_set_destroy(&generated);
+        set_error(error, error_size, "no loop candidate could be routed");
+        return false;
+    }
+
+    const OpenRideLoopProposal *best = &generated.items[0];
+    generated.generation_stats.score = best->stats.score;
+    generated.generation_stats.distance_error_ratio = best->stats.distance_error_ratio;
+    generated.generation_stats.overlap_ratio = best->stats.overlap_ratio;
+    generated.generation_stats.max_waypoint_snap_distance_m =
+        best->stats.max_waypoint_snap_distance_m;
+    generated.generation_stats.shape_score = best->stats.shape_score;
+    generated.generation_stats.waypoint_quality_score = best->stats.waypoint_quality_score;
+    generated.generation_stats.selected_candidate_index = best->source_candidate_index;
+
+    openride_loop_proposal_set_destroy(proposals);
+    *proposals = generated;
+    set_error(error, error_size, "");
+    return true;
+}
+
+bool openride_loop_proposal_set_take(OpenRideLoopProposalSet *proposals,
+                                     uint32_t index,
+                                     OpenRideRoute *route,
+                                     OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS],
+                                     uint32_t *waypoint_count,
+                                     OpenRideLoopCandidateStats *stats,
+                                     uint32_t *source_candidate_index)
+{
+    if (!proposals || !route || index >= proposals->count) return false;
+    OpenRideLoopProposal *chosen = &proposals->items[index];
+    openride_route_destroy(route);
+    *route = chosen->route;
+    memset(&chosen->route, 0, sizeof(chosen->route));
+    if (waypoints) memcpy(waypoints, chosen->waypoints, sizeof(chosen->waypoints));
+    if (waypoint_count) *waypoint_count = chosen->waypoint_count;
+    if (stats) *stats = chosen->stats;
+    if (source_candidate_index) *source_candidate_index = chosen->source_candidate_index;
+    openride_loop_proposal_set_destroy(proposals);
+    return true;
+}
+
 bool openride_loop_generator_generate(const OpenRideRoutingGraph *graph,
                                       const OpenRideLoopRequest *request,
                                       OpenRideLoopResult *result,
                                       char *error,
                                       size_t error_size)
 {
-    if (!result || !validate_request(graph, request, error, error_size)) return false;
-
-    OpenRideLoopResult generated;
-    memset(&generated, 0, sizeof(generated));
-    generated.stats.attempted_candidates = request->candidate_count;
-    generated.stats.selected_candidate_index = UINT32_MAX;
-
-    bool have_best = false;
-    uint32_t random_state = request->seed == 0U ? 0x4f70656eU : request->seed;
-
-    generated.stats.candidate_stat_count = request->candidate_count;
-    for (uint32_t i = 0U; i < request->candidate_count; ++i) {
-        OpenRideLoopCandidate candidate;
-        OpenRideLoopCandidateStats *candidate_stats = &generated.stats.candidates[i];
-        if (!generate_candidate(graph, request, i, &random_state, &candidate)) {
-            candidate_stats->successful = false;
-            continue;
-        }
-        ++generated.stats.successful_candidates;
-        candidate_stats->successful = true;
-        candidate_stats->distance_m = candidate.route.distance_m;
-        candidate_stats->score = candidate.score;
-        candidate_stats->distance_error_ratio = candidate.distance_error_ratio;
-        candidate_stats->overlap_ratio = candidate.overlap_ratio;
-        candidate_stats->max_waypoint_snap_distance_m =
-            candidate.max_waypoint_snap_distance_m;
-        candidate_stats->shape_score = candidate.shape_score;
-        candidate_stats->waypoint_quality_score = candidate.waypoint_quality_score;
-
-        if (!have_best || candidate.score > generated.stats.score) {
-            openride_route_destroy(&generated.route);
-            generated.route = candidate.route;
-            memset(&candidate.route, 0, sizeof(candidate.route));
-            memcpy(generated.waypoints,
-                   candidate.waypoints,
-                   sizeof(generated.waypoints));
-            generated.waypoint_count = OPENRIDE_LOOP_MAX_WAYPOINTS;
-            generated.stats.score = candidate.score;
-            generated.stats.distance_error_ratio = candidate.distance_error_ratio;
-            generated.stats.overlap_ratio = candidate.overlap_ratio;
-            generated.stats.max_waypoint_snap_distance_m =
-                candidate.max_waypoint_snap_distance_m;
-            generated.stats.shape_score = candidate.shape_score;
-            generated.stats.waypoint_quality_score = candidate.waypoint_quality_score;
-            generated.stats.selected_candidate_index = i;
-            have_best = true;
-        }
-        openride_route_destroy(&candidate.route);
+    if (!result) return false;
+    OpenRideLoopProposalSet proposals = {0};
+    if (!openride_loop_generator_generate_proposals(graph,
+                                                    request,
+                                                    &proposals,
+                                                    error,
+                                                    error_size)) {
+        return false;
     }
 
-    if (!have_best) {
-        openride_loop_result_destroy(&generated);
-        set_error(error, error_size, "no loop candidate could be routed");
+    OpenRideLoopStats generation_stats = proposals.generation_stats;
+    OpenRideLoopCandidateStats selected_stats = {0};
+    uint32_t source_index = UINT32_MAX;
+    OpenRideRoute route = {0};
+    OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS] = {{0}};
+    uint32_t waypoint_count = 0U;
+    if (!openride_loop_proposal_set_take(&proposals,
+                                         0U,
+                                         &route,
+                                         waypoints,
+                                         &waypoint_count,
+                                         &selected_stats,
+                                         &source_index)) {
+        openride_loop_proposal_set_destroy(&proposals);
+        set_error(error, error_size, "unable to select generated loop");
         return false;
     }
 
     openride_loop_result_destroy(result);
-    *result = generated;
+    result->route = route;
+    memcpy(result->waypoints, waypoints, sizeof(result->waypoints));
+    result->waypoint_count = waypoint_count;
+    result->stats = generation_stats;
+    result->stats.score = selected_stats.score;
+    result->stats.distance_error_ratio = selected_stats.distance_error_ratio;
+    result->stats.overlap_ratio = selected_stats.overlap_ratio;
+    result->stats.max_waypoint_snap_distance_m = selected_stats.max_waypoint_snap_distance_m;
+    result->stats.shape_score = selected_stats.shape_score;
+    result->stats.waypoint_quality_score = selected_stats.waypoint_quality_score;
+    result->stats.selected_candidate_index = source_index;
     set_error(error, error_size, "");
     return true;
 }
+
 
 const char *openride_loop_direction_name(OpenRideLoopDirection direction)
 {

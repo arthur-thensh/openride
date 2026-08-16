@@ -286,12 +286,188 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                 }
             }
     #endif
+            if ((*context->events->planner_async_thread)
+                && SDL_GetAtomicInt(&(*context->events->planner_async_context).done)) {
+                const OpenRideRidePlannerBusy completed_kind =
+                    (*context->events->planner_async_context).kind;
+                SDL_WaitThread((*context->events->planner_async_thread), NULL);
+                (*context->events->planner_async_thread) = NULL;
+
+                const bool calculation_ok =
+                    SDL_GetAtomicInt(&(*context->events->planner_async_context).success) != 0;
+
+                if (completed_kind == OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS) {
+                    const bool request_current = openride_app_planner_async_loop_request_matches(
+                        &(*context->events->planner_async_context),
+                        &(*context->events->selection),
+                        (*context->events->routing_profile),
+                        (*context->events->loop_target_distance_m),
+                        (*context->events->loop_direction));
+                    if (!request_current) {
+                        snprintf(context->events->route_status,
+                                 context->events->route_status_size,
+                                 "Parametres modifies - relance la recherche de balades");
+                    } else if (!calculation_ok) {
+                        snprintf(context->events->route_status,
+                                 context->events->route_status_size,
+                                 "%s",
+                                 (*context->events->planner_async_context).status[0]
+                                     ? (*context->events->planner_async_context).status
+                                     : "Recherche de balades impossible");
+                    } else {
+                        openride_loop_proposal_set_destroy(context->events->loop_proposals);
+                        (*context->events->loop_proposals) =
+                            (*context->events->planner_async_context).proposals;
+                        memset(&(*context->events->planner_async_context).proposals,
+                               0,
+                               sizeof((*context->events->planner_async_context).proposals));
+                        (*context->events->start_snap) =
+                            (*context->events->planner_async_context).start_snap;
+                        (*context->events->app_panel) = OPENRIDE_APP_PANEL_LOOP_PROPOSALS;
+                        snprintf(context->events->route_status,
+                                 context->events->route_status_size,
+                                 "%s",
+                                 (*context->events->planner_async_context).status[0]
+                                     ? (*context->events->planner_async_context).status
+                                     : "Balades pretes");
+                    }
+                    (*context->events->planner_busy) = OPENRIDE_RIDE_PLANNER_IDLE;
+                    if (calculation_ok && request_current) {
+                        openride_app_planner_async_reset(
+                            &(*context->events->planner_async_context));
+                    } else {
+                        SDL_Log("RidePlanner: keeping loop failure feedback: %s",
+                                (*context->events->planner_async_context).status[0]
+                                    ? (*context->events->planner_async_context).status
+                                    : context->events->route_status);
+                    }
+                } else if (completed_kind == OPENRIDE_RIDE_PLANNER_CALCULATING_ROUTE) {
+                    const bool request_current = openride_app_planner_async_route_request_matches(
+                        &(*context->events->planner_async_context),
+                        &(*context->events->selection),
+                        (*context->events->routing_profile));
+                    if (!request_current) {
+                        (*context->events->planner_busy) = OPENRIDE_RIDE_PLANNER_IDLE;
+                        snprintf(context->events->route_status,
+                                 context->events->route_status_size,
+                                 "Points modifies - relance le calcul");
+                    } else if (calculation_ok) {
+                        openride_app_route_clear_navigation_session(
+                            &(*context->events->navigation),
+                            &(*context->events->gps_simulator),
+                            &(*context->events->navigation_state),
+                            &(*context->events->gps_sample),
+                            &(*context->events->gps_sample_valid));
+                        openride_navigation_session_reset(
+                            &(*context->events->navigation_session));
+                        openride_location_filter_reset(&(*context->events->location_filter));
+                        memset(&(*context->events->filtered_location),
+                               0,
+                               sizeof((*context->events->filtered_location)));
+                        openride_route_destroy(&(*context->events->route));
+                        (*context->events->route) =
+                            (*context->events->planner_async_context).route;
+                        memset(&(*context->events->planner_async_context).route,
+                               0,
+                               sizeof((*context->events->planner_async_context).route));
+                        (*context->events->start_snap) =
+                            (*context->events->planner_async_context).start_snap;
+                        (*context->events->destination_snap) =
+                            (*context->events->planner_async_context).destination_snap;
+                        (*context->events->loop_active) = false;
+                        (*context->events->loop_waypoint_count) = 0U;
+                        (*context->events->gpx_navigation_active) = false;
+                        (*context->events->simulator_deviation) = false;
+                        (*context->events->route_valid) =
+                            openride_app_route_prepare_navigation_session(
+                                &(*context->events->navigation),
+                                &(*context->events->gps_simulator),
+                                &(*context->events->navigation_instructions),
+                                &(*context->events->routing_graph),
+                                &(*context->events->route),
+                                context->events->route_status,
+                                context->events->route_status_size);
+                        (*context->events->planner_busy) = OPENRIDE_RIDE_PLANNER_IDLE;
+                        if ((*context->events->route_valid)) {
+                            (*context->events->app_panel) = OPENRIDE_APP_PANEL_NONE;
+                            snprintf(context->events->route_status,
+                                     context->events->route_status_size,
+                                     "itineraire pret | %.1f km",
+                                     (*context->events->route).distance_m / 1000.0);
+#ifdef __ANDROID__
+                            if ((*context->events->real_gps_active)
+                                || (*context->events->simulated_gps_active)) {
+                                openride_drive_mode_set_active(
+                                    &(*context->events->drive_mode), true);
+                                openride_drive_mode_set_auto_zoom(
+                                    &(*context->events->drive_mode), true);
+                                (*context->events->follow_gps) = true;
+                            }
+#endif
+                            if (context->events->app_storage
+                                && (*context->events->selection).has_destination) {
+                                openride_app_storage_add_history(
+                                    context->events->app_storage,
+                                    "Destination",
+                                    (*context->events->selection).destination.lat,
+                                    (*context->events->selection).destination.lon,
+                                    0,
+                                    context->events->error,
+                                    context->events->error_size);
+                                openride_app_search_refresh_stored_places(
+                                    context->events->app_storage,
+                                    false,
+                                    context->events->history_places,
+                                    &(*context->events->history_count));
+                            }
+                        }
+                    } else {
+                        (*context->events->routing_world_thread) =
+                            openride_app_route_start_world_thread(
+                                &(*context->events->routing_world_context),
+                                &(*context->events->platform_paths),
+                                (*context->events->active_region),
+                                (*context->events->graph_loaded)
+                                    ? &(*context->events->routing_graph) : NULL,
+                                &(*context->events->routing_world_cache),
+                                &(*context->events->selection),
+                                (*context->events->routing_profile),
+                                false,
+                                false);
+                        if ((*context->events->routing_world_thread)) {
+                            (*context->events->planner_busy) =
+                                OPENRIDE_RIDE_PLANNER_CALCULATING_ROUTE;
+                            snprintf(context->events->route_status,
+                                     context->events->route_status_size,
+                                     "Calcul de l'itineraire inter-region...");
+                        } else {
+                            (*context->events->planner_busy) = OPENRIDE_RIDE_PLANNER_IDLE;
+                            snprintf(context->events->route_status,
+                                     context->events->route_status_size,
+                                     "%s",
+                                     (*context->events->planner_async_context).status[0]
+                                         ? (*context->events->planner_async_context).status
+                                         : "Calcul de l'itineraire impossible");
+                        }
+                    }
+                    openride_app_planner_async_reset(
+                        &(*context->events->planner_async_context));
+                } else {
+                    (*context->events->planner_busy) = OPENRIDE_RIDE_PLANNER_IDLE;
+                    openride_app_planner_async_reset(
+                        &(*context->events->planner_async_context));
+                }
+            }
+
             /*
              * RoutingWorld borrows the currently active routing graph read-only.
              * Region activation can destroy/reload that graph, so defer activation
              * until the worker has joined on the main thread.
              */
-            if ((*context->events->region_activation_requested) && !(*context->events->region_busy) && !(*context->events->routing_world_thread)) {
+            if ((*context->events->region_activation_requested)
+                && !(*context->events->region_busy)
+                && !(*context->events->routing_world_thread)
+                && !(*context->events->planner_async_thread)) {
                 (*context->events->region_activation_requested) = false;
                 if ((*context->events->region) == (*context->events->active_region)) {
                     snprintf(context->events->region_work_status, context->events->region_work_status_size,
@@ -369,6 +545,12 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                 && SDL_GetAtomicInt(&(*context->events->routing_world_context).done)) {
                 SDL_WaitThread((*context->events->routing_world_thread), NULL);
                 (*context->events->routing_world_thread) = NULL;
+                const bool planner_world_request =
+                    (*context->events->planner_busy) ==
+                        OPENRIDE_RIDE_PLANNER_CALCULATING_ROUTE;
+                if (planner_world_request) {
+                    (*context->events->planner_busy) = OPENRIDE_RIDE_PLANNER_IDLE;
+                }
 
                 const bool request_current = openride_app_route_world_request_matches(
                     &(*context->events->routing_world_context),
@@ -499,6 +681,9 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                                                              context->events->route_status,
                                                              context->events->route_status_size);
                     if ((*context->events->route_valid)) {
+                        if (planner_world_request) {
+                            (*context->events->app_panel) = OPENRIDE_APP_PANEL_NONE;
+                        }
                         if ((*context->events->routing_world_context).reroute) {
                             openride_navigation_session_mark_rerouted(&(*context->events->navigation_session));
                             openride_location_filter_reset(&(*context->events->location_filter));
@@ -557,7 +742,9 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                 (*context->events->routing_world_context).error[0] = '\0';
             }
 
-            if ((*context->events->route_dirty) && !(*context->events->routing_world_thread)) {
+            if ((*context->events->route_dirty)
+                && !(*context->events->routing_world_thread)
+                && !(*context->events->planner_async_thread)) {
                 (*context->events->loop_active) = false;
                 (*context->events->gpx_navigation_active) = false;
                 (*context->events->loop_waypoint_count) = 0U;

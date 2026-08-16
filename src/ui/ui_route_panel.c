@@ -253,15 +253,17 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
 
     OpenRideUIRoutePanelAction clicked = OPENRIDE_UI_ROUTE_PANEL_NONE;
+    const bool planner_busy = state->busy != OPENRIDE_RIDE_PLANNER_IDLE;
+    const bool interactive = !planner_busy;
     if (openride_ui_button(ui, planner_id("planner-mode-route"),
                            layout.mode_route, "Trajet",
-                           OPENRIDE_UI_BUTTON_GHOST, true,
+                           OPENRIDE_UI_BUTTON_GHOST, interactive,
                            state->mode == OPENRIDE_RIDE_PLANNER_ROUTE)) {
         clicked = OPENRIDE_UI_ROUTE_PANEL_MODE_ROUTE;
     }
     if (openride_ui_button(ui, planner_id("planner-mode-loop"),
                            layout.mode_loop, "Boucle",
-                           OPENRIDE_UI_BUTTON_GHOST, true,
+                           OPENRIDE_UI_BUTTON_GHOST, interactive,
                            state->mode == OPENRIDE_RIDE_PLANNER_LOOP)) {
         clicked = OPENRIDE_UI_ROUTE_PANEL_MODE_LOOP;
     }
@@ -283,13 +285,13 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
         snprintf(gps_label, sizeof(gps_label), "Ma position GPS");
     }
     draw_icon_row(ui, planner_id("planner-gps-start"), layout.start[0],
-                  OPENRIDE_UI_ICON_GPS, gps_label, true,
+                  OPENRIDE_UI_ICON_GPS, gps_label, interactive,
                   OPENRIDE_UI_ROUTE_PANEL_GPS_START, &clicked);
     draw_icon_row(ui, planner_id("planner-search-start"), layout.start[1],
-                  OPENRIDE_UI_ICON_SEARCH, "Rechercher un lieu", true,
+                  OPENRIDE_UI_ICON_SEARCH, "Rechercher un lieu", interactive,
                   OPENRIDE_UI_ROUTE_PANEL_SEARCH_START, &clicked);
     draw_icon_row(ui, planner_id("planner-map-start"), layout.start[2],
-                  OPENRIDE_UI_ICON_MAP, "Choisir sur la carte", true,
+                  OPENRIDE_UI_ICON_MAP, "Choisir sur la carte", interactive,
                   OPENRIDE_UI_ROUTE_PANEL_MAP_START, &clicked);
 
     if (state->mode == OPENRIDE_RIDE_PLANNER_ROUTE) {
@@ -303,11 +305,11 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
                                ui->theme.primary);
         draw_icon_row(ui, planner_id("planner-search-destination"),
                       layout.destination[0], OPENRIDE_UI_ICON_SEARCH,
-                      "Rechercher un lieu", true,
+                      "Rechercher un lieu", interactive,
                       OPENRIDE_UI_ROUTE_PANEL_SEARCH_DESTINATION, &clicked);
         draw_icon_row(ui, planner_id("planner-map-destination"),
                       layout.destination[1], OPENRIDE_UI_ICON_MAP,
-                      "Choisir sur la carte", true,
+                      "Choisir sur la carte", interactive,
                       OPENRIDE_UI_ROUTE_PANEL_MAP_DESTINATION, &clicked);
     }
 
@@ -337,7 +339,7 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
     for (uint32_t i = 0U; i < 3U; ++i) {
         if (openride_ui_button(ui, planner_id(profile_ids[i]), layout.profiles[i],
                                profile_label(profile_values[i]),
-                               OPENRIDE_UI_BUTTON_GHOST, true,
+                               OPENRIDE_UI_BUTTON_GHOST, interactive,
                                state->profile == profile_values[i])) {
             clicked = profile_actions[i];
         }
@@ -356,7 +358,7 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
                                ui->theme.primary);
         if (openride_ui_button(ui, planner_id("planner-distance-down"),
                                layout.distance_down, "−",
-                               OPENRIDE_UI_BUTTON_GHOST, true, false)) {
+                               OPENRIDE_UI_BUTTON_GHOST, interactive, false)) {
             clicked = OPENRIDE_UI_ROUTE_PANEL_LOOP_DISTANCE_DOWN;
         }
         char distance[48];
@@ -368,7 +370,7 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
                          OPENRIDE_UI_TEXT_ALIGN_CENTER);
         if (openride_ui_button(ui, planner_id("planner-distance-up"),
                                layout.distance_up, "+",
-                               OPENRIDE_UI_BUTTON_GHOST, true, false)) {
+                               OPENRIDE_UI_BUTTON_GHOST, interactive, false)) {
             clicked = OPENRIDE_UI_ROUTE_PANEL_LOOP_DISTANCE_UP;
         }
 
@@ -377,7 +379,7 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
                  openride_loop_direction_name(state->loop_direction));
         if (openride_ui_button(ui, planner_id("planner-direction"),
                                layout.direction, direction,
-                               OPENRIDE_UI_BUTTON_GHOST, true, false)) {
+                               OPENRIDE_UI_BUTTON_GHOST, interactive, false)) {
             clicked = OPENRIDE_UI_ROUTE_PANEL_LOOP_DIRECTION;
         }
     }
@@ -387,23 +389,65 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
         : state->has_start && state->has_destination;
     const char *primary_label = state->mode == OPENRIDE_RIDE_PLANNER_LOOP
         ? "Proposer des balades" : "Calculer l’itinéraire";
-    if (openride_ui_button(ui, planner_id("planner-primary"), layout.primary,
-                           primary_label,
-                           can_generate ? OPENRIDE_UI_BUTTON_PRIMARY
-                                        : OPENRIDE_UI_BUTTON_SECONDARY,
-                           can_generate, false)) {
+    if (planner_busy) {
+        (void)openride_ui_button(ui,
+                                 planner_id("planner-primary"),
+                                 layout.primary,
+                                 "",
+                                 OPENRIDE_UI_BUTTON_PRIMARY,
+                                 false,
+                                 false);
+        const float angle = (float)(SDL_GetTicks() % 1200U) * (360.0f / 1200.0f);
+        openride_ui_icon_draw_rotated(
+            ui,
+            OPENRIDE_UI_ICON_LOADING,
+            openride_ui_rect(layout.primary.x + 18.0f,
+                             layout.primary.y + (layout.primary.h - 22.0f) * 0.5f,
+                             22.0f,
+                             22.0f),
+            ui->theme.text,
+            1.8f,
+            angle);
+        openride_ui_text_color(
+            ui,
+            openride_ui_rect(layout.primary.x + 50.0f,
+                             layout.primary.y,
+                             layout.primary.w - 64.0f,
+                             layout.primary.h),
+            state->busy == OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS
+                ? "Recherche de balades..."
+                : "Calcul de l’itinéraire...",
+            OPENRIDE_UI_TEXT_BODY,
+            OPENRIDE_UI_TEXT_ALIGN_LEFT,
+            ui->theme.text);
+    } else if (openride_ui_button(ui, planner_id("planner-primary"), layout.primary,
+                                  primary_label,
+                                  can_generate ? OPENRIDE_UI_BUTTON_PRIMARY
+                                               : OPENRIDE_UI_BUTTON_SECONDARY,
+                                  can_generate, false)) {
         clicked = OPENRIDE_UI_ROUTE_PANEL_CALCULATE;
     }
 
-    openride_ui_text(ui, layout.hint,
-                     state->mode == OPENRIDE_RIDE_PLANNER_LOOP
-                         ? "3 propositions seront comparées avant de partir"
-                         : "Le trajet sera affiché sur la carte avant le départ",
-                     OPENRIDE_UI_TEXT_CAPTION,
-                     OPENRIDE_UI_TEXT_ALIGN_CENTER);
+    if (!planner_busy && state->feedback && state->feedback[0]) {
+        openride_ui_text_color(ui,
+                               layout.hint,
+                               state->feedback,
+                               OPENRIDE_UI_TEXT_CAPTION,
+                               OPENRIDE_UI_TEXT_ALIGN_CENTER,
+                               ui->theme.danger);
+    } else {
+        openride_ui_text(ui, layout.hint,
+                         planner_busy
+                             ? "Le calcul continue en arrière-plan"
+                             : state->mode == OPENRIDE_RIDE_PLANNER_LOOP
+                                 ? "3 propositions seront comparées avant de partir"
+                                 : "Le trajet sera affiché sur la carte avant le départ",
+                         OPENRIDE_UI_TEXT_CAPTION,
+                         OPENRIDE_UI_TEXT_ALIGN_CENTER);
+    }
 
     if (openride_ui_button(ui, planner_id("planner-back"), layout.back,
-                           "Retour", OPENRIDE_UI_BUTTON_GHOST, true, false)) {
+                           "Retour", OPENRIDE_UI_BUTTON_GHOST, interactive, false)) {
         clicked = OPENRIDE_UI_ROUTE_PANEL_BACK;
     }
     return clicked;
