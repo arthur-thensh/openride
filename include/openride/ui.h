@@ -28,10 +28,12 @@ typedef struct OpenRideUITheme {
     OpenRideUIColor surface_elevated;
     OpenRideUIColor primary;
     OpenRideUIColor primary_pressed;
+    OpenRideUIColor primary_soft;
     OpenRideUIColor text;
     OpenRideUIColor text_secondary;
     OpenRideUIColor border;
     OpenRideUIColor danger;
+    OpenRideUIColor success;
     OpenRideUIColor disabled;
 
     float spacing_xs;
@@ -40,8 +42,10 @@ typedef struct OpenRideUITheme {
     float spacing_lg;
     float radius_sm;
     float radius_md;
+    float radius_lg;
     float touch_target;
     float button_height;
+    float icon_size;
 } OpenRideUITheme;
 
 typedef enum OpenRideUITextStyle {
@@ -131,6 +135,12 @@ void openride_ui_text(OpenRideUIContext *ui,
                       const char *text,
                       OpenRideUITextStyle style,
                       OpenRideUITextAlign align);
+void openride_ui_text_color(OpenRideUIContext *ui,
+                            OpenRideUIRect rect,
+                            const char *text,
+                            OpenRideUITextStyle style,
+                            OpenRideUITextAlign align,
+                            OpenRideUIColor color);
 bool openride_ui_button(OpenRideUIContext *ui,
                         OpenRideUIID id,
                         OpenRideUIRect rect,
