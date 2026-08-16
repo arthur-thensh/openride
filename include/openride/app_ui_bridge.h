@@ -18,6 +18,7 @@
 #include "openride/navigation_session.h"
 #include "openride/place_search.h"
 #include "openride/region_manager.h"
+#include "openride/ride_planner.h"
 #include "openride/routing_engine.h"
 #include "openride/routing_world.h"
 
@@ -46,6 +47,7 @@ typedef enum OpenRideAppPanel {
     OPENRIDE_APP_PANEL_NONE = 0,
     OPENRIDE_APP_PANEL_MAIN,
     OPENRIDE_APP_PANEL_ROUTE,
+    OPENRIDE_APP_PANEL_LOOP_PROPOSALS,
     OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS,
     OPENRIDE_APP_PANEL_FAVORITES,
     OPENRIDE_APP_PANEL_HISTORY,
@@ -169,6 +171,10 @@ void openride_app_ui_draw_panel(
     const OpenRideMapSelection *selection,
     bool gps_valid,
     double gps_accuracy_m,
+    OpenRideRidePlannerMode planner_mode,
+    double loop_target_distance_m,
+    OpenRideLoopDirection loop_direction,
+    const OpenRideLoopProposalSet *loop_proposals,
     const OpenRideRouteDownloadPlan *route_download_plan_state,
     int viewport_width);
 
