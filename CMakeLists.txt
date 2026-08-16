@@ -145,6 +145,7 @@ endif()
 
 set(OPENRIDE_APP_SOURCES
     src/main.c
+    src/app_runtime.c
     src/app_ui_action.c
     src/app_ui_bridge.c
     src/app_search_runtime.c
@@ -152,6 +153,7 @@ set(OPENRIDE_APP_SOURCES
     src/app_region_runtime.c
     src/app_support_runtime.c
     src/app_event_runtime.c
+    src/app_async_runtime.c
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
