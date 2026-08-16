@@ -22,6 +22,8 @@ The script is transactional: all generated content is validated before any file
 is written. It never builds, tests, commits or pushes.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 import runpy
 import sys
