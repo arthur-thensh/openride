@@ -5,12 +5,12 @@
 
 #define OPENRIDE_UI_MAIN_MENU_ITEMS 6U
 #define OPENRIDE_UI_MAIN_MENU_MARGIN 12.0f
-#define OPENRIDE_UI_MAIN_MENU_GAP 8.0f
-#define OPENRIDE_UI_MAIN_MENU_HEADER 70.0f
-#define OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT 52.0f
-#define OPENRIDE_UI_MAIN_MENU_MAX_ROW_HEIGHT 60.0f
-#define OPENRIDE_UI_MAIN_MENU_MAX_WIDTH 430.0f
-#define OPENRIDE_UI_MAIN_MENU_MAX_HEIGHT 610.0f
+#define OPENRIDE_UI_MAIN_MENU_GAP 6.0f
+#define OPENRIDE_UI_MAIN_MENU_HEADER 62.0f
+#define OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT 46.0f
+#define OPENRIDE_UI_MAIN_MENU_MAX_ROW_HEIGHT 52.0f
+#define OPENRIDE_UI_MAIN_MENU_MAX_WIDTH 400.0f
+#define OPENRIDE_UI_MAIN_MENU_MAX_HEIGHT 462.0f
 
 static float main_menu_minf(float a, float b)
 {
@@ -76,14 +76,14 @@ OpenRideUIMainMenuLayout openride_ui_main_menu_layout(
         safe.y + (safe.h - panel_h) * 0.5f,
         panel_w,
         panel_h);
-    layout.title = openride_ui_rect(layout.panel.x + 18.0f,
-                                    layout.panel.y + 11.0f,
-                                    layout.panel.w - 36.0f,
-                                    28.0f);
-    layout.subtitle = openride_ui_rect(layout.panel.x + 18.0f,
-                                       layout.panel.y + 38.0f,
-                                       layout.panel.w - 36.0f,
-                                       18.0f);
+    layout.title = openride_ui_rect(layout.panel.x + 48.0f,
+                                    layout.panel.y + 8.0f,
+                                    layout.panel.w - 64.0f,
+                                    24.0f);
+    layout.subtitle = openride_ui_rect(layout.panel.x + 48.0f,
+                                       layout.panel.y + 32.0f,
+                                       layout.panel.w - 64.0f,
+                                       16.0f);
 
     layout.close = openride_ui_rect(
         layout.panel.x + OPENRIDE_UI_MAIN_MENU_GAP,
@@ -149,10 +149,18 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
         (float)ui->viewport_width,
         (float)ui->viewport_height
     };
-    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 154);
+    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 138);
     SDL_RenderFillRect(ui->renderer, &screen);
 
     openride_ui_panel(ui, layout.panel, true);
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_ROUTE,
+                          openride_ui_rect(layout.panel.x + 17.0f,
+                                           layout.panel.y + 14.0f,
+                                           22.0f,
+                                           22.0f),
+                          ui->theme.primary,
+                          1.7f);
     openride_ui_text(ui,
                      layout.title,
                      "OpenRide",
@@ -164,6 +172,9 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
                      OPENRIDE_UI_TEXT_CAPTION,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
 
+    const OpenRideUIColor saved_border = ui->theme.border;
+    ui->theme.border.a = 18U;
+
     OpenRideUIMainMenuAction clicked = OPENRIDE_UI_MAIN_MENU_NONE;
     for (uint32_t i = 0U; i < OPENRIDE_UI_MAIN_MENU_ITEMS; ++i) {
         const OpenRideUIID id = main_menu_id(i);
@@ -171,16 +182,16 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
                                id,
                                layout.items[i],
                                "",
-                               OPENRIDE_UI_BUTTON_SECONDARY,
+                               OPENRIDE_UI_BUTTON_GHOST,
                                true,
                                false)) {
             clicked = (OpenRideUIMainMenuAction)(
                 OPENRIDE_UI_MAIN_MENU_SEARCH + (int)i);
         }
 
-        const float icon_size = 24.0f;
+        const float icon_size = 22.0f;
         const OpenRideUIRect icon_rect = openride_ui_rect(
-            layout.items[i].x + 15.0f,
+            layout.items[i].x + 14.0f,
             layout.items[i].y + (layout.items[i].h - icon_size) * 0.5f,
             icon_size,
             icon_size);
@@ -193,12 +204,12 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
                               main_menu_icon(i),
                               icon_rect,
                               tint,
-                              1.75f);
+                              1.65f);
 
         openride_ui_text_color(ui,
-                               openride_ui_rect(layout.items[i].x + 52.0f,
+                               openride_ui_rect(layout.items[i].x + 48.0f,
                                                 layout.items[i].y,
-                                                layout.items[i].w - 66.0f,
+                                                layout.items[i].w - 60.0f,
                                                 layout.items[i].h),
                                main_menu_label(i),
                                OPENRIDE_UI_TEXT_BODY,
@@ -209,6 +220,7 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
     }
 
     const OpenRideUIID close_id = OPENRIDE_UI_ID("main-menu-close");
+    ui->theme.border.a = 0U;
     if (openride_ui_button(ui,
                            close_id,
                            layout.close,
@@ -218,14 +230,16 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
                            false)) {
         clicked = OPENRIDE_UI_MAIN_MENU_CLOSE;
     }
+    ui->theme.border = saved_border;
+
     openride_ui_icon_draw(ui,
                           OPENRIDE_UI_ICON_CLOSE,
-                          openride_ui_rect(layout.close.x + 16.0f,
-                                           layout.close.y + (layout.close.h - 22.0f) * 0.5f,
-                                           22.0f,
-                                           22.0f),
+                          openride_ui_rect(layout.close.x + 14.0f,
+                                           layout.close.y + (layout.close.h - 20.0f) * 0.5f,
+                                           20.0f,
+                                           20.0f),
                           ui->theme.text_secondary,
-                          1.75f);
+                          1.6f);
     openride_ui_text(ui,
                      layout.close,
                      "Fermer",
