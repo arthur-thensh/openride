@@ -1,13 +1,21 @@
 #include "openride/ui_main_menu.h"
+#include "openride/ui_icon.h"
 
 #include <stddef.h>
 
 #define OPENRIDE_UI_MAIN_MENU_ITEMS 6U
-#define OPENRIDE_UI_MAIN_MENU_MARGIN 8.0f
+#define OPENRIDE_UI_MAIN_MENU_MARGIN 12.0f
 #define OPENRIDE_UI_MAIN_MENU_GAP 8.0f
-#define OPENRIDE_UI_MAIN_MENU_HEADER 56.0f
-#define OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT 54.0f
-#define OPENRIDE_UI_MAIN_MENU_MAX_ROW_HEIGHT 64.0f
+#define OPENRIDE_UI_MAIN_MENU_HEADER 70.0f
+#define OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT 52.0f
+#define OPENRIDE_UI_MAIN_MENU_MAX_ROW_HEIGHT 60.0f
+#define OPENRIDE_UI_MAIN_MENU_MAX_WIDTH 430.0f
+#define OPENRIDE_UI_MAIN_MENU_MAX_HEIGHT 610.0f
+
+static float main_menu_minf(float a, float b)
+{
+    return a < b ? a : b;
+}
 
 static OpenRideUIID main_menu_id(uint32_t index)
 {
@@ -36,6 +44,21 @@ static const char *main_menu_label(uint32_t index)
     return index < OPENRIDE_UI_MAIN_MENU_ITEMS ? labels[index] : "";
 }
 
+static OpenRideUIIcon main_menu_icon(uint32_t index)
+{
+    static const OpenRideUIIcon icons[OPENRIDE_UI_MAIN_MENU_ITEMS] = {
+        OPENRIDE_UI_ICON_SEARCH,
+        OPENRIDE_UI_ICON_FAVORITE,
+        OPENRIDE_UI_ICON_HISTORY,
+        OPENRIDE_UI_ICON_DOWNLOAD,
+        OPENRIDE_UI_ICON_SETTINGS,
+        OPENRIDE_UI_ICON_MAP
+    };
+    return index < OPENRIDE_UI_MAIN_MENU_ITEMS
+        ? icons[index]
+        : OPENRIDE_UI_ICON_MENU;
+}
+
 OpenRideUIMainMenuLayout openride_ui_main_menu_layout(
     const OpenRideUIContext *ui)
 {
@@ -46,25 +69,30 @@ OpenRideUIMainMenuLayout openride_ui_main_menu_layout(
     safe = openride_ui_inset(safe, OPENRIDE_UI_MAIN_MENU_MARGIN);
     if (safe.w < 120.0f || safe.h < 180.0f) return layout;
 
-    layout.panel = safe;
-    layout.title = openride_ui_rect(safe.x + 14.0f,
-                                    safe.y + 8.0f,
-                                    safe.w - 28.0f,
+    const float panel_w = main_menu_minf(safe.w, OPENRIDE_UI_MAIN_MENU_MAX_WIDTH);
+    const float panel_h = main_menu_minf(safe.h, OPENRIDE_UI_MAIN_MENU_MAX_HEIGHT);
+    layout.panel = openride_ui_rect(
+        safe.x + (safe.w - panel_w) * 0.5f,
+        safe.y + (safe.h - panel_h) * 0.5f,
+        panel_w,
+        panel_h);
+    layout.title = openride_ui_rect(layout.panel.x + 18.0f,
+                                    layout.panel.y + 11.0f,
+                                    layout.panel.w - 36.0f,
                                     28.0f);
-    layout.subtitle = openride_ui_rect(safe.x + 14.0f,
-                                       safe.y + 34.0f,
-                                       safe.w - 28.0f,
+    layout.subtitle = openride_ui_rect(layout.panel.x + 18.0f,
+                                       layout.panel.y + 38.0f,
+                                       layout.panel.w - 36.0f,
                                        18.0f);
 
     layout.close = openride_ui_rect(
-        safe.x + OPENRIDE_UI_MAIN_MENU_GAP,
-        safe.y + safe.h - OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT
+        layout.panel.x + OPENRIDE_UI_MAIN_MENU_GAP,
+        layout.panel.y + layout.panel.h - OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT
             - OPENRIDE_UI_MAIN_MENU_GAP,
-        safe.w - OPENRIDE_UI_MAIN_MENU_GAP * 2.0f,
+        layout.panel.w - OPENRIDE_UI_MAIN_MENU_GAP * 2.0f,
         OPENRIDE_UI_MAIN_MENU_CLOSE_HEIGHT);
 
-    const float rows_top = safe.y + OPENRIDE_UI_MAIN_MENU_HEADER
-        + OPENRIDE_UI_MAIN_MENU_GAP;
+    const float rows_top = layout.panel.y + OPENRIDE_UI_MAIN_MENU_HEADER;
     float available = layout.close.y - OPENRIDE_UI_MAIN_MENU_GAP - rows_top;
     available -= OPENRIDE_UI_MAIN_MENU_GAP
         * (float)(OPENRIDE_UI_MAIN_MENU_ITEMS - 1U);
@@ -76,9 +104,9 @@ OpenRideUIMainMenuLayout openride_ui_main_menu_layout(
 
     for (uint32_t i = 0U; i < OPENRIDE_UI_MAIN_MENU_ITEMS; ++i) {
         layout.items[i] = openride_ui_rect(
-            safe.x + OPENRIDE_UI_MAIN_MENU_GAP,
+            layout.panel.x + OPENRIDE_UI_MAIN_MENU_GAP,
             rows_top + (row_height + OPENRIDE_UI_MAIN_MENU_GAP) * (float)i,
-            safe.w - OPENRIDE_UI_MAIN_MENU_GAP * 2.0f,
+            layout.panel.w - OPENRIDE_UI_MAIN_MENU_GAP * 2.0f,
             row_height);
     }
     return layout;
@@ -121,13 +149,13 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
         (float)ui->viewport_width,
         (float)ui->viewport_height
     };
-    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 115);
+    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 154);
     SDL_RenderFillRect(ui->renderer, &screen);
 
     openride_ui_panel(ui, layout.panel, true);
     openride_ui_text(ui,
                      layout.title,
-                     "OPENRIDE",
+                     "OpenRide",
                      OPENRIDE_UI_TEXT_TITLE,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
     openride_ui_text(ui,
@@ -138,26 +166,70 @@ OpenRideUIMainMenuAction openride_ui_main_menu_draw(OpenRideUIContext *ui)
 
     OpenRideUIMainMenuAction clicked = OPENRIDE_UI_MAIN_MENU_NONE;
     for (uint32_t i = 0U; i < OPENRIDE_UI_MAIN_MENU_ITEMS; ++i) {
+        const OpenRideUIID id = main_menu_id(i);
         if (openride_ui_button(ui,
-                               main_menu_id(i),
+                               id,
                                layout.items[i],
-                               main_menu_label(i),
+                               "",
                                OPENRIDE_UI_BUTTON_SECONDARY,
                                true,
                                false)) {
             clicked = (OpenRideUIMainMenuAction)(
                 OPENRIDE_UI_MAIN_MENU_SEARCH + (int)i);
         }
+
+        const float icon_size = 24.0f;
+        const OpenRideUIRect icon_rect = openride_ui_rect(
+            layout.items[i].x + 15.0f,
+            layout.items[i].y + (layout.items[i].h - icon_size) * 0.5f,
+            icon_size,
+            icon_size);
+        const OpenRideUIColor tint = ui->hot_id == id
+            ? ui->theme.primary
+            : (i == OPENRIDE_UI_MAIN_MENU_ITEMS - 1U
+                ? ui->theme.text_secondary
+                : ui->theme.text);
+        openride_ui_icon_draw(ui,
+                              main_menu_icon(i),
+                              icon_rect,
+                              tint,
+                              1.75f);
+
+        openride_ui_text_color(ui,
+                               openride_ui_rect(layout.items[i].x + 52.0f,
+                                                layout.items[i].y,
+                                                layout.items[i].w - 66.0f,
+                                                layout.items[i].h),
+                               main_menu_label(i),
+                               OPENRIDE_UI_TEXT_BODY,
+                               OPENRIDE_UI_TEXT_ALIGN_LEFT,
+                               i == OPENRIDE_UI_MAIN_MENU_ITEMS - 1U
+                                   ? ui->theme.text_secondary
+                                   : ui->theme.text);
     }
 
+    const OpenRideUIID close_id = OPENRIDE_UI_ID("main-menu-close");
     if (openride_ui_button(ui,
-                           OPENRIDE_UI_ID("main-menu-close"),
+                           close_id,
                            layout.close,
-                           "Fermer",
+                           "",
                            OPENRIDE_UI_BUTTON_GHOST,
                            true,
                            false)) {
         clicked = OPENRIDE_UI_MAIN_MENU_CLOSE;
     }
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_CLOSE,
+                          openride_ui_rect(layout.close.x + 16.0f,
+                                           layout.close.y + (layout.close.h - 22.0f) * 0.5f,
+                                           22.0f,
+                                           22.0f),
+                          ui->theme.text_secondary,
+                          1.75f);
+    openride_ui_text(ui,
+                     layout.close,
+                     "Fermer",
+                     OPENRIDE_UI_TEXT_BODY,
+                     OPENRIDE_UI_TEXT_ALIGN_CENTER);
     return clicked;
 }
