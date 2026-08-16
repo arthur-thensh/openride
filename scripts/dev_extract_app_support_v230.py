@@ -274,7 +274,7 @@ def prepare(original: str) -> tuple[str, str, str]:
         raise RuntimeError("V2.3: support header include missing from main")
 
     for old, new in mapping.items():
-        if re.search(rf"\b{re.escape(old)}\b", main_after):
+        if old != new and re.search(rf"\b{re.escape(old)}\b", main_after):
             raise RuntimeError(f"V2.3: old helper name remains in main: {old}")
         if not re.search(rf"\b{re.escape(new)}\b", main_after):
             raise RuntimeError(f"V2.3: public helper not referenced by main: {new}")
