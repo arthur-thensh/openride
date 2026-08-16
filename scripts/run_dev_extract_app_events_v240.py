@@ -24,6 +24,16 @@ if source.count(replacer_old) != 1:
     )
 source = source.replace(replacer_old, replacer_new, 1)
 
+guard_old = '''        pattern = rf"(?<![A-Za-z0-9_.>])\\b{re.escape(name)}\\b"\n        if re.search(pattern, source):\n            raise RuntimeError(\n                f"V2.4: unbound main variable remains in event runtime: {name}"\n            )\n'''
+
+guard_new = '''        # Reuse the C-aware identifier scanner above so string literals such\n        # as "routing_profile" are not mistaken for unbound C variables.\n        if replace_variable(source, name, "__OPENRIDE_UNBOUND__") != source:\n            raise RuntimeError(\n                f"V2.4: unbound main variable remains in event runtime: {name}"\n            )\n'''
+
+if source.count(guard_old) != 1:
+    raise RuntimeError(
+        "V2.4 launcher expected exactly one unbound-variable guard target"
+    )
+source = source.replace(guard_old, guard_new, 1)
+
 namespace = {
     "__name__": "__main__",
     "__file__": str(script),
