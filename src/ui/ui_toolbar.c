@@ -1,15 +1,49 @@
 #include "openride/ui_toolbar.h"
+#include "openride/ui_icon.h"
 
 #include <stddef.h>
 
-#define OPENRIDE_UI_TOOLBAR_MARGIN 10.0f
-#define OPENRIDE_UI_TOOLBAR_HEIGHT 72.0f
+#define OPENRIDE_UI_TOOLBAR_MARGIN 12.0f
+#define OPENRIDE_UI_TOOLBAR_HEIGHT 82.0f
 #define OPENRIDE_UI_TOOLBAR_ITEMS 5U
+#define OPENRIDE_UI_TOOLBAR_ITEM_INSET 3.0f
 
 static const char *toolbar_label(OpenRideToolbarAction action, bool route_ready)
 {
-    if (action == OPENRIDE_TOOLBAR_ROUTE && route_ready) return "Demarrer";
-    return openride_toolbar_action_label(action);
+    switch (action) {
+        case OPENRIDE_TOOLBAR_MENU:
+            return "Menu";
+        case OPENRIDE_TOOLBAR_SEARCH:
+            return "Chercher";
+        case OPENRIDE_TOOLBAR_ROUTE:
+            return route_ready ? "Demarrer" : "Trajet";
+        case OPENRIDE_TOOLBAR_LOOP:
+            return "Balade";
+        case OPENRIDE_TOOLBAR_GPS:
+            return "GPS";
+        case OPENRIDE_TOOLBAR_NONE:
+        default:
+            return "";
+    }
+}
+
+static OpenRideUIIcon toolbar_icon(OpenRideToolbarAction action)
+{
+    switch (action) {
+        case OPENRIDE_TOOLBAR_MENU:
+            return OPENRIDE_UI_ICON_MENU;
+        case OPENRIDE_TOOLBAR_SEARCH:
+            return OPENRIDE_UI_ICON_SEARCH;
+        case OPENRIDE_TOOLBAR_ROUTE:
+            return OPENRIDE_UI_ICON_ROUTE;
+        case OPENRIDE_TOOLBAR_LOOP:
+            return OPENRIDE_UI_ICON_LOOP;
+        case OPENRIDE_TOOLBAR_GPS:
+            return OPENRIDE_UI_ICON_GPS;
+        case OPENRIDE_TOOLBAR_NONE:
+        default:
+            return OPENRIDE_UI_ICON_MENU;
+    }
 }
 
 static OpenRideUIID toolbar_id(OpenRideToolbarAction action)
@@ -84,16 +118,47 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
          action <= OPENRIDE_TOOLBAR_GPS;
          action = (OpenRideToolbarAction)(action + 1)) {
         const uint32_t index = (uint32_t)(action - OPENRIDE_TOOLBAR_MENU);
+        const OpenRideUIID id = toolbar_id(action);
+        const bool selected = action == OPENRIDE_TOOLBAR_ROUTE && route_ready;
+        OpenRideUIRect item = openride_ui_inset(layout.items[index],
+                                                OPENRIDE_UI_TOOLBAR_ITEM_INSET);
         if (openride_ui_button(ui,
-                               toolbar_id(action),
-                               layout.items[index],
-                               toolbar_label(action, route_ready),
+                               id,
+                               item,
+                               "",
                                OPENRIDE_UI_BUTTON_GHOST,
                                true,
-                               action == OPENRIDE_TOOLBAR_ROUTE && route_ready)) {
+                               selected)) {
             clicked = action;
         }
+
+        float icon_size = ui->theme.icon_size;
+        if (icon_size > item.h * 0.42f) icon_size = item.h * 0.42f;
+        const OpenRideUIRect icon_rect = openride_ui_rect(
+            item.x + (item.w - icon_size) * 0.5f,
+            item.y + 8.0f,
+            icon_size,
+            icon_size);
+        const OpenRideUIColor icon_color = selected
+            ? ui->theme.primary
+            : (ui->hot_id == id ? ui->theme.text : ui->theme.text_secondary);
+        openride_ui_icon_draw(ui,
+                              toolbar_icon(action),
+                              icon_rect,
+                              icon_color,
+                              selected ? 2.0f : 1.75f);
+
+        const OpenRideUIRect label_rect = openride_ui_rect(
+            item.x + 2.0f,
+            item.y + item.h - 25.0f,
+            item.w - 4.0f,
+            18.0f);
+        openride_ui_text_color(ui,
+                               label_rect,
+                               toolbar_label(action, route_ready),
+                               OPENRIDE_UI_TEXT_CAPTION,
+                               OPENRIDE_UI_TEXT_ALIGN_CENTER,
+                               selected ? ui->theme.primary : ui->theme.text_secondary);
     }
     return clicked;
 }
-
