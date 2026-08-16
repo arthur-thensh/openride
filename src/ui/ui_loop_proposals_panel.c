@@ -22,8 +22,8 @@ OpenRideUILoopProposalsLayout openride_ui_loop_proposals_layout(
     OpenRideUIRect safe = openride_ui_inset(openride_ui_safe_rect(ui), 10.0f);
     if (safe.w < 200.0f || safe.h < 340.0f) return layout;
     const float panel_w = safe.w < 370.0f ? safe.w : 370.0f;
-    float panel_h = 150.0f + (float)count * 86.0f;
-    if (panel_h > 500.0f) panel_h = 500.0f;
+    float panel_h = 190.0f + (float)count * 86.0f;
+    if (panel_h > 540.0f) panel_h = 540.0f;
     if (panel_h > safe.h * 0.90f) panel_h = safe.h * 0.90f;
     const float x = safe.x + (safe.w - panel_w) * 0.5f;
     const float y = safe.y + (safe.h - panel_h) * 0.43f;
