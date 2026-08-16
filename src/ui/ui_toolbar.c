@@ -3,10 +3,11 @@
 
 #include <stddef.h>
 
-#define OPENRIDE_UI_TOOLBAR_MARGIN 12.0f
-#define OPENRIDE_UI_TOOLBAR_HEIGHT 82.0f
+#define OPENRIDE_UI_TOOLBAR_MARGIN_X 12.0f
+#define OPENRIDE_UI_TOOLBAR_HEIGHT 76.0f
+#define OPENRIDE_UI_TOOLBAR_BOTTOM_CLEARANCE 18.0f
 #define OPENRIDE_UI_TOOLBAR_ITEMS 5U
-#define OPENRIDE_UI_TOOLBAR_ITEM_INSET 3.0f
+#define OPENRIDE_UI_TOOLBAR_ITEM_INSET 2.0f
 
 static const char *toolbar_label(OpenRideToolbarAction action, bool route_ready)
 {
@@ -64,16 +65,20 @@ OpenRideUIToolbarLayout openride_ui_toolbar_layout(const OpenRideUIContext *ui)
     OpenRideUIToolbarLayout layout = {0};
     if (!ui) return layout;
 
-    OpenRideUIRect safe = openride_ui_safe_rect(ui);
-    safe = openride_ui_inset(safe, OPENRIDE_UI_TOOLBAR_MARGIN);
-    if (safe.w <= 0.0f || safe.h <= 0.0f) return layout;
+    const OpenRideUIRect safe = openride_ui_safe_rect(ui);
+    if (safe.w <= OPENRIDE_UI_TOOLBAR_MARGIN_X * 2.0f
+        || safe.h <= OPENRIDE_UI_TOOLBAR_BOTTOM_CLEARANCE) {
+        return layout;
+    }
 
-    const float height = safe.h < OPENRIDE_UI_TOOLBAR_HEIGHT
-        ? safe.h : OPENRIDE_UI_TOOLBAR_HEIGHT;
-    layout.bar = openride_ui_rect(safe.x,
-                                  safe.y + safe.h - height,
-                                  safe.w,
-                                  height);
+    const float available_height = safe.h - OPENRIDE_UI_TOOLBAR_BOTTOM_CLEARANCE;
+    const float height = available_height < OPENRIDE_UI_TOOLBAR_HEIGHT
+        ? available_height : OPENRIDE_UI_TOOLBAR_HEIGHT;
+    layout.bar = openride_ui_rect(
+        safe.x + OPENRIDE_UI_TOOLBAR_MARGIN_X,
+        safe.y + safe.h - OPENRIDE_UI_TOOLBAR_BOTTOM_CLEARANCE - height,
+        safe.w - OPENRIDE_UI_TOOLBAR_MARGIN_X * 2.0f,
+        height);
 
     const float item_width = layout.bar.w / (float)OPENRIDE_UI_TOOLBAR_ITEMS;
     for (uint32_t i = 0U; i < OPENRIDE_UI_TOOLBAR_ITEMS; ++i) {
@@ -113,6 +118,11 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
 
     openride_ui_panel(ui, layout.bar, true);
 
+    /* Toolbar items live inside one cockpit surface. Remove per-item borders so
+       only interaction/selection creates a subtle pill instead of five boxes. */
+    const OpenRideUIColor saved_border = ui->theme.border;
+    ui->theme.border.a = 0U;
+
     OpenRideToolbarAction clicked = OPENRIDE_TOOLBAR_NONE;
     for (OpenRideToolbarAction action = OPENRIDE_TOOLBAR_MENU;
          action <= OPENRIDE_TOOLBAR_GPS;
@@ -120,8 +130,8 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
         const uint32_t index = (uint32_t)(action - OPENRIDE_TOOLBAR_MENU);
         const OpenRideUIID id = toolbar_id(action);
         const bool selected = action == OPENRIDE_TOOLBAR_ROUTE && route_ready;
-        OpenRideUIRect item = openride_ui_inset(layout.items[index],
-                                                OPENRIDE_UI_TOOLBAR_ITEM_INSET);
+        const OpenRideUIRect item = openride_ui_inset(layout.items[index],
+                                                      OPENRIDE_UI_TOOLBAR_ITEM_INSET);
         if (openride_ui_button(ui,
                                id,
                                item,
@@ -132,8 +142,8 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
             clicked = action;
         }
 
-        float icon_size = ui->theme.icon_size;
-        if (icon_size > item.h * 0.42f) icon_size = item.h * 0.42f;
+        float icon_size = 24.0f;
+        if (icon_size > item.h * 0.40f) icon_size = item.h * 0.40f;
         const OpenRideUIRect icon_rect = openride_ui_rect(
             item.x + (item.w - icon_size) * 0.5f,
             item.y + 8.0f,
@@ -146,13 +156,13 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
                               toolbar_icon(action),
                               icon_rect,
                               icon_color,
-                              selected ? 2.0f : 1.75f);
+                              selected ? 2.0f : 1.7f);
 
         const OpenRideUIRect label_rect = openride_ui_rect(
             item.x + 2.0f,
-            item.y + item.h - 25.0f,
+            item.y + item.h - 22.0f,
             item.w - 4.0f,
-            18.0f);
+            16.0f);
         openride_ui_text_color(ui,
                                label_rect,
                                toolbar_label(action, route_ready),
@@ -160,5 +170,7 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
                                OPENRIDE_UI_TEXT_ALIGN_CENTER,
                                selected ? ui->theme.primary : ui->theme.text_secondary);
     }
+
+    ui->theme.border = saved_border;
     return clicked;
 }
