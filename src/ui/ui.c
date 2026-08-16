@@ -34,6 +34,108 @@ static void ui_set_draw_color(SDL_Renderer *renderer, OpenRideUIColor color)
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 }
 
+static void ui_fill_rounded_rect(SDL_Renderer *renderer,
+                                 SDL_FRect rect,
+                                 float radius,
+                                 OpenRideUIColor color)
+{
+    if (!renderer || rect.w <= 0.0f || rect.h <= 0.0f) return;
+    const float max_radius = fminf(rect.w, rect.h) * 0.5f;
+    radius = ui_clampf(radius, 0.0f, max_radius);
+    ui_set_draw_color(renderer, color);
+    if (radius < 1.0f) {
+        SDL_RenderFillRect(renderer, &rect);
+        return;
+    }
+
+    SDL_FRect horizontal = {
+        rect.x + radius,
+        rect.y,
+        rect.w - radius * 2.0f,
+        rect.h
+    };
+    SDL_FRect vertical = {
+        rect.x,
+        rect.y + radius,
+        rect.w,
+        rect.h - radius * 2.0f
+    };
+    if (horizontal.w > 0.0f) SDL_RenderFillRect(renderer, &horizontal);
+    if (vertical.h > 0.0f) SDL_RenderFillRect(renderer, &vertical);
+
+    const int rows = (int)ceilf(radius);
+    for (int row = 0; row < rows; ++row) {
+        const float y_from_center = radius - ((float)row + 0.5f);
+        const float inside = radius * radius - y_from_center * y_from_center;
+        const float span = inside > 0.0f ? sqrtf(inside) : 0.0f;
+        SDL_FRect top = {
+            rect.x + radius - span,
+            rect.y + (float)row,
+            rect.w - radius * 2.0f + span * 2.0f,
+            1.0f
+        };
+        SDL_FRect bottom = top;
+        bottom.y = rect.y + rect.h - (float)row - 1.0f;
+        if (top.w > 0.0f) SDL_RenderFillRect(renderer, &top);
+        if (bottom.w > 0.0f) SDL_RenderFillRect(renderer, &bottom);
+    }
+}
+
+static void ui_draw_arc(SDL_Renderer *renderer,
+                        float cx,
+                        float cy,
+                        float radius,
+                        float start_angle,
+                        float end_angle)
+{
+    if (!renderer || radius <= 0.0f) return;
+    const int segments = 8;
+    float previous_x = cx + cosf(start_angle) * radius;
+    float previous_y = cy + sinf(start_angle) * radius;
+    for (int i = 1; i <= segments; ++i) {
+        const float t = (float)i / (float)segments;
+        const float angle = start_angle + (end_angle - start_angle) * t;
+        const float x = cx + cosf(angle) * radius;
+        const float y = cy + sinf(angle) * radius;
+        SDL_RenderLine(renderer, previous_x, previous_y, x, y);
+        previous_x = x;
+        previous_y = y;
+    }
+}
+
+static void ui_stroke_rounded_rect(SDL_Renderer *renderer,
+                                   SDL_FRect rect,
+                                   float radius,
+                                   OpenRideUIColor color)
+{
+    if (!renderer || rect.w <= 0.0f || rect.h <= 0.0f) return;
+    const float max_radius = fminf(rect.w, rect.h) * 0.5f;
+    radius = ui_clampf(radius, 0.0f, max_radius);
+    ui_set_draw_color(renderer, color);
+    if (radius < 1.0f) {
+        SDL_RenderRect(renderer, &rect);
+        return;
+    }
+
+    const float left = rect.x;
+    const float right = rect.x + rect.w;
+    const float top = rect.y;
+    const float bottom = rect.y + rect.h;
+    SDL_RenderLine(renderer, left + radius, top, right - radius, top);
+    SDL_RenderLine(renderer, left + radius, bottom, right - radius, bottom);
+    SDL_RenderLine(renderer, left, top + radius, left, bottom - radius);
+    SDL_RenderLine(renderer, right, top + radius, right, bottom - radius);
+
+    ui_draw_arc(renderer, left + radius, top + radius,
+                radius, 3.14159265359f, 4.71238898038f);
+    ui_draw_arc(renderer, right - radius, top + radius,
+                radius, 4.71238898038f, 6.28318530718f);
+    ui_draw_arc(renderer, right - radius, bottom - radius,
+                radius, 0.0f, 1.57079632679f);
+    ui_draw_arc(renderer, left + radius, bottom - radius,
+                radius, 1.57079632679f, 3.14159265359f);
+}
+
 static size_t ui_utf8_glyph_count(const char *text)
 {
     if (!text) return 0U;
@@ -71,7 +173,7 @@ static float ui_text_style_scale(const OpenRideUIContext *ui,
             multiplier = 1.30f;
             break;
         case OPENRIDE_UI_TEXT_CAPTION:
-            multiplier = 0.86f;
+            multiplier = 0.82f;
             break;
         case OPENRIDE_UI_TEXT_BODY:
         default:
@@ -96,24 +198,31 @@ OpenRideUITheme openride_ui_theme_default(void)
 {
     OpenRideUITheme theme;
     memset(&theme, 0, sizeof(theme));
-    theme.background = ui_color(13U, 17U, 21U, 255U);
-    theme.surface = ui_color(24U, 29U, 34U, 242U);
-    theme.surface_elevated = ui_color(32U, 38U, 44U, 248U);
-    theme.primary = ui_color(42U, 105U, 154U, 255U);
-    theme.primary_pressed = ui_color(34U, 86U, 126U, 255U);
-    theme.text = ui_color(244U, 247U, 249U, 255U);
-    theme.text_secondary = ui_color(168U, 178U, 186U, 255U);
-    theme.border = ui_color(255U, 255U, 255U, 58U);
-    theme.danger = ui_color(148U, 67U, 67U, 255U);
-    theme.disabled = ui_color(86U, 94U, 101U, 220U);
-    theme.spacing_xs = 4.0f;
-    theme.spacing_sm = 8.0f;
-    theme.spacing_md = 12.0f;
-    theme.spacing_lg = 18.0f;
-    theme.radius_sm = 6.0f;
-    theme.radius_md = 10.0f;
-    theme.touch_target = 48.0f;
-    theme.button_height = 56.0f;
+
+    /* OpenRide visual language: dark cockpit surfaces + turquoise navigation accent. */
+    theme.background = ui_color(13U, 16U, 18U, 255U);          /* #0D1012 */
+    theme.surface = ui_color(22U, 26U, 29U, 238U);             /* #161A1D */
+    theme.surface_elevated = ui_color(29U, 34U, 37U, 248U);    /* #1D2225 */
+    theme.primary = ui_color(47U, 198U, 181U, 255U);           /* #2FC6B5 */
+    theme.primary_pressed = ui_color(35U, 164U, 150U, 255U);
+    theme.primary_soft = ui_color(38U, 96U, 91U, 220U);
+    theme.text = ui_color(245U, 245U, 245U, 255U);
+    theme.text_secondary = ui_color(155U, 163U, 167U, 255U);
+    theme.border = ui_color(255U, 255U, 255U, 34U);
+    theme.danger = ui_color(218U, 88U, 88U, 255U);
+    theme.success = ui_color(77U, 205U, 139U, 255U);
+    theme.disabled = ui_color(67U, 73U, 77U, 220U);
+
+    theme.spacing_xs = 5.0f;
+    theme.spacing_sm = 10.0f;
+    theme.spacing_md = 14.0f;
+    theme.spacing_lg = 20.0f;
+    theme.radius_sm = 8.0f;
+    theme.radius_md = 14.0f;
+    theme.radius_lg = 20.0f;
+    theme.touch_target = 52.0f;
+    theme.button_height = 58.0f;
+    theme.icon_size = 26.0f;
     return theme;
 }
 
@@ -142,6 +251,7 @@ bool openride_ui_begin(OpenRideUIContext *ui,
     ui->pointer_pressed = false;
     ui->pointer_released = false;
     ui->pointer_consumed = false;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     float scale = 1.0f;
     SDL_Window *window = SDL_GetRenderWindow(renderer);
@@ -311,18 +421,34 @@ void openride_ui_panel(OpenRideUIContext *ui,
 {
     if (!ui || !ui->renderer || rect.w <= 0.0f || rect.h <= 0.0f) return;
     const SDL_FRect pixels = openride_ui_rect_pixels(ui, rect);
-    ui_set_draw_color(ui->renderer,
-                      elevated ? ui->theme.surface_elevated : ui->theme.surface);
-    SDL_RenderFillRect(ui->renderer, &pixels);
-    ui_set_draw_color(ui->renderer, ui->theme.border);
-    SDL_RenderRect(ui->renderer, &pixels);
+    const float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
+    const float radius = (elevated ? ui->theme.radius_lg : ui->theme.radius_md)
+        * scale;
+
+    if (elevated) {
+        SDL_FRect shadow = pixels;
+        shadow.y += 3.0f * scale;
+        ui_fill_rounded_rect(ui->renderer,
+                             shadow,
+                             radius,
+                             ui_color(0U, 0U, 0U, 72U));
+    }
+    ui_fill_rounded_rect(ui->renderer,
+                         pixels,
+                         radius,
+                         elevated ? ui->theme.surface_elevated : ui->theme.surface);
+    ui_stroke_rounded_rect(ui->renderer,
+                           pixels,
+                           radius,
+                           ui->theme.border);
 }
 
-void openride_ui_text(OpenRideUIContext *ui,
-                      OpenRideUIRect rect,
-                      const char *text,
-                      OpenRideUITextStyle style,
-                      OpenRideUITextAlign align)
+void openride_ui_text_color(OpenRideUIContext *ui,
+                            OpenRideUIRect rect,
+                            const char *text,
+                            OpenRideUITextStyle style,
+                            OpenRideUITextAlign align,
+                            OpenRideUIColor color)
 {
     if (!ui || !ui->renderer || !text || !text[0]
         || rect.w <= 0.0f || rect.h <= 0.0f) {
@@ -340,11 +466,25 @@ void openride_ui_text(OpenRideUIContext *ui,
         x += pixels.w - width;
     }
     const float y = pixels.y + (pixels.h - height) * 0.5f;
-    ui_set_draw_color(ui->renderer,
-                      style == OPENRIDE_UI_TEXT_CAPTION
-                          ? ui->theme.text_secondary
-                          : ui->theme.text);
+    ui_set_draw_color(ui->renderer, color);
     ui_draw_scaled_text(ui->renderer, x, y, scale, text);
+}
+
+void openride_ui_text(OpenRideUIContext *ui,
+                      OpenRideUIRect rect,
+                      const char *text,
+                      OpenRideUITextStyle style,
+                      OpenRideUITextAlign align)
+{
+    if (!ui) return;
+    openride_ui_text_color(ui,
+                           rect,
+                           text,
+                           style,
+                           align,
+                           style == OPENRIDE_UI_TEXT_CAPTION
+                               ? ui->theme.text_secondary
+                               : ui->theme.text);
 }
 
 bool openride_ui_button(OpenRideUIContext *ui,
@@ -390,37 +530,40 @@ bool openride_ui_button(OpenRideUIContext *ui,
         switch (style) {
             case OPENRIDE_UI_BUTTON_PRIMARY:
                 fill = active ? ui->theme.primary_pressed : ui->theme.primary;
+                border = fill;
                 break;
             case OPENRIDE_UI_BUTTON_DANGER:
                 fill = active
                     ? ui_color_scale(ui->theme.danger, 0.82f)
                     : ui->theme.danger;
+                border = fill;
                 break;
             case OPENRIDE_UI_BUTTON_GHOST:
-                fill = ui->theme.surface;
-                fill.a = selected || active || inside ? 150U : 40U;
+                fill = selected ? ui->theme.primary_soft : ui->theme.surface;
+                fill.a = selected ? 205U : (active || inside ? 120U : 36U);
+                border.a = selected ? 70U : 22U;
                 break;
             case OPENRIDE_UI_BUTTON_SECONDARY:
             default:
-                if (selected) fill = ui_color_scale(ui->theme.primary, 0.78f);
-                else if (active) fill = ui_color_scale(fill, 0.80f);
-                else if (inside) fill = ui_color_scale(fill, 1.12f);
+                if (selected) fill = ui->theme.primary_soft;
+                else if (active) fill = ui_color_scale(fill, 0.82f);
+                else if (inside) fill = ui_color_scale(fill, 1.10f);
                 break;
         }
     }
 
     const SDL_FRect pixels = openride_ui_rect_pixels(ui, rect);
-    ui_set_draw_color(ui->renderer, fill);
-    SDL_RenderFillRect(ui->renderer, &pixels);
-    ui_set_draw_color(ui->renderer, border);
-    SDL_RenderRect(ui->renderer, &pixels);
+    const float scale = ui->scale > 0.0f ? ui->scale : 1.0f;
+    const float radius = ui->theme.radius_md * scale;
+    ui_fill_rounded_rect(ui->renderer, pixels, radius, fill);
+    ui_stroke_rounded_rect(ui->renderer, pixels, radius, border);
 
     if (label && label[0]) {
         float text_scale = ui->text_scale;
         const float natural_width =
             (float)ui_utf8_glyph_count(label) * 8.0f * text_scale;
         const float max_width = pixels.w - 24.0f * ui->scale;
-        if (natural_width > max_width && natural_width > 0.0f) {
+        if (natural_width > max_width && natural_width > 0.0f && max_width > 0.0f) {
             text_scale *= max_width / natural_width;
             if (text_scale < 1.0f) text_scale = 1.0f;
         }
@@ -437,4 +580,3 @@ bool openride_ui_button(OpenRideUIContext *ui,
 
     return clicked;
 }
-
