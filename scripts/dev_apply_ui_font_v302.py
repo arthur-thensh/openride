@@ -78,7 +78,7 @@ def prepare_cmake(text: str) -> str:
             "CMake UI font source",
         )
 
-    marker = "if(ANDROID)\n"
+    marker = '''if(ANDROID)\n    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/sqlite/sqlite3.c")\n'''
     check = '''if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb/stb_truetype.h"\n   OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ui-font/roboto_data.inc")\n    message(FATAL_ERROR\n        "UI font dependencies are missing. Run: ./scripts/bootstrap_ui_font.sh")\nendif()\n\n'''
     if check not in text:
         text = replace_once(text, marker, check + marker, "CMake UI font dependency check")
