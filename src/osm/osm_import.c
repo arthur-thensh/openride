@@ -2101,6 +2101,7 @@ typedef struct MapPolygonContext {
     OpenRideOSMMapFeatureVisitor visitor;
     void *userdata;
     OpenRideOSMMapFeatureStats stats;
+    bool overview_lines_only;
 } MapPolygonContext;
 
 typedef enum MapPolygonPass {
@@ -2235,6 +2236,31 @@ static OpenRideOSMMapFeatureKind classify_map_waterway_way(const OSMStringTable 
         return OPENRIDE_OSM_MAP_FEATURE_WATERWAY_DRAIN;
     }
     return 0;
+}
+
+static OpenRideOSMMapFeatureKind classify_overview_line_way(
+    const OSMStringTable *table,
+    const U32Vector *keys,
+    const U32Vector *vals)
+{
+    const ProtoSlice natural =
+        way_tag_value(table, keys, vals, "natural");
+    if (tag_is(natural, "coastline")) {
+        return OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_COASTLINE;
+    }
+
+    const ProtoSlice highway =
+        way_tag_value(table, keys, vals, "highway");
+    switch (road_class_from_highway(highway)) {
+        case OPENRIDE_ROAD_MOTORWAY:
+            return OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_MOTORWAY;
+        case OPENRIDE_ROAD_TRUNK:
+            return OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_TRUNK;
+        case OPENRIDE_ROAD_PRIMARY:
+            return OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_PRIMARY;
+        default:
+            return 0;
+    }
 }
 
 static bool relation_way_id_needed(const MapPolygonContext *context, int64_t osm_id)
@@ -2437,17 +2463,35 @@ static bool parse_map_polygon_way(ProtoSlice message,
     ++context->stats.osm_way_count;
     if (!has_id || scratch->refs.count < 2U) return true;
 
-    const bool relation_member = relation_way_id_needed(context, osm_id);
+    const bool relation_member =
+        context->overview_lines_only
+            ? false
+            : relation_way_id_needed(context, osm_id);
     const bool closed = scratch->refs.count >= 4U
         && scratch->refs.items[0] == scratch->refs.items[scratch->refs.count - 1U];
+
     OpenRideOSMMapFeatureKind kind = 0;
-    if (closed) {
-        kind = classify_map_area_way(table, &scratch->keys, &scratch->vals);
+    if (context->overview_lines_only) {
+        kind = classify_overview_line_way(
+            table,
+            &scratch->keys,
+            &scratch->vals);
+        if (kind == 0) return true;
+    } else {
+        if (closed) {
+            kind = classify_map_area_way(
+                table,
+                &scratch->keys,
+                &scratch->vals);
+        }
+        if (kind == 0) {
+            kind = classify_map_waterway_way(
+                table,
+                &scratch->keys,
+                &scratch->vals);
+        }
+        if (kind == 0 && !relation_member) return true;
     }
-    if (kind == 0) {
-        kind = classify_map_waterway_way(table, &scratch->keys, &scratch->vals);
-    }
-    if (kind == 0 && !relation_member) return true;
 
     const ProtoSlice building = way_tag_value(table, &scratch->keys, &scratch->vals, "building");
     const ProtoSlice landuse = way_tag_value(table, &scratch->keys, &scratch->vals, "landuse");
@@ -2952,10 +2996,10 @@ static bool emit_standalone_map_ways(MapPolygonContext *context,
                                      error_size)) {
             return false;
         }
-        const bool linear_waterway =
+        const bool linear_feature =
             feature_kind >= OPENRIDE_OSM_MAP_FEATURE_WATERWAY_RIVER;
-        if (!((linear_waterway && point_count >= 2U)
-              || (!linear_waterway && point_count >= 4U)
+        if (!((linear_feature && point_count >= 2U)
+              || (!linear_feature && point_count >= 4U)
               || (feature_kind == OPENRIDE_OSM_MAP_FEATURE_BUILTUP_AREA
                   && point_count == 1U))) {
             continue;
@@ -3184,6 +3228,81 @@ bool openride_osm_pbf_visit_map_features(
     free(longitudes);
     if (stats) *stats = context.stats;
     map_polygon_context_destroy(&context);
+    if (ok) set_error(error, error_size, "");
+    return ok;
+}
+
+
+bool openride_osm_pbf_visit_overview_lines(
+    const char *pbf_path,
+    OpenRideOSMMapFeatureVisitor visitor,
+    void *userdata,
+    OpenRideOSMMapFeatureStats *stats,
+    char *error,
+    size_t error_size)
+{
+    if (!pbf_path || !visitor) {
+        set_error(
+            error,
+            error_size,
+            "invalid overview line import arguments");
+        return false;
+    }
+
+    MapPolygonContext context;
+    memset(&context, 0, sizeof(context));
+    context.visitor = visitor;
+    context.userdata = userdata;
+    context.overview_lines_only = true;
+
+    /*
+     * National overview generation is intentionally only two passes:
+     *  1. retain motorway/trunk/primary/coastline way refs;
+     *  2. resolve only the nodes referenced by those ways.
+     *
+     * No multipolygon pass and no local-road graph are constructed.
+     */
+    bool ok = scan_pbf_map(
+        pbf_path,
+        MAP_POLYGON_PASS_WAYS,
+        &context,
+        error,
+        error_size);
+
+    if (ok) {
+        ok = prepare_map_polygon_nodes(
+            &context,
+            error,
+            error_size);
+    }
+    if (ok && context.node_count > 0U) {
+        ok = scan_pbf_map(
+            pbf_path,
+            MAP_POLYGON_PASS_NODES,
+            &context,
+            error,
+            error_size);
+    }
+
+    double *latitudes = NULL;
+    double *longitudes = NULL;
+    uint32_t point_capacity = 0U;
+    if (ok) {
+        ok = emit_standalone_map_ways(
+            &context,
+            &latitudes,
+            &longitudes,
+            &point_capacity,
+            error,
+            error_size);
+    }
+
+    free(latitudes);
+    free(longitudes);
+
+    if (stats) *stats = context.stats;
+    map_polygon_context_destroy(&context);
+
     if (ok) set_error(error, error_size, "");
     return ok;
 }

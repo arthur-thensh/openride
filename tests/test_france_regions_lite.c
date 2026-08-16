@@ -17,6 +17,34 @@ int main(void)
     assert(openride_france_regions_lite_ring_count() >= 27U);
     assert(openride_france_regions_lite_point_count() > 100U);
 
+    OpenRideFranceRegionsLiteRegionView first_region = {0};
+    assert(openride_france_regions_lite_region_at(0U, &first_region));
+    assert(first_region.id != NULL);
+    assert(first_region.ring_count > 0U);
+
+    OpenRideFranceRegionsLiteRingView first_ring = {0};
+    assert(openride_france_regions_lite_ring_at(
+        first_region.first_ring,
+        &first_ring));
+    assert(first_ring.point_count >= 3U);
+
+    OpenRideFranceRegionsLitePointView first_point = {0};
+    assert(openride_france_regions_lite_point_at(
+        first_ring.point_offset,
+        &first_point));
+    assert(first_point.lat >= -90.0 && first_point.lat <= 90.0);
+    assert(first_point.lon >= -180.0 && first_point.lon <= 180.0);
+
+    assert(!openride_france_regions_lite_region_at(
+        openride_france_regions_lite_region_count(),
+        &first_region));
+    assert(!openride_france_regions_lite_ring_at(
+        openride_france_regions_lite_ring_count(),
+        &first_ring));
+    assert(!openride_france_regions_lite_point_at(
+        openride_france_regions_lite_point_count(),
+        &first_point));
+
     expect_region(50.3708, 3.0802, "nord-pas-de-calais"); /* Douai */
     expect_region(49.1829, -0.3707, "basse-normandie");   /* Caen */
     expect_region(49.4432, 1.0993, "haute-normandie");   /* Rouen */

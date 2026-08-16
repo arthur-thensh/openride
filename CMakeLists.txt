@@ -288,6 +288,17 @@ else()
     target_compile_options(openride_ormap_import PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_executable(openride_france_overview_import
+    src/tools/france_overview_import_main.c
+)
+target_link_libraries(openride_france_overview_import PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_france_overview_import PRIVATE /W4)
+else()
+    target_compile_options(openride_france_overview_import PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+
 add_executable(openride_spatial_benchmark
     src/tools/spatial_benchmark_main.c
 )

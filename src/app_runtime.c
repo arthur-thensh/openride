@@ -648,8 +648,20 @@ int openride_app_run(int argc, char **argv)
                                                            error,
                                                            sizeof(error));
     if (map_world) {
-        SDL_Log("MapWorld overview: %zu installed region(s)",
-                openride_map_world_region_count(map_world));
+        const bool france_overview_available =
+            openride_map_world_base_available(map_world);
+        if (france_overview_available) {
+            /*
+             * The bundled France overview is zoomable even when the device has
+             * no downloaded regional map yet. Event handling can therefore use
+             * the MapWorld z6 floor instead of the fallback metadata z10 floor.
+             */
+            scalable_map = true;
+        }
+        SDL_Log(
+            "MapWorld: France overview=%s, %zu installed region(s)",
+            france_overview_available ? "ready" : "unavailable",
+            openride_map_world_region_count(map_world));
     } else {
         SDL_Log("MapWorld overview unavailable: %s",
                 error[0] ? error : "unknown error");
@@ -1302,6 +1314,8 @@ int openride_app_run(int argc, char **argv)
             break;
         }
 
+        const bool world_base_available = map_world
+            && openride_map_world_base_available(map_world);
         const bool world_available = map_world
             && openride_map_world_region_count(map_world) > 0U;
         OpenRideMapZoomFrameProfile map_zoom_profile;
@@ -1358,10 +1372,22 @@ int openride_app_run(int argc, char **argv)
                 if (map) openride_map_renderer_draw(&raster_renderer, &camera, width, height);
             }
 
-            if (world_available
-                && camera.zoom <= OPENRIDE_MAP_WORLD_MAX_OVERVIEW_ZOOM) {
-                /* During the handoff, keep the active region's
-                 * generalized overview visible as the detailed ORMap fades in. */
+            if (!map && world_base_available) {
+                /*
+                 * No regional map installed: keep a real France-wide visual
+                 * context instead of the empty background. Regional ORMaps,
+                 * once installed, are composited by MapWorld's detail path.
+                 */
+                openride_map_world_draw_base_overview(
+                    map_world,
+                    &camera,
+                    map_style,
+                    width,
+                    height);
+            } else if (world_available
+                       && camera.zoom
+                           <= OPENRIDE_MAP_WORLD_MAX_OVERVIEW_ZOOM) {
+                /* Legacy non-ORMap compatibility only. */
                 openride_map_world_draw(map_world,
                                         &camera,
                                         map_style,

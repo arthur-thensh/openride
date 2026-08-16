@@ -45,6 +45,15 @@ bool openride_map_world_refresh(OpenRideMapWorld *world,
 
 void openride_map_world_destroy(OpenRideMapWorld *world);
 
+bool openride_map_world_base_available(
+    const OpenRideMapWorld *world);
+void openride_map_world_draw_base_overview(
+    OpenRideMapWorld *world,
+    const OpenRideMapCamera *camera,
+    OpenRideMapStyle style,
+    int viewport_width,
+    int viewport_height);
+
 void openride_map_world_draw(OpenRideMapWorld *world,
                              const OpenRideMapCamera *camera,
                              OpenRideMapStyle style,

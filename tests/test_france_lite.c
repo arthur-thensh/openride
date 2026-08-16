@@ -30,6 +30,21 @@ int main(void)
 {
     assert(openride_france_lite_place_count() >= 80U);
 
+    const size_t place_count = openride_france_lite_place_count();
+    const OpenRideFranceLitePlace *paris = NULL;
+    for (size_t i = 0U; i < place_count; ++i) {
+        const OpenRideFranceLitePlace *place =
+            openride_france_lite_place_at(i);
+        assert(place != NULL);
+        if (strcmp(place->name, "Paris") == 0) {
+            paris = place;
+        }
+    }
+    assert(paris != NULL);
+    assert(paris->rank >= 100);
+    assert(strcmp(paris->region_id, "ile-de-france") == 0);
+    assert(openride_france_lite_place_at(place_count) == NULL);
+
     expect_region("bordeaux", "Bordeaux", "aquitaine");
     expect_region("caen", "Caen", "basse-normandie");
     expect_region("douai", "Douai", "nord-pas-de-calais");

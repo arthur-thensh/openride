@@ -6,20 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct OpenRideFranceLiteEntry {
-    const char *name;
-    double lat;
-    double lon;
-    OpenRidePlaceKind kind;
-    int rank;
-    const char *region_id;
-} OpenRideFranceLiteEntry;
-
 /*
  * Important cities/towns only. Downloaded regional SQLite indexes remain the
  * richer source for local places and POIs.
  */
-static const OpenRideFranceLiteEntry PLACES[] = {
+static const OpenRideFranceLitePlace PLACES[] = {
     {"Strasbourg", 48.5734, 7.7521, OPENRIDE_PLACE_CITY, 100, "alsace"},
     {"Mulhouse", 47.7508, 7.3359, OPENRIDE_PLACE_CITY, 85, "alsace"},
     {"Colmar", 48.0794, 7.3585, OPENRIDE_PLACE_TOWN, 78, "alsace"},
@@ -111,7 +102,7 @@ static const OpenRideFranceLiteEntry PLACES[] = {
 };
 
 typedef struct OpenRideFranceLiteCandidate {
-    const OpenRideFranceLiteEntry *entry;
+    const OpenRideFranceLitePlace *entry;
     int match_class;
     size_t normalized_name_length;
 } OpenRideFranceLiteCandidate;
@@ -125,6 +116,12 @@ static void set_error(char *error, size_t error_size, const char *message)
 size_t openride_france_lite_place_count(void)
 {
     return sizeof(PLACES) / sizeof(PLACES[0]);
+}
+
+const OpenRideFranceLitePlace *openride_france_lite_place_at(size_t index)
+{
+    if (index >= openride_france_lite_place_count()) return NULL;
+    return &PLACES[index];
 }
 
 static int compare_candidate(const void *left, const void *right)
@@ -211,7 +208,7 @@ bool openride_france_lite_search(const char *query,
             : max_results;
 
     for (uint32_t i = 0U; i < count; ++i) {
-        const OpenRideFranceLiteEntry *entry = candidates[i].entry;
+        const OpenRideFranceLitePlace *entry = candidates[i].entry;
         OpenRidePlaceSearchResult *out = &results[i];
         memset(out, 0, sizeof(*out));
         out->osm_id = -(int64_t)(i + 1U);

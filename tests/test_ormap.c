@@ -12,6 +12,28 @@
 #include <string.h>
 #include <unistd.h>
 
+typedef struct OverviewLineTestCounter {
+    uint32_t count;
+} OverviewLineTestCounter;
+
+static bool count_overview_line(
+    OpenRideOSMMapFeatureKind kind,
+    const double *latitudes,
+    const double *longitudes,
+    uint32_t point_count,
+    void *userdata)
+{
+    OverviewLineTestCounter *counter = userdata;
+    assert(counter != NULL);
+    assert(latitudes != NULL);
+    assert(longitudes != NULL);
+    assert(point_count >= 2U);
+    assert(kind >= OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_COASTLINE);
+    assert(kind <= OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_PRIMARY);
+    ++counter->count;
+    return true;
+}
+
 static double mx(double lon) { return (lon + 180.0) / 360.0; }
 static double my(double lat)
 {
@@ -171,6 +193,19 @@ int main(int argc, char **argv)
                                           &place_stats,
                                           error,
                                           sizeof(error)));
+    OpenRideOSMMapFeatureStats overview_stats = {0};
+    OverviewLineTestCounter overview_counter = {0};
+    assert(openride_osm_pbf_visit_overview_lines(
+        argv[1],
+        count_overview_line,
+        &overview_counter,
+        &overview_stats,
+        error,
+        sizeof(error)));
+    assert(overview_stats.osm_way_count > 0U);
+    assert(
+        (uint64_t)overview_counter.count
+        == overview_stats.emitted_feature_count);
     OpenRideORMapBuildStats map_stats = {0};
     assert(openride_ormap_build(argv[1],
                                 graph_path,

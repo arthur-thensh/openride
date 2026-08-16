@@ -108,6 +108,63 @@ const char *openride_france_regions_lite_region_id(double lat, double lon)
     return NULL;
 }
 
+bool openride_france_regions_lite_region_at(
+    size_t index,
+    OpenRideFranceRegionsLiteRegionView *region)
+{
+    if (!region || index >= openride_france_regions_lite_region_count()) {
+        return false;
+    }
+
+    const OpenRideFranceRegionsLiteRegion *source =
+        &OPENRIDE_FRANCE_REGIONS_LITE_REGIONS[index];
+    region->id = source->id;
+    region->first_ring = source->first_ring;
+    region->ring_count = source->ring_count;
+    region->min_lon =
+        (double)source->min_lon_e5 / OPENRIDE_FRANCE_REGIONS_LITE_SCALE;
+    region->min_lat =
+        (double)source->min_lat_e5 / OPENRIDE_FRANCE_REGIONS_LITE_SCALE;
+    region->max_lon =
+        (double)source->max_lon_e5 / OPENRIDE_FRANCE_REGIONS_LITE_SCALE;
+    region->max_lat =
+        (double)source->max_lat_e5 / OPENRIDE_FRANCE_REGIONS_LITE_SCALE;
+    return true;
+}
+
+bool openride_france_regions_lite_ring_at(
+    size_t index,
+    OpenRideFranceRegionsLiteRingView *ring)
+{
+    if (!ring || index >= openride_france_regions_lite_ring_count()) {
+        return false;
+    }
+
+    const OpenRideFranceRegionsLiteRing *source =
+        &OPENRIDE_FRANCE_REGIONS_LITE_RINGS[index];
+    ring->point_offset = source->point_offset;
+    ring->point_count = source->point_count;
+    ring->hole = source->hole != 0U;
+    return true;
+}
+
+bool openride_france_regions_lite_point_at(
+    size_t index,
+    OpenRideFranceRegionsLitePointView *point)
+{
+    if (!point || index >= openride_france_regions_lite_point_count()) {
+        return false;
+    }
+
+    const OpenRideFranceRegionsLitePoint *source =
+        &OPENRIDE_FRANCE_REGIONS_LITE_POINTS[index];
+    point->lon =
+        (double)source->lon_e5 / OPENRIDE_FRANCE_REGIONS_LITE_SCALE;
+    point->lat =
+        (double)source->lat_e5 / OPENRIDE_FRANCE_REGIONS_LITE_SCALE;
+    return true;
+}
+
 size_t openride_france_regions_lite_region_count(void)
 {
     return sizeof(OPENRIDE_FRANCE_REGIONS_LITE_REGIONS)

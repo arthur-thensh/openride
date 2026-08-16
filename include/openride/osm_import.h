@@ -22,7 +22,16 @@ typedef enum OpenRideOSMMapFeatureKind {
     OPENRIDE_OSM_MAP_FEATURE_WATERWAY_RIVER = 4,
     OPENRIDE_OSM_MAP_FEATURE_WATERWAY_CANAL = 5,
     OPENRIDE_OSM_MAP_FEATURE_WATERWAY_STREAM = 6,
-    OPENRIDE_OSM_MAP_FEATURE_WATERWAY_DRAIN = 7
+    OPENRIDE_OSM_MAP_FEATURE_WATERWAY_DRAIN = 7,
+
+    /*
+     * Development-time France Overview line classes.
+     * They are deliberately kept out of normal regional .ormap generation.
+     */
+    OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_COASTLINE = 8,
+    OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_MOTORWAY = 9,
+    OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_TRUNK = 10,
+    OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_PRIMARY = 11
 } OpenRideOSMMapFeatureKind;
 
 typedef struct OpenRideOSMMapFeatureStats {
@@ -91,6 +100,21 @@ bool openride_osm_pbf_import_places(const char *pbf_path,
  * layer and are reported in the returned statistics.
  */
 bool openride_osm_pbf_visit_map_features(
+    const char *pbf_path,
+    OpenRideOSMMapFeatureVisitor visitor,
+    void *userdata,
+    OpenRideOSMMapFeatureStats *stats,
+    char *error,
+    size_t error_size);
+
+/*
+ * Visit only the linear features needed to generate OpenRide's bundled
+ * national overview: real OSM coastline plus motorway/trunk/primary roads.
+ *
+ * This uses two streaming PBF passes (ways, then referenced nodes) and does
+ * not retain unrelated local roads, landcover or multipolygon relations.
+ */
+bool openride_osm_pbf_visit_overview_lines(
     const char *pbf_path,
     OpenRideOSMMapFeatureVisitor visitor,
     void *userdata,

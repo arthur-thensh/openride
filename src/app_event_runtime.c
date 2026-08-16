@@ -228,6 +228,38 @@ bool openride_app_events_poll(OpenRideAppEventContext *context,
                          * stock adb cannot synthesize a real two-finger stream
                          * reliably on every phone.
                          */
+                        if (event.key.key == SDLK_F9) {
+                            if ((*context->map_zoom_test).active) {
+                                openride_map_zoom_test_cancel(
+                                    &(*context->map_zoom_test));
+                            }
+                            if ((*context->place_search_active)) {
+                                (*context->place_search_active) = false;
+                                (*context->place_search_purpose) =
+                                    OPENRIDE_PLACE_SEARCH_BROWSE;
+                                SDL_StopTextInput(context->window);
+                            }
+                            (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
+                            if (context->route_choice) {
+                                openride_route_choice_reset(
+                                    context->route_choice);
+                            }
+
+                            /*
+                             * Paris is intentionally outside the normal
+                             * Nord-Pas-de-Calais test ORMap. This gives adb a
+                             * deterministic non-downloaded-zone target for the
+                             * bundled France Overview.
+                             */
+                            (*context->camera).center_lat = 48.8566;
+                            (*context->camera).center_lon = 2.3522;
+                            (*context->camera).zoom = 7.0;
+                            (*context->camera).bearing_deg = 0.0;
+                            SDL_Log(
+                                "AUDIT_FRANCE_OVERVIEW_JUMP center=48.856600,2.352200 zoom=7.000");
+                            break;
+                        }
+
                         if (event.key.key == SDLK_F10) {
                             if (!(*context->place_search_active)
                                 && (*context->app_panel)

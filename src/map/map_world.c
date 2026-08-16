@@ -4,6 +4,8 @@
 #include "openride/ormap.h"
 #include "openride/place_search.h"
 #include "openride/region_manager.h"
+#include "openride/france_lite.h"
+#include "openride/france_regions_lite.h"
 #include "openride/routing_graph.h"
 
 #include <math.h>
@@ -17,7 +19,12 @@
 #define WORLD_MAX_LINE_WIDTH 3
 #define WORLD_REGION_REFERENCE_LABEL_TARGET 3U
 #define WORLD_MAJOR_CITY_LABEL_MAX 96U
+#define WORLD_FRANCE_BASE_LABEL_MAX 48U
+#define WORLD_FRANCE_BASE_CANDIDATE_MAX 128U
 #define WORLD_LINE_CHUNK_SIZE 64U
+#define WORLD_FRANCE_NETWORK_COORD_MAX 65535U
+
+#include "france_overview_network_data.inc"
 /*
  * MapWorld is an orientation overview, not the navigation cartography.
  * Snap its major-road geometry to a ~131k WebMercator lattice and collapse
@@ -74,6 +81,11 @@ typedef struct WorldCityLabelBox {
     float bottom;
 } WorldCityLabelBox;
 
+typedef struct WorldFranceLabelCandidate {
+    const OpenRideFranceLitePlace *place;
+    OpenRidePointD point;
+} WorldFranceLabelCandidate;
+
 typedef struct OpenRideMapWorldRegion {
     const OpenRideRegionDefinition *definition;
     OpenRideORMapMetadata metadata;
@@ -89,6 +101,10 @@ struct OpenRideMapWorld {
     SDL_Renderer *renderer;
     OpenRideMapWorldRegion *regions;
     size_t region_count;
+    WorldLineArray france_boundaries;
+    WorldLineArray france_coastline;
+    WorldLineArray france_roads[WORLD_MAJOR_ROAD_CLASS_COUNT];
+    bool france_base_ready;
     SDL_Vertex *vertices;
     int *indices;
     uint32_t vertex_capacity;
@@ -784,6 +800,195 @@ static bool build_world_region(SDL_Renderer *renderer,
     return true;
 }
 
+static bool append_france_network_edges(
+    WorldLineArray *destination,
+    const uint64_t *edges,
+    size_t edge_count,
+    uint8_t kind)
+{
+    if (!destination) return false;
+    const double inverse =
+        1.0 / (double)WORLD_FRANCE_NETWORK_COORD_MAX;
+
+    for (size_t i = 0U; i < edge_count; ++i) {
+        const uint64_t edge = edges[i];
+        const uint32_t a = (uint32_t)(edge >> 32U);
+        const uint32_t b = (uint32_t)edge;
+
+        const double ax =
+            (double)(a & UINT32_C(0xffff)) * inverse;
+        const double ay =
+            (double)(a >> 16U) * inverse;
+        const double bx =
+            (double)(b & UINT32_C(0xffff)) * inverse;
+        const double by =
+            (double)(b >> 16U) * inverse;
+
+        if (!line_array_append_world(
+                destination,
+                ax,
+                ay,
+                bx,
+                by,
+                kind)) {
+            return false;
+        }
+    }
+
+    return line_array_build_chunks(destination);
+}
+
+static bool build_france_generated_network(OpenRideMapWorld *world)
+{
+    if (!world) return false;
+
+    if (!append_france_network_edges(
+            &world->france_coastline,
+            OPENRIDE_FRANCE_OVERVIEW_COAST_EDGES,
+            OPENRIDE_FRANCE_OVERVIEW_COAST_EDGES_COUNT,
+            0U)) {
+        return false;
+    }
+
+    if (!append_france_network_edges(
+            &world->france_roads[0],
+            OPENRIDE_FRANCE_OVERVIEW_MOTORWAY_EDGES,
+            OPENRIDE_FRANCE_OVERVIEW_MOTORWAY_EDGES_COUNT,
+            OPENRIDE_ROAD_MOTORWAY)
+        || !append_france_network_edges(
+            &world->france_roads[1],
+            OPENRIDE_FRANCE_OVERVIEW_TRUNK_EDGES,
+            OPENRIDE_FRANCE_OVERVIEW_TRUNK_EDGES_COUNT,
+            OPENRIDE_ROAD_TRUNK)
+        || !append_france_network_edges(
+            &world->france_roads[2],
+            OPENRIDE_FRANCE_OVERVIEW_PRIMARY_EDGES,
+            OPENRIDE_FRANCE_OVERVIEW_PRIMARY_EDGES_COUNT,
+            OPENRIDE_ROAD_PRIMARY)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool build_france_base_geometry(OpenRideMapWorld *world,
+                                       char *error,
+                                       size_t error_size)
+{
+    if (!world) return false;
+
+    line_array_destroy(&world->france_boundaries);
+    line_array_destroy(&world->france_coastline);
+    for (int i = 0; i < WORLD_MAJOR_ROAD_CLASS_COUNT; ++i) {
+        line_array_destroy(&world->france_roads[i]);
+    }
+    world->france_base_ready = false;
+
+    const size_t region_count =
+        openride_france_regions_lite_region_count();
+
+    for (size_t region_index = 0U;
+         region_index < region_count;
+         ++region_index) {
+        OpenRideFranceRegionsLiteRegionView region = {0};
+        if (!openride_france_regions_lite_region_at(
+                region_index,
+                &region)) {
+            continue;
+        }
+
+        const uint32_t ring_end =
+            region.first_ring + region.ring_count;
+        for (uint32_t ring_index = region.first_ring;
+             ring_index < ring_end;
+             ++ring_index) {
+            OpenRideFranceRegionsLiteRingView ring = {0};
+            if (!openride_france_regions_lite_ring_at(
+                    ring_index,
+                    &ring)
+                || ring.point_count < 2U) {
+                continue;
+            }
+
+            OpenRideFranceRegionsLitePointView first = {0};
+            OpenRideFranceRegionsLitePointView previous = {0};
+            if (!openride_france_regions_lite_point_at(
+                    ring.point_offset,
+                    &first)) {
+                continue;
+            }
+            previous = first;
+
+            for (uint32_t local = 1U;
+                 local < ring.point_count;
+                 ++local) {
+                OpenRideFranceRegionsLitePointView current = {0};
+                if (!openride_france_regions_lite_point_at(
+                        ring.point_offset + local,
+                        &current)) {
+                    continue;
+                }
+
+                if (!line_array_append(
+                        &world->france_boundaries,
+                        previous.lat,
+                        previous.lon,
+                        current.lat,
+                        current.lon,
+                        ring.hole ? 1U : 0U)) {
+                    set_error(
+                        error,
+                        error_size,
+                        "out of memory building bundled France overview");
+                    line_array_destroy(&world->france_boundaries);
+                    return false;
+                }
+                previous = current;
+            }
+
+            if (fabs(previous.lat - first.lat) > 1e-9
+                || fabs(previous.lon - first.lon) > 1e-9) {
+                if (!line_array_append(
+                        &world->france_boundaries,
+                        previous.lat,
+                        previous.lon,
+                        first.lat,
+                        first.lon,
+                        ring.hole ? 1U : 0U)) {
+                    set_error(
+                        error,
+                        error_size,
+                        "out of memory closing bundled France overview ring");
+                    line_array_destroy(&world->france_boundaries);
+                    return false;
+                }
+            }
+        }
+    }
+
+    if (!line_array_build_chunks(&world->france_boundaries)
+        || !build_france_generated_network(world)) {
+        set_error(
+            error,
+            error_size,
+            "out of memory indexing bundled France overview");
+        line_array_destroy(&world->france_boundaries);
+        line_array_destroy(&world->france_coastline);
+        for (int i = 0; i < WORLD_MAJOR_ROAD_CLASS_COUNT; ++i) {
+            line_array_destroy(&world->france_roads[i]);
+        }
+        return false;
+    }
+
+    world->france_base_ready =
+        world->france_boundaries.count > 0U
+        || world->france_coastline.count > 0U
+        || world->france_roads[0].count > 0U
+        || world->france_roads[1].count > 0U
+        || world->france_roads[2].count > 0U;
+    return true;
+}
+
 OpenRideMapWorld *openride_map_world_create(SDL_Renderer *renderer,
                                              const OpenRidePlatformPaths *paths,
                                              char *error,
@@ -799,6 +1004,10 @@ OpenRideMapWorld *openride_map_world_create(SDL_Renderer *renderer,
         return NULL;
     }
     world->renderer = renderer;
+    if (!build_france_base_geometry(world, error, error_size)) {
+        openride_map_world_destroy(world);
+        return NULL;
+    }
     if (!openride_map_world_refresh(world, paths, error, error_size)) {
         openride_map_world_destroy(world);
         return NULL;
@@ -867,6 +1076,11 @@ void openride_map_world_destroy(OpenRideMapWorld *world)
 {
     if (!world) return;
     destroy_regions(world->regions, world->region_count);
+    line_array_destroy(&world->france_boundaries);
+    line_array_destroy(&world->france_coastline);
+    for (int i = 0; i < WORLD_MAJOR_ROAD_CLASS_COUNT; ++i) {
+        line_array_destroy(&world->france_roads[i]);
+    }
     free(world->vertices);
     free(world->indices);
     free(world);
@@ -1501,6 +1715,436 @@ static void draw_major_city_labels(OpenRideMapWorld *world,
             : SDL_BLENDMODE_NONE);
 }
 
+static bool world_region_id_installed(
+    const OpenRideMapWorld *world,
+    const char *region_id)
+{
+    if (!world || !region_id || region_id[0] == '\0') return false;
+
+    for (size_t i = 0U; i < world->region_count; ++i) {
+        const OpenRideMapWorldRegion *region = &world->regions[i];
+        if (region->definition
+            && strcmp(region->definition->id, region_id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int compare_france_label_candidate(
+    const void *left,
+    const void *right)
+{
+    const WorldFranceLabelCandidate *a = left;
+    const WorldFranceLabelCandidate *b = right;
+
+    if (a->place->rank != b->place->rank) {
+        return a->place->rank > b->place->rank ? -1 : 1;
+    }
+    return strcmp(a->place->name, b->place->name);
+}
+
+static void draw_france_base_city_labels(
+    OpenRideMapWorld *world,
+    const OpenRideMapCamera *camera,
+    const OpenRideMapPalette *palette,
+    int viewport_width,
+    int viewport_height)
+{
+    if (!world || !world->renderer || !camera || !palette) return;
+
+    int min_rank = 72;
+    uint32_t max_labels = WORLD_FRANCE_BASE_LABEL_MAX;
+    if (camera->zoom < 7.0) {
+        min_rank = 98;
+        max_labels = 8U;
+    } else if (camera->zoom < 8.0) {
+        min_rank = 94;
+        max_labels = 14U;
+    } else if (camera->zoom < 9.0) {
+        min_rank = 88;
+        max_labels = 20U;
+    } else if (camera->zoom < 10.5) {
+        min_rank = 82;
+        max_labels = 28U;
+    } else if (camera->zoom < 12.5) {
+        min_rank = 76;
+        max_labels = 38U;
+    }
+
+    WorldFranceLabelCandidate
+        candidates[WORLD_FRANCE_BASE_CANDIDATE_MAX];
+    uint32_t candidate_count = 0U;
+
+    const size_t place_count =
+        openride_france_lite_place_count();
+    for (size_t i = 0U;
+         i < place_count
+         && candidate_count < WORLD_FRANCE_BASE_CANDIDATE_MAX;
+         ++i) {
+        const OpenRideFranceLitePlace *place =
+            openride_france_lite_place_at(i);
+        if (!place
+            || !place->name
+            || place->name[0] == '\0'
+            || place->rank < min_rank
+            || world_region_id_installed(
+                world,
+                place->region_id)) {
+            continue;
+        }
+
+        const OpenRidePointD point =
+            openride_geo_to_screen(
+                camera,
+                place->lat,
+                place->lon,
+                viewport_width,
+                viewport_height);
+
+        if (point.x < -140.0
+            || point.x > (double)viewport_width + 140.0
+            || point.y < -60.0
+            || point.y > (double)viewport_height + 60.0) {
+            continue;
+        }
+
+        candidates[candidate_count++] =
+            (WorldFranceLabelCandidate){
+                .place = place,
+                .point = point
+            };
+    }
+
+    if (candidate_count > 1U) {
+        qsort(
+            candidates,
+            candidate_count,
+            sizeof(candidates[0]),
+            compare_france_label_candidate);
+    }
+
+    WorldCityLabelBox boxes[WORLD_FRANCE_BASE_LABEL_MAX];
+    uint32_t box_count = 0U;
+
+    SDL_BlendMode previous_blend_mode = SDL_BLENDMODE_NONE;
+    const bool have_previous_blend_mode =
+        SDL_GetRenderDrawBlendMode(
+            world->renderer,
+            &previous_blend_mode);
+    SDL_SetRenderDrawBlendMode(
+        world->renderer,
+        SDL_BLENDMODE_BLEND);
+
+    for (uint32_t i = 0U;
+         i < candidate_count
+         && box_count < max_labels;
+         ++i) {
+        const WorldFranceLabelCandidate *candidate =
+            &candidates[i];
+        const char *name = candidate->place->name;
+        const float text_width =
+            (float)strlen(name) * 8.0f;
+        const float base_x =
+            (float)candidate->point.x
+            - text_width * 0.5f;
+        const float base_y =
+            (float)candidate->point.y - 4.0f;
+
+        float x = 0.0f;
+        float y = 0.0f;
+        WorldCityLabelBox box = {0};
+        if (!world_reference_label_try_place(
+                boxes,
+                box_count,
+                base_x,
+                base_y,
+                text_width,
+                viewport_width,
+                viewport_height,
+                &x,
+                &y,
+                &box)) {
+            continue;
+        }
+
+        boxes[box_count++] = box;
+
+        SDL_SetRenderDrawColor(
+            world->renderer,
+            palette->label_halo.r,
+            palette->label_halo.g,
+            palette->label_halo.b,
+            225U);
+        SDL_RenderDebugText(
+            world->renderer, x - 1.0f, y, name);
+        SDL_RenderDebugText(
+            world->renderer, x + 1.0f, y, name);
+        SDL_RenderDebugText(
+            world->renderer, x, y - 1.0f, name);
+        SDL_RenderDebugText(
+            world->renderer, x, y + 1.0f, name);
+
+        SDL_SetRenderDrawColor(
+            world->renderer,
+            palette->label.r,
+            palette->label.g,
+            palette->label.b,
+            SDL_ALPHA_OPAQUE);
+        SDL_RenderDebugText(
+            world->renderer, x, y, name);
+    }
+
+    SDL_SetRenderDrawBlendMode(
+        world->renderer,
+        have_previous_blend_mode
+            ? previous_blend_mode
+            : SDL_BLENDMODE_NONE);
+}
+
+static void draw_france_generated_network(
+    OpenRideMapWorld *world,
+    const OpenRideMapCamera *camera,
+    OpenRideMapStyle style,
+    const OpenRideMapPalette *palette,
+    int viewport_width,
+    int viewport_height)
+{
+    if (!world || !camera || !palette) return;
+
+    /*
+     * The generated coastline is the primary national geographic reference.
+     * Keep it visible longer than the road atlas so non-downloaded areas still
+     * retain a natural silhouette while ORMap takes over the road detail.
+     */
+    if (world->france_coastline.count > 0U
+        && camera->zoom < 13.0) {
+        OpenRideMapColor coast = palette->water_line;
+        double coast_alpha = 0.90;
+        if (camera->zoom > 10.75) {
+            coast_alpha *=
+                1.0 - openride_zoom_smoothstep(
+                    camera->zoom,
+                    10.75,
+                    13.0);
+        }
+        coast.a =
+            openride_scaled_alpha(205U, coast_alpha);
+        draw_line_array(
+            world,
+            camera,
+            &world->france_coastline,
+            coast,
+            camera->zoom >= 8.0 ? 2 : 1,
+            viewport_width,
+            viewport_height,
+            0U,
+            false);
+    }
+
+    /*
+     * France Overview road ownership:
+     *
+     *   z6        motorway
+     *   z7        + trunk
+     *   z8        + primary, initially faint
+     *   z9-z10.5  full national hierarchy
+     *   z10.5-12  progressive handoff to regional ORMap
+     *
+     * No secondary/tertiary roads belong in this national layer.
+     */
+    const double atlas_fade =
+        1.0 - openride_zoom_smoothstep(
+            camera->zoom,
+            10.5,
+            12.0);
+    if (atlas_fade <= 0.001) return;
+
+    for (int road_index = 0;
+         road_index < WORLD_MAJOR_ROAD_CLASS_COUNT;
+         ++road_index) {
+        const OpenRideRoadClass road_class =
+            (OpenRideRoadClass)(
+                (int)OPENRIDE_ROAD_MOTORWAY + road_index);
+
+        double class_factor = 1.0;
+        switch (road_class) {
+            case OPENRIDE_ROAD_MOTORWAY:
+                class_factor = 1.0;
+                break;
+
+            case OPENRIDE_ROAD_TRUNK:
+                if (camera->zoom < 7.0) continue;
+                class_factor =
+                    0.58
+                    + 0.32 * openride_zoom_smoothstep(
+                        camera->zoom,
+                        7.0,
+                        8.6);
+                break;
+
+            case OPENRIDE_ROAD_PRIMARY:
+                if (camera->zoom < 8.0) continue;
+                class_factor =
+                    0.24
+                    + 0.62 * openride_zoom_smoothstep(
+                        camera->zoom,
+                        8.0,
+                        9.35);
+                break;
+
+            default:
+                continue;
+        }
+
+        const char *kind =
+            road_kind((uint8_t)road_class);
+        OpenRideMapRoadPaint paint;
+        if (!openride_map_road_paint(
+                style,
+                kind,
+                false,
+                camera->zoom,
+                &paint)) {
+            continue;
+        }
+
+        /*
+         * The national atlas must remain context, not look like local
+         * navigation geometry. Keep lower classes thinner at z8-z9 while
+         * preserving motorway readability.
+         */
+        int width = paint.width;
+        if (road_class == OPENRIDE_ROAD_PRIMARY
+            && camera->zoom < 9.6) {
+            width = 1;
+        } else if (road_class == OPENRIDE_ROAD_TRUNK
+                   && camera->zoom < 8.2
+                   && width > 1) {
+            width = 1;
+        }
+
+        paint.line.a =
+            openride_scaled_alpha(
+                paint.line.a,
+                0.90 * class_factor * atlas_fade);
+
+        draw_line_array(
+            world,
+            camera,
+            &world->france_roads[road_index],
+            paint.line,
+            width,
+            viewport_width,
+            viewport_height,
+            0U,
+            false);
+    }
+}
+
+bool openride_map_world_base_available(
+    const OpenRideMapWorld *world)
+{
+    return world && world->france_base_ready;
+}
+
+void openride_map_world_draw_base_overview(
+    OpenRideMapWorld *world,
+    const OpenRideMapCamera *camera,
+    OpenRideMapStyle style,
+    int viewport_width,
+    int viewport_height)
+{
+    if (!openride_map_world_base_available(world)
+        || !world->renderer
+        || !camera
+        || viewport_width <= 0
+        || viewport_height <= 0
+        || camera->zoom < OPENRIDE_MAP_WORLD_MIN_ZOOM) {
+        return;
+    }
+
+    const bool debug_enabled = world->debug_enabled;
+    const uint64_t debug_started_ns =
+        debug_enabled ? SDL_GetTicksNS() : 0U;
+    if (debug_enabled) world->debug.overview_drawn = true;
+
+    const OpenRideMapPalette palette =
+        openride_map_palette(style);
+
+    /*
+     * This is intentionally a lightweight context layer, not navigation
+     * cartography. Once the generated OSM coastline exists, the historical
+     * Geofabrik extraction rings become secondary administrative context
+     * instead of pretending to be a coastline.
+     */
+    OpenRideMapColor boundary = palette.boundary;
+    double boundary_alpha = 0.0;
+    if (camera->zoom < 9.0) {
+        boundary_alpha = 0.68;
+    } else if (camera->zoom < 11.0) {
+        boundary_alpha =
+            0.68
+            * (1.0 - openride_zoom_smoothstep(
+                camera->zoom,
+                9.0,
+                11.0));
+        if (boundary_alpha < 0.22) boundary_alpha = 0.22;
+    } else if (camera->zoom < 13.0) {
+        boundary_alpha =
+            0.22
+            * (1.0 - openride_zoom_smoothstep(
+                camera->zoom,
+                11.0,
+                13.0));
+    }
+
+    if (world->france_coastline.count > 0U) {
+        /*
+         * These rings are Geofabrik extraction/admin context, not coastline.
+         * Once real OSM coastline exists they should never compete visually
+         * with the geography or the national road hierarchy.
+         */
+        boundary_alpha *= 0.14;
+    }
+
+    if (boundary_alpha > 0.001) {
+        boundary.a =
+            openride_scaled_alpha(115U, boundary_alpha);
+        draw_line_array(
+            world,
+            camera,
+            &world->france_boundaries,
+            boundary,
+            1,
+            viewport_width,
+            viewport_height,
+            0U,
+            false);
+    }
+
+    draw_france_generated_network(
+        world,
+        camera,
+        style,
+        &palette,
+        viewport_width,
+        viewport_height);
+
+    draw_france_base_city_labels(
+        world,
+        camera,
+        &palette,
+        viewport_width,
+        viewport_height);
+
+    if (debug_enabled) {
+        world->debug.overview_ms +=
+            (double)(SDL_GetTicksNS() - debug_started_ns)
+            / 1000000.0;
+    }
+}
+
 static bool overview_region_maybe_visible(
     const OpenRideMapWorldRegion *region,
     const OpenRideMapCamera *camera,
@@ -1762,6 +2406,13 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
                            palette.background.b,
                            SDL_ALPHA_OPAQUE);
     SDL_RenderClear(world->renderer);
+
+    openride_map_world_draw_base_overview(
+        world,
+        camera,
+        style,
+        viewport_width,
+        viewport_height);
 
     size_t visible_count = 0U;
     for (size_t i = 0U; i < world->region_count; ++i) {
