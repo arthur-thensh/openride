@@ -12,6 +12,7 @@ Transactional: validates all source fragments before writing files.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -269,22 +270,43 @@ static const OpenRideRoutingGraph *resolve_loop_graph(
 
 
 def patch_event(text: str) -> str:
-    old = (
-        "openride_app_planner_async_start_loops(\n"
-        "                                                context->planner_async_context,\n"
-        "                                                &(*context->routing_graph),\n"
+    # Calls in the migrated event runtime are not guaranteed to have identical
+    # indentation. Patch each still-unmigrated invocation structurally instead
+    # of relying on one exact whitespace layout.
+    pattern = re.compile(
+        r"openride_app_planner_async_start_loops\(\n"
+        r"(?P<context_indent>[ \t]*)context->planner_async_context,\n"
+        r"(?P<arg_indent>[ \t]*)&\(\*context->routing_graph\),\n"
     )
-    new = (
-        "openride_app_planner_async_start_loops(\n"
-        "                                                context->planner_async_context,\n"
-        "                                                &(*context->platform_paths),\n"
-        "                                                (*context->active_region),\n"
-        "                                                &(*context->routing_graph),\n"
-    )
-    count = text.count(old)
-    if count != 2:
-        fail(f"planner loop starts: expected 2 matches, found {count}")
-    return text.replace(old, new)
+
+    def replacement(match: re.Match[str]) -> str:
+        arg_indent = match.group("arg_indent")
+        return (
+            "openride_app_planner_async_start_loops(\n"
+            f"{match.group('context_indent')}context->planner_async_context,\n"
+            f"{arg_indent}&(*context->platform_paths),\n"
+            f"{arg_indent}(*context->active_region),\n"
+            f"{arg_indent}&(*context->routing_graph),\n"
+        )
+
+    changed, count = pattern.subn(replacement, text)
+    if count < 1:
+        fail("planner loop starts: no unmigrated call found")
+
+    # Every planner loop call must now carry the regional context. This catches
+    # future formatting variants without assuming there are exactly two calls.
+    call_count = changed.count("openride_app_planner_async_start_loops(")
+    regional_count = len(re.findall(
+        r"openride_app_planner_async_start_loops\([\s\S]{0,260}?"
+        r"&\(\*context->platform_paths\),[\s\S]{0,160}?"
+        r"\(\*context->active_region\),",
+        changed,
+    ))
+    if call_count != regional_count:
+        fail(
+            f"planner loop starts: {regional_count}/{call_count} calls carry regional context"
+        )
+    return changed
 
 
 def main() -> int:
