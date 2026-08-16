@@ -340,10 +340,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
     const float label_scale = ui_scale > 1.65f ? 1.65f : ui_scale;
 
     const SDL_FRect top = openride_ui_rect_pixels(ui, layout.top);
-    SDL_SetRenderDrawColor(renderer, 13, 16, 18, 238);
-    SDL_RenderFillRect(renderer, &top);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
-    SDL_RenderRect(renderer, &top);
+    openride_ui_panel(ui, layout.top, true);
 
     const float icon_size = 58.0f * ui_scale;
     const float content_x = top.x + 72.0f * ui_scale;
@@ -405,10 +402,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
 
     if (state->show_following && layout.following.w > 0.0f) {
         const SDL_FRect following = openride_ui_rect_pixels(ui, layout.following);
-        SDL_SetRenderDrawColor(renderer, 22, 26, 29, 226);
-        SDL_RenderFillRect(renderer, &following);
-        SDL_SetRenderDrawColor(renderer, 47, 198, 181, 70);
-        SDL_RenderRect(renderer, &following);
+        openride_ui_panel(ui, layout.following, false);
         SDL_SetRenderDrawColor(renderer, 190, 226, 221, 255);
         drive_draw_text_fit(renderer,
                             following.x + 10.0f * ui_scale,
@@ -446,10 +440,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
     }
 
     const SDL_FRect stats = openride_ui_rect_pixels(ui, layout.stats);
-    SDL_SetRenderDrawColor(renderer, 22, 26, 29, 232);
-    SDL_RenderFillRect(renderer, &stats);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 28);
-    SDL_RenderRect(renderer, &stats);
+    openride_ui_panel(ui, layout.stats, false);
 
     const float col_width = stats.w / 3.0f;
     char value[48];
@@ -506,10 +497,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
     }
 
     const SDL_FRect controls = openride_ui_rect_pixels(ui, layout.controls);
-    SDL_SetRenderDrawColor(renderer, 13, 16, 18, 242);
-    SDL_RenderFillRect(renderer, &controls);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
-    SDL_RenderRect(renderer, &controls);
+    openride_ui_panel(ui, layout.controls, true);
 
     if (state->show_attribution) {
         SDL_SetRenderDrawColor(renderer, 155, 163, 167, 70);

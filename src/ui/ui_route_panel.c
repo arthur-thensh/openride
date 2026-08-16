@@ -225,7 +225,8 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
                 OPENRIDE_UI_ROUTE_PANEL_GPS_START + (int)i);
         }
 
-        OpenRideUIColor tint = enabled ? ui->theme.text_secondary : ui->theme.disabled;
+        OpenRideUIColor tint = ui->theme.text_secondary;
+        if (!enabled) tint.a = 150U;
         if (calculate && ready) tint = ui->theme.text;
         openride_ui_icon_draw(ui,
                               icons[i],

@@ -118,11 +118,6 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
 
     openride_ui_panel(ui, layout.bar, true);
 
-    /* Toolbar items live inside one cockpit surface. Remove per-item borders so
-       only interaction/selection creates a subtle pill instead of five boxes. */
-    const OpenRideUIColor saved_border = ui->theme.border;
-    ui->theme.border.a = 0U;
-
     OpenRideToolbarAction clicked = OPENRIDE_TOOLBAR_NONE;
     for (OpenRideToolbarAction action = OPENRIDE_TOOLBAR_MENU;
          action <= OPENRIDE_TOOLBAR_GPS;
@@ -132,14 +127,34 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
         const bool selected = action == OPENRIDE_TOOLBAR_ROUTE && route_ready;
         const OpenRideUIRect item = openride_ui_inset(layout.items[index],
                                                       OPENRIDE_UI_TOOLBAR_ITEM_INSET);
-        if (openride_ui_button(ui,
-                               id,
-                               item,
-                               "",
-                               OPENRIDE_UI_BUTTON_GHOST,
-                               true,
-                               selected)) {
-            clicked = action;
+        const bool inside = openride_ui_point_in_rect(ui->pointer_x,
+                                                      ui->pointer_y,
+                                                      item);
+        if (inside) ui->hot_id = id;
+        if (inside && ui->pointer_pressed) {
+            ui->active_id = id;
+            ui->pointer_consumed = true;
+        }
+        const bool active = ui->active_id == id;
+        if (active && ui->pointer_down) ui->pointer_consumed = true;
+        if (active && ui->pointer_released) {
+            ui->pointer_consumed = true;
+            if (inside) clicked = action;
+        }
+
+        /* One continuous bar: only selected/pressed state gets a pill. */
+        if (selected || active) {
+            const OpenRideUIColor saved_surface = ui->theme.surface;
+            const OpenRideUIColor saved_border = ui->theme.border;
+            ui->theme.surface = selected
+                ? ui->theme.primary_soft
+                : ui->theme.surface_elevated;
+            ui->theme.surface.a = selected ? 205U : 120U;
+            ui->theme.border = selected ? ui->theme.primary : saved_border;
+            ui->theme.border.a = selected ? 42U : 18U;
+            openride_ui_panel(ui, openride_ui_inset(item, 4.0f), false);
+            ui->theme.surface = saved_surface;
+            ui->theme.border = saved_border;
         }
 
         float icon_size = 24.0f;
@@ -151,7 +166,7 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
             icon_size);
         const OpenRideUIColor icon_color = selected
             ? ui->theme.primary
-            : (ui->hot_id == id ? ui->theme.text : ui->theme.text_secondary);
+            : (inside ? ui->theme.text : ui->theme.text_secondary);
         openride_ui_icon_draw(ui,
                               toolbar_icon(action),
                               icon_rect,
@@ -168,9 +183,11 @@ OpenRideToolbarAction openride_ui_toolbar_draw(OpenRideUIContext *ui,
                                toolbar_label(action, route_ready),
                                OPENRIDE_UI_TEXT_CAPTION,
                                OPENRIDE_UI_TEXT_ALIGN_CENTER,
-                               selected ? ui->theme.primary : ui->theme.text_secondary);
+                               selected
+                                   ? ui->theme.primary
+                                   : (inside ? ui->theme.text
+                                             : ui->theme.text_secondary));
     }
-
-    ui->theme.border = saved_border;
     return clicked;
 }
+

@@ -65,67 +65,78 @@ static void draw_compact(OpenRideUIContext *ui,
             || strcmp(summary, "pret") == 0
             || strcmp(summary, "prêt") == 0);
 
-    /* Idle map = map first. Keep only legal attribution, no permanent brand card. */
+    /* Idle map = map first. Legal attribution remains independently visible. */
     if (idle) {
         draw_attribution(ui, state);
         return;
     }
 
-    const float panel_w = minf_openride(safe.w,
-                                        state->route_ready ? 310.0f : 300.0f);
-    const float panel_h = state->route_ready ? 62.0f : 50.0f;
-    const float panel_x = safe.x + (safe.w - panel_w) * 0.5f;
-    OpenRideUIRect panel = openride_ui_rect(panel_x,
-                                            safe.y,
-                                            panel_w,
-                                            panel_h);
-    openride_ui_panel(ui, panel, true);
-
-    const OpenRideUIRect icon_rect = openride_ui_rect(panel.x + 12.0f,
-                                                       panel.y + 13.0f,
-                                                       24.0f,
-                                                       24.0f);
-    openride_ui_icon_draw(ui,
-                          state->route_ready
-                              ? OPENRIDE_UI_ICON_ROUTE
-                              : OPENRIDE_UI_ICON_MAP,
-                          icon_rect,
-                          state->route_ready
-                              ? ui->theme.primary
-                              : ui->theme.text_secondary,
-                          1.7f);
-
-    if (state->route_ready) {
-        openride_ui_text_color(ui,
-                               openride_ui_rect(panel.x + 48.0f,
-                                                panel.y + 7.0f,
-                                                panel.w - 60.0f,
-                                                22.0f),
-                               "Itinéraire prêt",
-                               OPENRIDE_UI_TEXT_BODY,
-                               OPENRIDE_UI_TEXT_ALIGN_LEFT,
-                               ui->theme.primary);
+    if (!state->route_ready) {
+        /* Transient map state (loop/start/map-pick) is a toast, not a brand card. */
+        const float toast_w = minf_openride(safe.w, 330.0f);
+        const float toast_h = 38.0f;
+        const float toast_x = safe.x + (safe.w - toast_w) * 0.5f;
+        const OpenRideUIRect toast = openride_ui_rect(toast_x,
+                                                      safe.y,
+                                                      toast_w,
+                                                      toast_h);
+        openride_ui_panel(ui, toast, true);
+        openride_ui_icon_draw(ui,
+                              OPENRIDE_UI_ICON_MAP,
+                              openride_ui_rect(toast.x + 11.0f,
+                                               toast.y + 10.0f,
+                                               18.0f,
+                                               18.0f),
+                              ui->theme.text_secondary,
+                              1.45f);
         openride_ui_text(ui,
-                         openride_ui_rect(panel.x + 48.0f,
-                                          panel.y + 30.0f,
-                                          panel.w - 60.0f,
-                                          18.0f),
+                         openride_ui_rect(toast.x + 38.0f,
+                                          toast.y + 2.0f,
+                                          toast.w - 49.0f,
+                                          toast.h - 4.0f),
                          summary,
                          OPENRIDE_UI_TEXT_CAPTION,
                          OPENRIDE_UI_TEXT_ALIGN_LEFT);
-    } else {
-        openride_ui_text(ui,
-                         openride_ui_rect(panel.x + 48.0f,
-                                          panel.y + 8.0f,
-                                          panel.w - 60.0f,
-                                          30.0f),
-                         summary,
-                         OPENRIDE_UI_TEXT_BODY,
-                         OPENRIDE_UI_TEXT_ALIGN_LEFT);
+        draw_attribution(ui, state);
+        return;
     }
 
+    const float panel_w = minf_openride(safe.w, 310.0f);
+    const float panel_h = 62.0f;
+    const float panel_x = safe.x + (safe.w - panel_w) * 0.5f;
+    const OpenRideUIRect panel = openride_ui_rect(panel_x,
+                                                  safe.y,
+                                                  panel_w,
+                                                  panel_h);
+    openride_ui_panel(ui, panel, true);
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_ROUTE,
+                          openride_ui_rect(panel.x + 12.0f,
+                                           panel.y + 18.0f,
+                                           24.0f,
+                                           24.0f),
+                          ui->theme.primary,
+                          1.7f);
+    openride_ui_text_color(ui,
+                           openride_ui_rect(panel.x + 48.0f,
+                                            panel.y + 7.0f,
+                                            panel.w - 60.0f,
+                                            22.0f),
+                           "Itinéraire prêt",
+                           OPENRIDE_UI_TEXT_BODY,
+                           OPENRIDE_UI_TEXT_ALIGN_LEFT,
+                           ui->theme.primary);
+    openride_ui_text(ui,
+                     openride_ui_rect(panel.x + 48.0f,
+                                      panel.y + 30.0f,
+                                      panel.w - 60.0f,
+                                      18.0f),
+                     summary,
+                     OPENRIDE_UI_TEXT_CAPTION,
+                     OPENRIDE_UI_TEXT_ALIGN_LEFT);
     draw_attribution(ui, state);
 }
+
 
 
 static void draw_distance_card(OpenRideUIContext *ui,

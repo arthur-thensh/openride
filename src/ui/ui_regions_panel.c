@@ -191,11 +191,35 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
                          OPENRIDE_UI_TEXT_CAPTION,
                          OPENRIDE_UI_TEXT_ALIGN_CENTER);
     }
-    if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-install"),
-                           layout.install, primary_label,
-                           OPENRIDE_UI_BUTTON_PRIMARY,
-                           install_enabled,
-                           state->region_is_active && state->ready)) {
+    const bool show_active_badge = state->region_is_active
+        && state->ready
+        && state->poly_present
+        && !state->busy;
+    if (show_active_badge) {
+        const float badge_w = layout.install.w < 150.0f ? layout.install.w : 150.0f;
+        const OpenRideUIRect badge = openride_ui_rect(
+            layout.install.x + (layout.install.w - badge_w) * 0.5f,
+            layout.install.y + 8.0f,
+            badge_w,
+            36.0f);
+        const OpenRideUIColor saved_surface = ui->theme.surface;
+        const OpenRideUIColor saved_border = ui->theme.border;
+        ui->theme.surface = ui->theme.primary_soft;
+        ui->theme.surface.a = 150U;
+        ui->theme.border = ui->theme.primary;
+        ui->theme.border.a = 48U;
+        openride_ui_panel(ui, badge, false);
+        ui->theme.surface = saved_surface;
+        ui->theme.border = saved_border;
+        openride_ui_text_color(ui, badge,
+                               "Région active",
+                               OPENRIDE_UI_TEXT_CAPTION,
+                               OPENRIDE_UI_TEXT_ALIGN_CENTER,
+                               ui->theme.primary);
+    } else if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-install"),
+                                  layout.install, primary_label,
+                                  OPENRIDE_UI_BUTTON_PRIMARY,
+                                  install_enabled, false)) {
         clicked = OPENRIDE_UI_REGIONS_PANEL_INSTALL;
     }
 
