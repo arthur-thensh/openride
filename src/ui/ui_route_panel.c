@@ -1,16 +1,19 @@
 #include "openride/ui_route_panel.h"
+#include "openride/ui_icon.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 
 #define OPENRIDE_UI_ROUTE_ITEMS 6U
-#define OPENRIDE_UI_ROUTE_MARGIN 8.0f
-#define OPENRIDE_UI_ROUTE_GAP 8.0f
-#define OPENRIDE_UI_ROUTE_HEADER 56.0f
-#define OPENRIDE_UI_ROUTE_BACK_HEIGHT 54.0f
-#define OPENRIDE_UI_ROUTE_HINT_HEIGHT 24.0f
-#define OPENRIDE_UI_ROUTE_MAX_ROW_HEIGHT 64.0f
+#define OPENRIDE_UI_ROUTE_MARGIN 12.0f
+#define OPENRIDE_UI_ROUTE_GAP 6.0f
+#define OPENRIDE_UI_ROUTE_HEADER 62.0f
+#define OPENRIDE_UI_ROUTE_BACK_HEIGHT 46.0f
+#define OPENRIDE_UI_ROUTE_HINT_HEIGHT 20.0f
+#define OPENRIDE_UI_ROUTE_MAX_ROW_HEIGHT 54.0f
+#define OPENRIDE_UI_ROUTE_MAX_WIDTH 410.0f
+#define OPENRIDE_UI_ROUTE_MAX_HEIGHT 500.0f
 
 static OpenRideUIID route_item_id(uint32_t index)
 {
@@ -36,14 +39,22 @@ OpenRideUIRoutePanelLayout openride_ui_route_panel_layout(
     safe = openride_ui_inset(safe, OPENRIDE_UI_ROUTE_MARGIN);
     if (safe.w < 120.0f || safe.h < 220.0f) return layout;
 
-    layout.panel = safe;
-    layout.title = openride_ui_rect(safe.x + 14.0f,
+    float panel_w = safe.w < OPENRIDE_UI_ROUTE_MAX_WIDTH
+        ? safe.w : OPENRIDE_UI_ROUTE_MAX_WIDTH;
+    float panel_h = safe.h < OPENRIDE_UI_ROUTE_MAX_HEIGHT
+        ? safe.h : OPENRIDE_UI_ROUTE_MAX_HEIGHT;
+    layout.panel = openride_ui_rect(safe.x + (safe.w - panel_w) * 0.5f,
+                                    safe.y + (safe.h - panel_h) * 0.5f,
+                                    panel_w,
+                                    panel_h);
+    safe = layout.panel;
+    layout.title = openride_ui_rect(safe.x + 48.0f,
                                     safe.y + 8.0f,
-                                    safe.w - 28.0f,
+                                    safe.w - 62.0f,
                                     28.0f);
-    layout.subtitle = openride_ui_rect(safe.x + 14.0f,
+    layout.subtitle = openride_ui_rect(safe.x + 48.0f,
                                        safe.y + 34.0f,
-                                       safe.w - 28.0f,
+                                       safe.w - 62.0f,
                                        18.0f);
 
     layout.back = openride_ui_rect(
@@ -122,13 +133,21 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
         (float)ui->viewport_width,
         (float)ui->viewport_height
     };
-    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 115);
+    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 138);
     SDL_RenderFillRect(ui->renderer, &screen);
 
     openride_ui_panel(ui, layout.panel, true);
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_ROUTE,
+                          openride_ui_rect(layout.panel.x + 17.0f,
+                                           layout.panel.y + 14.0f,
+                                           22.0f,
+                                           22.0f),
+                          ui->theme.primary,
+                          1.7f);
     openride_ui_text(ui,
                      layout.title,
-                     "ITINERAIRE",
+                     "Itineraire",
                      OPENRIDE_UI_TEXT_TITLE,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
 
@@ -168,21 +187,51 @@ OpenRideUIRoutePanelAction openride_ui_route_panel_draw(
             : "Calculer - depart et arrivee requis"
     };
 
+    static const OpenRideUIIcon icons[OPENRIDE_UI_ROUTE_ITEMS] = {
+        OPENRIDE_UI_ICON_GPS,
+        OPENRIDE_UI_ICON_SEARCH,
+        OPENRIDE_UI_ICON_MAP,
+        OPENRIDE_UI_ICON_SEARCH,
+        OPENRIDE_UI_ICON_MAP,
+        OPENRIDE_UI_ICON_ROUTE
+    };
+
     OpenRideUIRoutePanelAction clicked = OPENRIDE_UI_ROUTE_PANEL_NONE;
     for (uint32_t i = 0U; i < OPENRIDE_UI_ROUTE_ITEMS; ++i) {
         const bool calculate = i == OPENRIDE_UI_ROUTE_ITEMS - 1U;
+        const bool enabled = !calculate || ready;
         if (openride_ui_button(ui,
                                route_item_id(i),
                                layout.items[i],
-                               labels[i],
+                               "",
                                calculate && ready
                                    ? OPENRIDE_UI_BUTTON_PRIMARY
-                                   : OPENRIDE_UI_BUTTON_SECONDARY,
-                               !calculate || ready,
+                                   : OPENRIDE_UI_BUTTON_GHOST,
+                               enabled,
                                false)) {
             clicked = (OpenRideUIRoutePanelAction)(
                 OPENRIDE_UI_ROUTE_PANEL_GPS_START + (int)i);
         }
+        OpenRideUIColor tint = enabled ? ui->theme.text_secondary : ui->theme.disabled;
+        if (calculate && ready) tint = ui->theme.text;
+        openride_ui_icon_draw(ui,
+                              icons[i],
+                              openride_ui_rect(layout.items[i].x + 13.0f,
+                                               layout.items[i].y
+                                                   + (layout.items[i].h - 21.0f) * 0.5f,
+                                               21.0f,
+                                               21.0f),
+                              tint,
+                              1.6f);
+        openride_ui_text_color(ui,
+                               openride_ui_rect(layout.items[i].x + 45.0f,
+                                                layout.items[i].y,
+                                                layout.items[i].w - 56.0f,
+                                                layout.items[i].h),
+                               labels[i],
+                               OPENRIDE_UI_TEXT_BODY,
+                               OPENRIDE_UI_TEXT_ALIGN_LEFT,
+                               enabled ? ui->theme.text : ui->theme.text_secondary);
     }
 
     openride_ui_text(ui,

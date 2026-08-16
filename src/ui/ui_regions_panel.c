@@ -1,4 +1,5 @@
 #include "openride/ui_regions_panel.h"
+#include "openride/ui_icon.h"
 
 #include <stdio.h>
 
@@ -7,7 +8,9 @@
 #define OPENRIDE_UI_REGIONS_HEADER 56.0f
 #define OPENRIDE_UI_REGIONS_NAV_HEIGHT 44.0f
 #define OPENRIDE_UI_REGIONS_BUTTON_HEIGHT 56.0f
-#define OPENRIDE_UI_REGIONS_BACK_HEIGHT 54.0f
+#define OPENRIDE_UI_REGIONS_BACK_HEIGHT 48.0f
+#define OPENRIDE_UI_REGIONS_MAX_WIDTH 410.0f
+#define OPENRIDE_UI_REGIONS_MAX_HEIGHT 470.0f
 
 OpenRideUIRegionsPanelLayout openride_ui_regions_panel_layout(
     const OpenRideUIContext *ui)
@@ -19,14 +22,20 @@ OpenRideUIRegionsPanelLayout openride_ui_regions_panel_layout(
     safe = openride_ui_inset(safe, OPENRIDE_UI_REGIONS_MARGIN);
     if (safe.w < 120.0f || safe.h < 260.0f) return layout;
 
-    layout.panel = safe;
-    layout.title = openride_ui_rect(safe.x + 14.0f,
+    const float panel_w = safe.w < OPENRIDE_UI_REGIONS_MAX_WIDTH ? safe.w : OPENRIDE_UI_REGIONS_MAX_WIDTH;
+    const float panel_h = safe.h < OPENRIDE_UI_REGIONS_MAX_HEIGHT ? safe.h : OPENRIDE_UI_REGIONS_MAX_HEIGHT;
+    layout.panel = openride_ui_rect(safe.x + (safe.w - panel_w) * 0.5f,
+                                    safe.y + (safe.h - panel_h) * 0.5f,
+                                    panel_w,
+                                    panel_h);
+    safe = layout.panel;
+    layout.title = openride_ui_rect(safe.x + 48.0f,
                                     safe.y + 8.0f,
-                                    safe.w - 28.0f,
+                                    safe.w - 62.0f,
                                     28.0f);
-    layout.subtitle = openride_ui_rect(safe.x + 14.0f,
+    layout.subtitle = openride_ui_rect(safe.x + 48.0f,
                                        safe.y + 34.0f,
-                                       safe.w - 28.0f,
+                                       safe.w - 62.0f,
                                        18.0f);
 
     const float inner_x = safe.x + OPENRIDE_UI_REGIONS_GAP;
@@ -134,13 +143,21 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
         (float)ui->viewport_width,
         (float)ui->viewport_height
     };
-    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 115);
+    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 138);
     SDL_RenderFillRect(ui->renderer, &screen);
 
     openride_ui_panel(ui, layout.panel, true);
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_DOWNLOAD,
+                          openride_ui_rect(layout.panel.x + 17.0f,
+                                           layout.panel.y + 14.0f,
+                                           22.0f,
+                                           22.0f),
+                          ui->theme.primary,
+                          1.7f);
     openride_ui_text(ui,
                      layout.title,
-                     "CARTES HORS LIGNE",
+                     "Cartes hors ligne",
                      OPENRIDE_UI_TEXT_TITLE,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
 

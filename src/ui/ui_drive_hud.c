@@ -1,15 +1,17 @@
 #include "openride/ui_drive_hud.h"
+#include "openride/ui_icon.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
-#define OPENRIDE_UI_DRIVE_MARGIN 6.0f
-#define OPENRIDE_UI_DRIVE_TOP_HEIGHT 86.0f
-#define OPENRIDE_UI_DRIVE_FOLLOWING_HEIGHT 28.0f
-#define OPENRIDE_UI_DRIVE_STATS_HEIGHT 54.0f
-#define OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT 62.0f
+#define OPENRIDE_UI_DRIVE_MARGIN 10.0f
+#define OPENRIDE_UI_DRIVE_TOP_HEIGHT 78.0f
+#define OPENRIDE_UI_DRIVE_FOLLOWING_HEIGHT 26.0f
+#define OPENRIDE_UI_DRIVE_STATS_HEIGHT 52.0f
+#define OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT 64.0f
+#define OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT 14.0f
 #define OPENRIDE_UI_DRIVE_CONTROL_COUNT 4U
 
 static size_t drive_glyph_count(const char *text)
@@ -114,7 +116,7 @@ static void drive_draw_maneuver_icon(SDL_Renderer *renderer,
     const float right = x + size * 0.82f;
     const float mid = y + size * 0.48f;
 
-    SDL_SetRenderDrawColor(renderer, 255, 214, 83, 255);
+    SDL_SetRenderDrawColor(renderer, 47, 198, 181, 255);
     switch (maneuver) {
         case OPENRIDE_UI_DRIVE_MANEUVER_LEFT:
         case OPENRIDE_UI_DRIVE_MANEUVER_SHARP_LEFT:
@@ -284,7 +286,8 @@ OpenRideUIDriveHUDLayout openride_ui_drive_hud_layout(
 
     layout.controls = openride_ui_rect(
         safe.x,
-        safe.y + safe.h - OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT,
+        safe.y + safe.h - OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT
+            - OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT,
         safe.w,
         OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT);
     layout.stats = openride_ui_rect(
@@ -340,9 +343,9 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
     const float label_scale = ui_scale > 1.65f ? 1.65f : ui_scale;
 
     const SDL_FRect top = openride_ui_rect_pixels(ui, layout.top);
-    SDL_SetRenderDrawColor(renderer, 13, 17, 21, 232);
+    SDL_SetRenderDrawColor(renderer, 13, 16, 18, 238);
     SDL_RenderFillRect(renderer, &top);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 65);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
     SDL_RenderRect(renderer, &top);
 
     const float icon_size = 58.0f * ui_scale;
@@ -385,7 +388,7 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
                             big_scale,
                             "ARRIVEE");
     } else {
-        SDL_SetRenderDrawColor(renderer, 255, 214, 83, 255);
+        SDL_SetRenderDrawColor(renderer, 47, 198, 181, 255);
         drive_draw_text_fit(renderer,
                             content_x,
                             top.y + 8.0f * ui_scale,
@@ -405,11 +408,11 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
 
     if (state->show_following && layout.following.w > 0.0f) {
         const SDL_FRect following = openride_ui_rect_pixels(ui, layout.following);
-        SDL_SetRenderDrawColor(renderer, 20, 25, 30, 224);
+        SDL_SetRenderDrawColor(renderer, 22, 26, 29, 226);
         SDL_RenderFillRect(renderer, &following);
-        SDL_SetRenderDrawColor(renderer, 255, 214, 83, 85);
+        SDL_SetRenderDrawColor(renderer, 47, 198, 181, 70);
         SDL_RenderRect(renderer, &following);
-        SDL_SetRenderDrawColor(renderer, 245, 223, 153, 255);
+        SDL_SetRenderDrawColor(renderer, 190, 226, 221, 255);
         drive_draw_text_fit(renderer,
                             following.x + 10.0f * ui_scale,
                             following.y + 8.0f * ui_scale,
@@ -446,9 +449,9 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
     }
 
     const SDL_FRect stats = openride_ui_rect_pixels(ui, layout.stats);
-    SDL_SetRenderDrawColor(renderer, 13, 17, 21, 225);
+    SDL_SetRenderDrawColor(renderer, 22, 26, 29, 232);
     SDL_RenderFillRect(renderer, &stats);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 50);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 28);
     SDL_RenderRect(renderer, &stats);
 
     const float col_width = stats.w / 3.0f;
@@ -505,20 +508,20 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
                                reroutes);
     }
 
+    const SDL_FRect controls = openride_ui_rect_pixels(ui, layout.controls);
+    SDL_SetRenderDrawColor(renderer, 13, 16, 18, 242);
+    SDL_RenderFillRect(renderer, &controls);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
+    SDL_RenderRect(renderer, &controls);
+
     if (state->show_attribution) {
-        SDL_SetRenderDrawColor(renderer, 65, 68, 70, 255);
+        SDL_SetRenderDrawColor(renderer, 155, 163, 167, 70);
         drive_draw_scaled_text(renderer,
-                               stats.x + 3.0f * ui_scale,
-                               stats.y - 13.0f * ui_scale,
-                               ui_scale > 1.4f ? 1.4f : ui_scale,
+                               controls.x + 4.0f * ui_scale,
+                               controls.y + controls.h + 2.0f * ui_scale,
+                               ui_scale > 1.15f ? 1.15f : ui_scale,
                                "(c) OpenStreetMap contributors | ODbL");
     }
-
-    const SDL_FRect controls = openride_ui_rect_pixels(ui, layout.controls);
-    SDL_SetRenderDrawColor(renderer, 13, 17, 21, 238);
-    SDL_RenderFillRect(renderer, &controls);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 65);
-    SDL_RenderRect(renderer, &controls);
 
     const char *labels[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {
         "CARTE",
@@ -526,26 +529,33 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
         state->heading_up ? "NORD" : "CAP",
         "GPS"
     };
-    const float item_width = controls.w / (float)OPENRIDE_UI_DRIVE_CONTROL_COUNT;
-    const float control_scale = ui_scale > 2.4f ? 2.4f : ui_scale;
+    static const OpenRideUIIcon control_icons[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {
+        OPENRIDE_UI_ICON_MAP,
+        OPENRIDE_UI_ICON_LOCATION,
+        OPENRIDE_UI_ICON_COMPASS,
+        OPENRIDE_UI_ICON_GPS
+    };
     for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {
-        const float item_x = controls.x + item_width * (float)i;
-        if (i > 0U) {
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 38);
-            SDL_RenderLine(renderer,
-                           item_x,
-                           controls.y + 10.0f * ui_scale,
-                           item_x,
-                           controls.y + controls.h - 10.0f * ui_scale);
-        }
-        const float label_width =
-            (float)drive_glyph_count(labels[i]) * 8.0f * control_scale;
-        const float label_height = 8.0f * control_scale;
-        SDL_SetRenderDrawColor(renderer, 243, 245, 247, 255);
-        drive_draw_scaled_text(renderer,
-                               item_x + (item_width - label_width) * 0.5f,
-                               controls.y + (controls.h - label_height) * 0.5f,
-                               control_scale,
-                               labels[i]);
+        const OpenRideUIRect item = layout.control_items[i];
+        const OpenRideUIColor tint = i == 1U
+            ? ui->theme.primary
+            : ui->theme.text_secondary;
+        openride_ui_icon_draw(ui,
+                              control_icons[i],
+                              openride_ui_rect(item.x + (item.w - 22.0f) * 0.5f,
+                                               item.y + 8.0f,
+                                               22.0f,
+                                               22.0f),
+                              tint,
+                              1.65f);
+        openride_ui_text_color(ui,
+                               openride_ui_rect(item.x + 2.0f,
+                                                item.y + item.h - 22.0f,
+                                                item.w - 4.0f,
+                                                16.0f),
+                               labels[i],
+                               OPENRIDE_UI_TEXT_CAPTION,
+                               OPENRIDE_UI_TEXT_ALIGN_CENTER,
+                               tint);
     }
 }

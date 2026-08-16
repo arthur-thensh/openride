@@ -1,15 +1,17 @@
 #include "openride/ui_search_overlay.h"
+#include "openride/ui_icon.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define OPENRIDE_UI_SEARCH_MARGIN 8.0f
-#define OPENRIDE_UI_SEARCH_GAP 6.0f
-#define OPENRIDE_UI_SEARCH_TITLE_HEIGHT 38.0f
-#define OPENRIDE_UI_SEARCH_QUERY_HEIGHT 50.0f
+#define OPENRIDE_UI_SEARCH_MARGIN 12.0f
+#define OPENRIDE_UI_SEARCH_GAP 7.0f
+#define OPENRIDE_UI_SEARCH_TITLE_HEIGHT 44.0f
+#define OPENRIDE_UI_SEARCH_QUERY_HEIGHT 52.0f
 #define OPENRIDE_UI_SEARCH_FOOTER_HEIGHT 12.0f
-#define OPENRIDE_UI_SEARCH_DESIRED_ROW_HEIGHT 54.0f
-#define OPENRIDE_UI_SEARCH_MIN_ROW_HEIGHT 31.0f
+#define OPENRIDE_UI_SEARCH_DESIRED_ROW_HEIGHT 52.0f
+#define OPENRIDE_UI_SEARCH_MIN_ROW_HEIGHT 34.0f
+#define OPENRIDE_UI_SEARCH_MAX_WIDTH 410.0f
 
 static OpenRideUIID search_row_id(uint32_t index)
 {
@@ -49,15 +51,17 @@ OpenRideUISearchOverlayLayout openride_ui_search_overlay_layout(
     const float safe_max_h = safe.h - margin * 2.0f;
     if (panel_h > safe_max_h) panel_h = safe_max_h;
 
-    layout.panel = openride_ui_rect(safe.x + margin,
+    float panel_w = safe.w - margin * 2.0f;
+    if (panel_w > OPENRIDE_UI_SEARCH_MAX_WIDTH) panel_w = OPENRIDE_UI_SEARCH_MAX_WIDTH;
+    layout.panel = openride_ui_rect(safe.x + (safe.w - panel_w) * 0.5f,
                                     safe.y + margin,
-                                    safe.w - margin * 2.0f,
+                                    panel_w,
                                     panel_h);
     if (layout.panel.w <= 0.0f || layout.panel.h <= 0.0f) return layout;
 
-    layout.title = openride_ui_rect(layout.panel.x + 12.0f,
+    layout.title = openride_ui_rect(layout.panel.x + 46.0f,
                                     layout.panel.y + 5.0f,
-                                    layout.panel.w - 24.0f,
+                                    layout.panel.w - 60.0f,
                                     OPENRIDE_UI_SEARCH_TITLE_HEIGHT - 8.0f);
     layout.query = openride_ui_rect(layout.panel.x + margin,
                                     layout.panel.y
@@ -141,10 +145,18 @@ void openride_ui_search_overlay_draw(
         (float)ui->viewport_width,
         (float)ui->viewport_height
     };
-    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 72);
+    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 112);
     SDL_RenderFillRect(ui->renderer, &screen);
 
     openride_ui_panel(ui, layout.panel, true);
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_SEARCH,
+                          openride_ui_rect(layout.panel.x + 15.0f,
+                                           layout.panel.y + 12.0f,
+                                           22.0f,
+                                           22.0f),
+                          ui->theme.primary,
+                          1.7f);
     openride_ui_text(ui,
                      layout.title,
                      state->title && state->title[0]
@@ -154,6 +166,14 @@ void openride_ui_search_overlay_draw(
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
 
     openride_ui_panel(ui, layout.query, false);
+    openride_ui_icon_draw(ui,
+                          OPENRIDE_UI_ICON_SEARCH,
+                          openride_ui_rect(layout.query.x + 13.0f,
+                                           layout.query.y + (layout.query.h - 20.0f) * 0.5f,
+                                           20.0f,
+                                           20.0f),
+                          ui->theme.text_secondary,
+                          1.55f);
     char query_text[96];
     snprintf(query_text,
              sizeof(query_text),
@@ -163,7 +183,10 @@ void openride_ui_search_overlay_draw(
                  : "Tapez un lieu",
              state->query && state->query[0] ? "_" : "");
     openride_ui_text(ui,
-                     openride_ui_inset_xy(layout.query, 12.0f, 4.0f),
+                     openride_ui_rect(layout.query.x + 43.0f,
+                                              layout.query.y + 4.0f,
+                                              layout.query.w - 55.0f,
+                                              layout.query.h - 8.0f),
                      query_text,
                      OPENRIDE_UI_TEXT_BODY,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
@@ -191,23 +214,33 @@ void openride_ui_search_overlay_draw(
     }
 
     for (uint32_t i = 0U; i < count; ++i) {
+        const bool selected = i == state->selected;
         (void)openride_ui_button(ui,
                                  search_row_id(i),
                                  layout.rows[i],
                                  "",
-                                 OPENRIDE_UI_BUTTON_SECONDARY,
+                                 OPENRIDE_UI_BUTTON_GHOST,
                                  true,
-                                 i == state->selected);
+                                 selected);
+        openride_ui_icon_draw(ui,
+                              OPENRIDE_UI_ICON_LOCATION,
+                              openride_ui_rect(layout.rows[i].x + 12.0f,
+                                               layout.rows[i].y
+                                                   + (layout.rows[i].h - 19.0f) * 0.5f,
+                                               19.0f,
+                                               19.0f),
+                              selected ? ui->theme.primary : ui->theme.text_secondary,
+                              1.5f);
 
         const OpenRideUIRect name_rect = openride_ui_rect(
-            layout.rows[i].x + 12.0f,
+            layout.rows[i].x + 42.0f,
             layout.rows[i].y + 3.0f,
-            layout.rows[i].w - 24.0f,
+            layout.rows[i].w - 54.0f,
             layout.rows[i].h * 0.52f);
         const OpenRideUIRect secondary_rect = openride_ui_rect(
-            layout.rows[i].x + 12.0f,
+            layout.rows[i].x + 42.0f,
             layout.rows[i].y + layout.rows[i].h * 0.50f,
-            layout.rows[i].w - 24.0f,
+            layout.rows[i].w - 54.0f,
             layout.rows[i].h * 0.46f);
 
         openride_ui_text(ui,
