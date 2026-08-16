@@ -10,12 +10,22 @@ typedef enum OpenRideAppUIActionType {
     OPENRIDE_APP_UI_CLOSE,
     OPENRIDE_APP_UI_BACK,
     OPENRIDE_APP_UI_SEARCH,
+    OPENRIDE_APP_UI_ROUTE_MODE_ROUTE,
+    OPENRIDE_APP_UI_ROUTE_MODE_LOOP,
     OPENRIDE_APP_UI_ROUTE_GPS_START,
     OPENRIDE_APP_UI_ROUTE_SEARCH_START,
     OPENRIDE_APP_UI_ROUTE_MAP_START,
     OPENRIDE_APP_UI_ROUTE_SEARCH_DESTINATION,
     OPENRIDE_APP_UI_ROUTE_MAP_DESTINATION,
+    OPENRIDE_APP_UI_ROUTE_PROFILE_FASTEST,
+    OPENRIDE_APP_UI_ROUTE_PROFILE_TOURING,
+    OPENRIDE_APP_UI_ROUTE_PROFILE_TRAIL,
+    OPENRIDE_APP_UI_ROUTE_LOOP_DISTANCE_DOWN,
+    OPENRIDE_APP_UI_ROUTE_LOOP_DISTANCE_UP,
+    OPENRIDE_APP_UI_ROUTE_LOOP_DIRECTION,
     OPENRIDE_APP_UI_ROUTE_CALCULATE,
+    OPENRIDE_APP_UI_LOOP_PROPOSAL_SELECT,
+    OPENRIDE_APP_UI_LOOP_PROPOSALS_REGENERATE,
     OPENRIDE_APP_UI_ROUTE_DOWNLOAD_REQUIRED,
     OPENRIDE_APP_UI_ROUTE_USE_INSTALLED,
     OPENRIDE_APP_UI_FAVORITES,
@@ -53,6 +63,15 @@ OpenRideAppUIAction openride_app_ui_main_menu_hit_test(
 
 OpenRideAppUIAction openride_app_ui_route_panel_hit_test(
     SDL_Renderer *renderer,
+    int planner_mode,
+    double x,
+    double y,
+    int viewport_width,
+    int viewport_height);
+
+OpenRideAppUIAction openride_app_ui_loop_proposals_hit_test(
+    SDL_Renderer *renderer,
+    uint32_t proposal_count,
     double x,
     double y,
     int viewport_width,
