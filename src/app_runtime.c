@@ -1207,7 +1207,9 @@ int openride_app_run(int argc, char **argv)
         if (!drive_mode.active) {
             openride_app_render_center_marker(renderer, width, height);
         }
-        if (!drive_mode.active) {
+        if (!drive_mode.active
+            && app_panel == OPENRIDE_APP_PANEL_NONE
+            && !place_search_active) {
             openride_app_ui_draw_map_status_overlay(renderer,
                                     &camera,
                                     &selection,

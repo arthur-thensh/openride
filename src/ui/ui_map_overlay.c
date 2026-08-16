@@ -3,6 +3,7 @@
 #include "openride/ui_toolbar.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #define OPENRIDE_UI_MAP_OVERLAY_MARGIN 12.0f
 #define OPENRIDE_UI_MAP_OVERLAY_PANEL_MAX_WIDTH 500.0f
@@ -58,17 +59,30 @@ static void draw_compact(OpenRideUIContext *ui,
                          const OpenRideUIMapOverlayState *state,
                          OpenRideUIRect safe)
 {
+    const char *summary = state->summary ? state->summary : "";
+    const bool idle = !state->route_ready
+        && (summary[0] == '\0'
+            || strcmp(summary, "pret") == 0
+            || strcmp(summary, "prêt") == 0);
+
+    /* Idle map = map first. Keep only legal attribution, no permanent brand card. */
+    if (idle) {
+        draw_attribution(ui, state);
+        return;
+    }
+
     const float panel_w = minf_openride(safe.w,
-                                        OPENRIDE_UI_MAP_OVERLAY_COMPACT_MAX_WIDTH);
-    const float panel_h = state->route_ready ? 78.0f : 58.0f;
-    OpenRideUIRect panel = openride_ui_rect(safe.x,
+                                        state->route_ready ? 310.0f : 300.0f);
+    const float panel_h = state->route_ready ? 62.0f : 50.0f;
+    const float panel_x = safe.x + (safe.w - panel_w) * 0.5f;
+    OpenRideUIRect panel = openride_ui_rect(panel_x,
                                             safe.y,
                                             panel_w,
                                             panel_h);
     openride_ui_panel(ui, panel, true);
 
-    const OpenRideUIRect icon_rect = openride_ui_rect(panel.x + 13.0f,
-                                                       panel.y + 12.0f,
+    const OpenRideUIRect icon_rect = openride_ui_rect(panel.x + 12.0f,
+                                                       panel.y + 13.0f,
                                                        24.0f,
                                                        24.0f);
     openride_ui_icon_draw(ui,
@@ -81,40 +95,38 @@ static void draw_compact(OpenRideUIContext *ui,
                               : ui->theme.text_secondary,
                           1.7f);
 
-    openride_ui_text(ui,
-                     openride_ui_rect(panel.x + 48.0f,
-                                      panel.y + 7.0f,
-                                      panel.w - 60.0f,
-                                      22.0f),
-                     state->title ? state->title : "OpenRide",
-                     OPENRIDE_UI_TEXT_TITLE,
-                     OPENRIDE_UI_TEXT_ALIGN_LEFT);
-
-    openride_ui_text(ui,
-                     openride_ui_rect(panel.x + 48.0f,
-                                      panel.y + 28.0f,
-                                      panel.w - 60.0f,
-                                      16.0f),
-                     state->summary ? state->summary : "pret",
-                     OPENRIDE_UI_TEXT_CAPTION,
-                     OPENRIDE_UI_TEXT_ALIGN_LEFT);
-
     if (state->route_ready) {
         openride_ui_text_color(ui,
-                               openride_ui_rect(panel.x + 13.0f,
-                                                panel.y + 54.0f,
-                                                panel.w - 26.0f,
-                                                15.0f),
-                               state->route_ready_text
-                                   ? state->route_ready_text
-                                   : "TRAJET PRET - DEMARRER",
-                               OPENRIDE_UI_TEXT_CAPTION,
+                               openride_ui_rect(panel.x + 48.0f,
+                                                panel.y + 7.0f,
+                                                panel.w - 60.0f,
+                                                22.0f),
+                               "Itinéraire prêt",
+                               OPENRIDE_UI_TEXT_BODY,
                                OPENRIDE_UI_TEXT_ALIGN_LEFT,
                                ui->theme.primary);
+        openride_ui_text(ui,
+                         openride_ui_rect(panel.x + 48.0f,
+                                          panel.y + 30.0f,
+                                          panel.w - 60.0f,
+                                          18.0f),
+                         summary,
+                         OPENRIDE_UI_TEXT_CAPTION,
+                         OPENRIDE_UI_TEXT_ALIGN_LEFT);
+    } else {
+        openride_ui_text(ui,
+                         openride_ui_rect(panel.x + 48.0f,
+                                          panel.y + 8.0f,
+                                          panel.w - 60.0f,
+                                          30.0f),
+                         summary,
+                         OPENRIDE_UI_TEXT_BODY,
+                         OPENRIDE_UI_TEXT_ALIGN_LEFT);
     }
 
     draw_attribution(ui, state);
 }
+
 
 static void draw_distance_card(OpenRideUIContext *ui,
                                const OpenRideUIMapOverlayState *state,

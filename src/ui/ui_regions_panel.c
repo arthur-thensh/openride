@@ -18,80 +18,51 @@ OpenRideUIRegionsPanelLayout openride_ui_regions_panel_layout(
     OpenRideUIRegionsPanelLayout layout = {0};
     if (!ui) return layout;
 
-    OpenRideUIRect safe = openride_ui_safe_rect(ui);
-    safe = openride_ui_inset(safe, OPENRIDE_UI_REGIONS_MARGIN);
-    if (safe.w < 120.0f || safe.h < 260.0f) return layout;
+    OpenRideUIRect safe = openride_ui_inset(openride_ui_safe_rect(ui), 10.0f);
+    if (safe.w < 120.0f || safe.h < 380.0f) return layout;
+    const float panel_w = safe.w < 350.0f ? safe.w : 350.0f;
+    const float max_h = safe.h * 0.88f;
+    const float panel_h = max_h < 480.0f ? max_h : 480.0f;
+    const float x = safe.x + (safe.w - panel_w) * 0.5f;
+    const float y = safe.y + (safe.h - panel_h) * 0.42f;
+    layout.panel = openride_ui_rect(x, y, panel_w, panel_h);
+    layout.title = openride_ui_rect(x + 18.0f, y + 12.0f, panel_w - 36.0f, 28.0f);
+    layout.subtitle = openride_ui_rect(x + 18.0f, y + 40.0f, panel_w - 36.0f, 20.0f);
 
-    const float panel_w = safe.w < OPENRIDE_UI_REGIONS_MAX_WIDTH ? safe.w : OPENRIDE_UI_REGIONS_MAX_WIDTH;
-    const float panel_h = safe.h < OPENRIDE_UI_REGIONS_MAX_HEIGHT ? safe.h : OPENRIDE_UI_REGIONS_MAX_HEIGHT;
-    layout.panel = openride_ui_rect(safe.x + (safe.w - panel_w) * 0.5f,
-                                    safe.y + (safe.h - panel_h) * 0.5f,
-                                    panel_w,
-                                    panel_h);
-    safe = layout.panel;
-    layout.title = openride_ui_rect(safe.x + 48.0f,
-                                    safe.y + 8.0f,
-                                    safe.w - 62.0f,
-                                    28.0f);
-    layout.subtitle = openride_ui_rect(safe.x + 48.0f,
-                                       safe.y + 34.0f,
-                                       safe.w - 62.0f,
-                                       18.0f);
+    const float inner_x = x + 10.0f;
+    const float inner_w = panel_w - 20.0f;
+    const float nav_y = y + 72.0f;
+    const float half = (inner_w - 8.0f) * 0.5f;
+    layout.previous = openride_ui_rect(inner_x, nav_y, half, 40.0f);
+    layout.next = openride_ui_rect(inner_x + half + 8.0f, nav_y, half, 40.0f);
 
-    const float inner_x = safe.x + OPENRIDE_UI_REGIONS_GAP;
-    const float inner_w = safe.w - OPENRIDE_UI_REGIONS_GAP * 2.0f;
-    const float half_w = (inner_w - OPENRIDE_UI_REGIONS_GAP) * 0.5f;
-    const float nav_y = safe.y + OPENRIDE_UI_REGIONS_HEADER
-        + OPENRIDE_UI_REGIONS_GAP;
-
-    layout.previous = openride_ui_rect(inner_x,
-                                       nav_y,
-                                       half_w,
-                                       OPENRIDE_UI_REGIONS_NAV_HEIGHT);
-    layout.next = openride_ui_rect(inner_x + half_w + OPENRIDE_UI_REGIONS_GAP,
-                                   nav_y,
-                                   half_w,
-                                   OPENRIDE_UI_REGIONS_NAV_HEIGHT);
-
-    const float status_y = nav_y + OPENRIDE_UI_REGIONS_NAV_HEIGHT
-        + OPENRIDE_UI_REGIONS_GAP;
+    const float status_y = nav_y + 50.0f;
     for (uint32_t i = 0U; i < 3U; ++i) {
         layout.status[i] = openride_ui_rect(inner_x,
-                                            status_y + 24.0f * (float)i,
+                                            status_y + 48.0f * (float)i,
                                             inner_w,
-                                            20.0f);
+                                            42.0f);
     }
 
-    layout.back = openride_ui_rect(
-        inner_x,
-        safe.y + safe.h - OPENRIDE_UI_REGIONS_BACK_HEIGHT
-            - OPENRIDE_UI_REGIONS_GAP,
-        inner_w,
-        OPENRIDE_UI_REGIONS_BACK_HEIGHT);
-
-    float action_y = status_y + 80.0f;
-    const float latest = layout.back.y - OPENRIDE_UI_REGIONS_GAP
-        - OPENRIDE_UI_REGIONS_BUTTON_HEIGHT * 2.0f
-        - OPENRIDE_UI_REGIONS_GAP
-        - 28.0f;
-    if (action_y > latest) action_y = latest;
-
+    layout.back = openride_ui_rect(inner_x,
+                                   y + panel_h - 54.0f,
+                                   inner_w,
+                                   44.0f);
+    layout.remove = openride_ui_rect(inner_x,
+                                     layout.back.y - 48.0f,
+                                     inner_w,
+                                     40.0f);
     layout.install = openride_ui_rect(inner_x,
-                                      action_y,
+                                      layout.remove.y - 62.0f,
                                       inner_w,
-                                      OPENRIDE_UI_REGIONS_BUTTON_HEIGHT);
-    layout.remove = openride_ui_rect(
-        inner_x,
-        action_y + OPENRIDE_UI_REGIONS_BUTTON_HEIGHT + OPENRIDE_UI_REGIONS_GAP,
-        inner_w,
-        OPENRIDE_UI_REGIONS_BUTTON_HEIGHT);
-    layout.work_status = openride_ui_rect(
-        inner_x,
-        layout.remove.y + layout.remove.h + 4.0f,
-        inner_w,
-        24.0f);
+                                      52.0f);
+    layout.work_status = openride_ui_rect(inner_x,
+                                          layout.install.y - 26.0f,
+                                          inner_w,
+                                          20.0f);
     return layout;
 }
+
 
 OpenRideUIRegionsPanelAction openride_ui_regions_panel_hit_test(
     const OpenRideUIContext *ui,
@@ -127,167 +98,124 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
     OpenRideUIContext *ui,
     const OpenRideUIRegionsPanelState *state)
 {
-    if (!ui || !ui->renderer || !state) {
-        return OPENRIDE_UI_REGIONS_PANEL_NONE;
-    }
-
-    const OpenRideUIRegionsPanelLayout layout =
-        openride_ui_regions_panel_layout(ui);
+    if (!ui || !ui->renderer || !state) return OPENRIDE_UI_REGIONS_PANEL_NONE;
+    const OpenRideUIRegionsPanelLayout layout = openride_ui_regions_panel_layout(ui);
     if (layout.panel.w <= 0.0f || layout.panel.h <= 0.0f) {
         return OPENRIDE_UI_REGIONS_PANEL_NONE;
     }
 
-    SDL_FRect screen = {
-        0.0f,
-        0.0f,
-        (float)ui->viewport_width,
-        (float)ui->viewport_height
-    };
-    SDL_SetRenderDrawColor(ui->renderer, 4, 7, 8, 138);
+    SDL_FRect screen = {0.0f, 0.0f,
+                        (float)ui->viewport_width,
+                        (float)ui->viewport_height};
+    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 92);
     SDL_RenderFillRect(ui->renderer, &screen);
-
     openride_ui_panel(ui, layout.panel, true);
-    openride_ui_icon_draw(ui,
-                          OPENRIDE_UI_ICON_DOWNLOAD,
-                          openride_ui_rect(layout.panel.x + 17.0f,
-                                           layout.panel.y + 14.0f,
-                                           22.0f,
-                                           22.0f),
-                          ui->theme.primary,
-                          1.7f);
-    openride_ui_text(ui,
-                     layout.title,
-                     "Cartes hors ligne",
+
+    openride_ui_text(ui, layout.title, "Cartes hors ligne",
                      OPENRIDE_UI_TEXT_TITLE,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
-
     char subtitle[128];
-    snprintf(subtitle,
-             sizeof(subtitle),
-             "%s%s",
-             state->region_name ? state->region_name : "Region",
-             state->region_is_active ? "  [ACTIVE]" : "");
-    openride_ui_text(ui,
-                     layout.subtitle,
-                     subtitle,
+    snprintf(subtitle, sizeof(subtitle), "%s%s  ·  %.0f Mo",
+             state->region_name ? state->region_name : "Région",
+             state->region_is_active ? "  ·  active" : "",
+             state->total_size_mb);
+    openride_ui_text(ui, layout.subtitle, subtitle,
                      OPENRIDE_UI_TEXT_CAPTION,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
 
     OpenRideUIRegionsPanelAction clicked = OPENRIDE_UI_REGIONS_PANEL_NONE;
-    if (openride_ui_button(ui,
-                           OPENRIDE_UI_ID("regions-previous"),
-                           layout.previous,
-                           "Region precedente",
-                           OPENRIDE_UI_BUTTON_SECONDARY,
-                           true,
-                           false)) {
+    if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-previous"),
+                           layout.previous, "Précédente",
+                           OPENRIDE_UI_BUTTON_GHOST, true, false)) {
         clicked = OPENRIDE_UI_REGIONS_PANEL_PREVIOUS;
     }
-    if (openride_ui_button(ui,
-                           OPENRIDE_UI_ID("regions-next"),
-                           layout.next,
-                           "Region suivante",
-                           OPENRIDE_UI_BUTTON_SECONDARY,
-                           true,
-                           false)) {
+    if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-next"),
+                           layout.next, "Suivante",
+                           OPENRIDE_UI_BUTTON_GHOST, true, false)) {
         clicked = OPENRIDE_UI_REGIONS_PANEL_NEXT;
     }
 
-    char line[128];
-    snprintf(line,
-             sizeof(line),
-             "Carte : %s | Routage : %s",
-             state->ormap_installed ? "OK" : "absente",
-             state->routing_installed ? "OK" : "absent");
-    openride_ui_text(ui,
-                     layout.status[0],
-                     line,
-                     OPENRIDE_UI_TEXT_CAPTION,
-                     OPENRIDE_UI_TEXT_ALIGN_LEFT);
-
-    snprintf(line,
-             sizeof(line),
-             "Recherche : %s | PBF : %s",
-             state->search_installed ? "OK" : "absente",
-             state->source_pbf_present ? "present" : "absent");
-    openride_ui_text(ui,
-                     layout.status[1],
-                     line,
-                     OPENRIDE_UI_TEXT_CAPTION,
-                     OPENRIDE_UI_TEXT_ALIGN_LEFT);
-
-    snprintf(line, sizeof(line), "Taille locale : %.1f Mo", state->total_size_mb);
-    openride_ui_text(ui,
-                     layout.status[2],
-                     line,
-                     OPENRIDE_UI_TEXT_CAPTION,
-                     OPENRIDE_UI_TEXT_ALIGN_LEFT);
-
-    char primary_label[112];
-    bool install_enabled = !state->busy;
-    if (state->busy) {
-        if (state->progress >= 0.0) {
-            snprintf(primary_label,
-                     sizeof(primary_label),
-                     "Preparation en cours : %.0f %%",
-                     state->progress * 100.0);
-        } else {
-            snprintf(primary_label,
-                     sizeof(primary_label),
-                     "Preparation en cours...");
-        }
-    } else if (state->ready && !state->poly_present) {
-        snprintf(primary_label, sizeof(primary_label), "Ajouter apercu de region");
-    } else if (state->ready) {
-        snprintf(primary_label,
-                 sizeof(primary_label),
-                 "%s",
-                 state->region_is_active
-                     ? "Region active"
-                     : "Utiliser cette region");
-    } else if (state->source_pbf_present) {
-        snprintf(primary_label, sizeof(primary_label), "Preparer le PBF local");
-    } else {
-        snprintf(primary_label, sizeof(primary_label), "Telecharger OSM et preparer");
+    const char *names[3] = {"Carte", "Navigation", "Recherche"};
+    const bool installed[3] = {
+        state->ormap_installed,
+        state->routing_installed,
+        state->search_installed
+    };
+    for (uint32_t i = 0U; i < 3U; ++i) {
+        openride_ui_panel(ui, layout.status[i], false);
+        openride_ui_text(ui,
+                         openride_ui_rect(layout.status[i].x + 12.0f,
+                                          layout.status[i].y,
+                                          layout.status[i].w * 0.58f,
+                                          layout.status[i].h),
+                         names[i],
+                         OPENRIDE_UI_TEXT_BODY,
+                         OPENRIDE_UI_TEXT_ALIGN_LEFT);
+        OpenRideUIColor tint = installed[i]
+            ? ui->theme.success
+            : ui->theme.text_secondary;
+        openride_ui_text_color(ui,
+                               openride_ui_rect(layout.status[i].x
+                                                   + layout.status[i].w * 0.56f,
+                                                layout.status[i].y,
+                                                layout.status[i].w * 0.40f - 10.0f,
+                                                layout.status[i].h),
+                               installed[i] ? "Prête" : "Absente",
+                               OPENRIDE_UI_TEXT_CAPTION,
+                               OPENRIDE_UI_TEXT_ALIGN_RIGHT,
+                               tint);
     }
 
-    if (openride_ui_button(ui,
-                           OPENRIDE_UI_ID("regions-install"),
-                           layout.install,
-                           primary_label,
+    char primary_label[112];
+    const bool install_enabled = !state->busy;
+    if (state->busy) {
+        if (state->progress >= 0.0) {
+            snprintf(primary_label, sizeof(primary_label),
+                     "Préparation  ·  %.0f %%", state->progress * 100.0);
+        } else {
+            snprintf(primary_label, sizeof(primary_label), "Préparation en cours…");
+        }
+    } else if (state->ready && !state->poly_present) {
+        snprintf(primary_label, sizeof(primary_label), "Ajouter l’aperçu de région");
+    } else if (state->ready) {
+        snprintf(primary_label, sizeof(primary_label), "%s",
+                 state->region_is_active ? "Région active" : "Utiliser cette région");
+    } else if (state->source_pbf_present) {
+        snprintf(primary_label, sizeof(primary_label), "Préparer les données locales");
+    } else {
+        snprintf(primary_label, sizeof(primary_label), "Télécharger la région");
+    }
+
+    if (state->work_status && state->work_status[0]) {
+        openride_ui_text(ui, layout.work_status, state->work_status,
+                         OPENRIDE_UI_TEXT_CAPTION,
+                         OPENRIDE_UI_TEXT_ALIGN_CENTER);
+    }
+    if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-install"),
+                           layout.install, primary_label,
                            OPENRIDE_UI_BUTTON_PRIMARY,
                            install_enabled,
                            state->region_is_active && state->ready)) {
         clicked = OPENRIDE_UI_REGIONS_PANEL_INSTALL;
     }
 
-    if (openride_ui_button(ui,
-                           OPENRIDE_UI_ID("regions-remove"),
-                           layout.remove,
-                           "Supprimer les donnees",
-                           OPENRIDE_UI_BUTTON_DANGER,
-                           !state->busy,
-                           false)) {
+    if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-remove"),
+                           layout.remove, "",
+                           OPENRIDE_UI_BUTTON_GHOST,
+                           !state->busy, false)) {
         clicked = OPENRIDE_UI_REGIONS_PANEL_REMOVE;
     }
+    openride_ui_text_color(ui, layout.remove,
+                           "Supprimer les données locales",
+                           OPENRIDE_UI_TEXT_CAPTION,
+                           OPENRIDE_UI_TEXT_ALIGN_CENTER,
+                           ui->theme.danger);
 
-    if (state->work_status && state->work_status[0]) {
-        openride_ui_text(ui,
-                         layout.work_status,
-                         state->work_status,
-                         OPENRIDE_UI_TEXT_CAPTION,
-                         OPENRIDE_UI_TEXT_ALIGN_LEFT);
-    }
-
-    if (openride_ui_button(ui,
-                           OPENRIDE_UI_ID("regions-back"),
-                           layout.back,
-                           "Retour",
-                           OPENRIDE_UI_BUTTON_GHOST,
-                           true,
-                           false)) {
+    if (openride_ui_button(ui, OPENRIDE_UI_ID("regions-back"),
+                           layout.back, "Retour",
+                           OPENRIDE_UI_BUTTON_GHOST, true, false)) {
         clicked = OPENRIDE_UI_REGIONS_PANEL_BACK;
     }
-
     return clicked;
 }
+
