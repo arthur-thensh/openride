@@ -19,32 +19,59 @@ OpenRideUILoopProposalsLayout openride_ui_loop_proposals_layout(
     if (!ui) return layout;
     if (count > OPENRIDE_LOOP_MAX_PROPOSALS) count = OPENRIDE_LOOP_MAX_PROPOSALS;
 
-    OpenRideUIRect safe = openride_ui_inset(openride_ui_safe_rect(ui), 10.0f);
-    if (safe.w < 200.0f || safe.h < 340.0f) return layout;
-    const float panel_w = safe.w < 370.0f ? safe.w : 370.0f;
-    float panel_h = 190.0f + (float)count * 86.0f;
-    if (panel_h > 540.0f) panel_h = 540.0f;
-    if (panel_h > safe.h * 0.90f) panel_h = safe.h * 0.90f;
+    OpenRideUIRect safe = openride_ui_inset(openride_ui_safe_rect(ui), 8.0f);
+    if (safe.w < 220.0f || safe.h < 340.0f) return layout;
+
+    const float panel_w = safe.w < 430.0f ? safe.w : 430.0f;
+    const float row_h = 56.0f;
+    const float row_gap = 6.0f;
+    const float header_h = 64.0f;
+    const float confirm_h = 56.0f;
+    const float actions_h = 52.0f;
+    const float panel_h =
+        header_h
+        + (count > 0U ? (float)count * row_h + (float)(count - 1U) * row_gap : 0.0f)
+        + 10.0f
+        + confirm_h
+        + 8.0f
+        + actions_h
+        + 12.0f;
+
+    if (panel_h > safe.h) return layout;
+
     const float x = safe.x + (safe.w - panel_w) * 0.5f;
-    const float y = safe.y + (safe.h - panel_h) * 0.43f;
+    const float y = safe.y + safe.h - panel_h;
     layout.panel = openride_ui_rect(x, y, panel_w, panel_h);
-    layout.title = openride_ui_rect(x + 50.0f, y + 10.0f, panel_w - 66.0f, 28.0f);
-    layout.subtitle = openride_ui_rect(x + 18.0f, y + 40.0f, panel_w - 36.0f, 18.0f);
+    layout.title = openride_ui_rect(x + 50.0f, y + 9.0f, panel_w - 66.0f, 28.0f);
+    layout.subtitle = openride_ui_rect(x + 18.0f, y + 38.0f, panel_w - 36.0f, 18.0f);
     layout.count = count;
 
-    float row_y = y + 70.0f;
+    float row_y = y + header_h;
     for (uint32_t i = 0U; i < count; ++i) {
-        layout.items[i] = openride_ui_rect(x + 12.0f, row_y, panel_w - 24.0f, 78.0f);
-        row_y += 86.0f;
+        layout.items[i] = openride_ui_rect(x + 12.0f,
+                                           row_y,
+                                           panel_w - 24.0f,
+                                           row_h);
+        row_y += row_h + row_gap;
     }
+    if (count > 0U) row_y -= row_gap;
+
+    layout.confirm = openride_ui_rect(x + 12.0f,
+                                      row_y + 10.0f,
+                                      panel_w - 24.0f,
+                                      confirm_h);
+
+    const float action_y = layout.confirm.y + layout.confirm.h + 8.0f;
+    const float action_gap = 8.0f;
+    const float action_w = (panel_w - 24.0f - action_gap) * 0.5f;
     layout.regenerate = openride_ui_rect(x + 12.0f,
-                                         y + panel_h - 92.0f,
-                                         panel_w - 24.0f,
-                                         38.0f);
-    layout.back = openride_ui_rect(x + 12.0f,
-                                   y + panel_h - 48.0f,
-                                   panel_w - 24.0f,
-                                   38.0f);
+                                         action_y,
+                                         action_w,
+                                         actions_h);
+    layout.back = openride_ui_rect(layout.regenerate.x + action_w + action_gap,
+                                   action_y,
+                                   action_w,
+                                   actions_h);
     return layout;
 }
 
@@ -68,7 +95,9 @@ OpenRideUILoopProposalsHit openride_ui_loop_proposals_hit_test(
             return hit;
         }
     }
-    if (openride_ui_point_in_rect(x, y, layout.regenerate)) {
+    if (openride_ui_point_in_rect(x, y, layout.confirm)) {
+        hit.action = OPENRIDE_UI_LOOP_PROPOSALS_CONFIRM;
+    } else if (openride_ui_point_in_rect(x, y, layout.regenerate)) {
         hit.action = OPENRIDE_UI_LOOP_PROPOSALS_REGENERATE;
     } else if (openride_ui_point_in_rect(x, y, layout.back)) {
         hit.action = OPENRIDE_UI_LOOP_PROPOSALS_BACK;
@@ -89,7 +118,8 @@ static void format_duration(double seconds, char *buffer, size_t size)
 OpenRideUILoopProposalsHit openride_ui_loop_proposals_draw(
     OpenRideUIContext *ui,
     const OpenRideLoopProposalSet *proposals,
-    double target_distance_m)
+    double target_distance_m,
+    int preview_index)
 {
     OpenRideUILoopProposalsHit hit = {OPENRIDE_UI_LOOP_PROPOSALS_NONE, -1};
     if (!ui || !ui->renderer || !proposals) return hit;
@@ -99,22 +129,19 @@ OpenRideUILoopProposalsHit openride_ui_loop_proposals_draw(
         openride_ui_loop_proposals_layout(ui, count);
     if (layout.panel.w <= 0.0f) return hit;
 
-    SDL_FRect screen = {0.0f, 0.0f,
-                        (float)ui->viewport_width,
-                        (float)ui->viewport_height};
-    SDL_SetRenderDrawColor(ui->renderer, 0, 0, 0, 92);
-    SDL_RenderFillRect(ui->renderer, &screen);
+    /* Keep the map fully readable: no fullscreen scrim on the preview sheet. */
     openride_ui_panel(ui, layout.panel, true);
     openride_ui_icon_draw(ui, OPENRIDE_UI_ICON_LOOP,
                           openride_ui_rect(layout.panel.x + 17.0f,
-                                           layout.panel.y + 13.0f,
+                                           layout.panel.y + 12.0f,
                                            24.0f, 24.0f),
                           ui->theme.primary, 1.8f);
     openride_ui_text(ui, layout.title, "Balades proposées",
                      OPENRIDE_UI_TEXT_TITLE,
                      OPENRIDE_UI_TEXT_ALIGN_LEFT);
+
     char subtitle[96];
-    snprintf(subtitle, sizeof(subtitle), "%u options autour de %.0f km",
+    snprintf(subtitle, sizeof(subtitle), "%u itinéraires autour de %.0f km",
              count, target_distance_m / 1000.0);
     openride_ui_text(ui, layout.subtitle, subtitle,
                      OPENRIDE_UI_TEXT_CAPTION,
@@ -122,18 +149,22 @@ OpenRideUILoopProposalsHit openride_ui_loop_proposals_draw(
 
     for (uint32_t i = 0U; i < count; ++i) {
         const OpenRideLoopProposal *proposal = &proposals->items[i];
+        const bool selected = preview_index >= 0 && (uint32_t)preview_index == i;
+
         if (openride_ui_button(ui, proposal_id(i), layout.items[i], "",
-                               i == 0U ? OPENRIDE_UI_BUTTON_SECONDARY
-                                       : OPENRIDE_UI_BUTTON_GHOST,
-                               true, false)) {
+                               OPENRIDE_UI_BUTTON_GHOST,
+                               true, selected)) {
             hit.action = OPENRIDE_UI_LOOP_PROPOSALS_SELECT;
             hit.index = (int)i;
         }
-        char rank[32];
+
+        char rank[56];
         char duration[32];
         char metrics[128];
-        snprintf(rank, sizeof(rank), "Option %u%s", i + 1U,
-                 i == 0U ? " · recommandée" : "");
+        snprintf(rank, sizeof(rank), "Option %u%s%s",
+                 i + 1U,
+                 i == 0U ? " · recommandée" : "",
+                 selected ? " · aperçu" : "");
         format_duration(proposal->route.estimated_time_s, duration, sizeof(duration));
         snprintf(metrics, sizeof(metrics),
                  "%.1f km  ·  %s  ·  score %.0f  ·  répétition %.0f %%",
@@ -141,18 +172,19 @@ OpenRideUILoopProposalsHit openride_ui_loop_proposals_draw(
                  duration,
                  proposal->stats.score,
                  proposal->stats.overlap_ratio * 100.0);
+
         openride_ui_text_color(ui,
                                openride_ui_rect(layout.items[i].x + 14.0f,
-                                                layout.items[i].y + 8.0f,
+                                                layout.items[i].y + 5.0f,
                                                 layout.items[i].w - 28.0f,
-                                                24.0f),
+                                                22.0f),
                                rank,
                                OPENRIDE_UI_TEXT_BODY,
                                OPENRIDE_UI_TEXT_ALIGN_LEFT,
-                               i == 0U ? ui->theme.primary : ui->theme.text);
+                               selected ? ui->theme.primary : ui->theme.text);
         openride_ui_text(ui,
                          openride_ui_rect(layout.items[i].x + 14.0f,
-                                          layout.items[i].y + 38.0f,
+                                          layout.items[i].y + 29.0f,
                                           layout.items[i].w - 28.0f,
                                           20.0f),
                          metrics,
@@ -160,14 +192,24 @@ OpenRideUILoopProposalsHit openride_ui_loop_proposals_draw(
                          OPENRIDE_UI_TEXT_ALIGN_LEFT);
     }
 
+    const bool can_confirm =
+        count > 0U && preview_index >= 0 && (uint32_t)preview_index < count;
+    if (openride_ui_button(ui, OPENRIDE_UI_ID("loop-proposals-confirm"),
+                           layout.confirm, "Choisir cette balade",
+                           OPENRIDE_UI_BUTTON_PRIMARY,
+                           can_confirm, false)) {
+        hit.action = OPENRIDE_UI_LOOP_PROPOSALS_CONFIRM;
+        hit.index = preview_index;
+    }
+
     if (openride_ui_button(ui, OPENRIDE_UI_ID("loop-proposals-regenerate"),
-                           layout.regenerate, "Proposer d’autres balades",
+                           layout.regenerate, "Autres balades",
                            OPENRIDE_UI_BUTTON_GHOST, true, false)) {
         hit.action = OPENRIDE_UI_LOOP_PROPOSALS_REGENERATE;
         hit.index = -1;
     }
     if (openride_ui_button(ui, OPENRIDE_UI_ID("loop-proposals-back"),
-                           layout.back, "Retour au planner",
+                           layout.back, "Retour planner",
                            OPENRIDE_UI_BUTTON_GHOST, true, false)) {
         hit.action = OPENRIDE_UI_LOOP_PROPOSALS_BACK;
         hit.index = -1;

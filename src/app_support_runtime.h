@@ -114,6 +114,12 @@ void openride_app_render_route(SDL_Renderer *renderer,
                        int viewport_width,
                        int viewport_height);
 
+void openride_app_render_route_preview(SDL_Renderer *renderer,
+                               const OpenRideMapCamera *camera,
+                               const OpenRideRoute *route,
+                               int viewport_width,
+                               int viewport_height);
+
 void openride_app_render_gpx_document(SDL_Renderer *renderer,
                               const OpenRideMapCamera *camera,
                               const OpenRideGPXDocument *document,

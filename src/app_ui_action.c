@@ -119,6 +119,9 @@ OpenRideAppUIAction openride_app_ui_loop_proposals_hit_test(
     if (proposal_hit.action == OPENRIDE_UI_LOOP_PROPOSALS_SELECT) {
         hit.action = OPENRIDE_APP_UI_LOOP_PROPOSAL_SELECT;
         hit.index = proposal_hit.index;
+    } else if (proposal_hit.action == OPENRIDE_UI_LOOP_PROPOSALS_CONFIRM) {
+        hit.action = OPENRIDE_APP_UI_LOOP_PROPOSAL_CONFIRM;
+        hit.index = proposal_hit.index;
     } else if (proposal_hit.action == OPENRIDE_UI_LOOP_PROPOSALS_REGENERATE) {
         hit.action = OPENRIDE_APP_UI_LOOP_PROPOSALS_REGENERATE;
     } else if (proposal_hit.action == OPENRIDE_UI_LOOP_PROPOSALS_BACK) {
@@ -127,6 +130,41 @@ OpenRideAppUIAction openride_app_ui_loop_proposals_hit_test(
     openride_ui_end(&ui);
     return hit;
 }
+
+OpenRideAppUIMapInsets openride_app_ui_loop_proposals_map_insets(
+    SDL_Renderer *renderer,
+    uint32_t proposal_count,
+    int viewport_width,
+    int viewport_height)
+{
+    OpenRideAppUIMapInsets insets = {24.0, 24.0, 24.0, 24.0};
+    if (!renderer || viewport_width <= 0 || viewport_height <= 0) return insets;
+
+    OpenRideUIContext ui;
+    if (!begin_ui(&ui, renderer, viewport_width, viewport_height)) return insets;
+
+    const OpenRideUILoopProposalsLayout layout =
+        openride_ui_loop_proposals_layout(&ui, proposal_count);
+    if (layout.panel.w > 0.0f && layout.panel.h > 0.0f) {
+        const SDL_FRect panel_px = openride_ui_rect_pixels(&ui, layout.panel);
+        const double margin = 18.0 * (ui.scale > 0.0f ? (double)ui.scale : 1.0);
+        insets.left = (double)ui.safe_area_px.x + margin;
+        insets.top = (double)ui.safe_area_px.y + margin;
+        insets.right =
+            (double)viewport_width
+            - (double)(ui.safe_area_px.x + ui.safe_area_px.w)
+            + margin;
+        insets.bottom = (double)viewport_height - (double)panel_px.y + margin;
+
+        if (insets.left < 0.0) insets.left = 0.0;
+        if (insets.top < 0.0) insets.top = 0.0;
+        if (insets.right < 0.0) insets.right = 0.0;
+        if (insets.bottom < 0.0) insets.bottom = 0.0;
+    }
+    openride_ui_end(&ui);
+    return insets;
+}
+
 
 OpenRideAppUIAction openride_app_ui_route_downloads_panel_hit_test(
     SDL_Renderer *renderer,

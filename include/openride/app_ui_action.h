@@ -25,6 +25,7 @@ typedef enum OpenRideAppUIActionType {
     OPENRIDE_APP_UI_ROUTE_LOOP_DIRECTION,
     OPENRIDE_APP_UI_ROUTE_CALCULATE,
     OPENRIDE_APP_UI_LOOP_PROPOSAL_SELECT,
+    OPENRIDE_APP_UI_LOOP_PROPOSAL_CONFIRM,
     OPENRIDE_APP_UI_LOOP_PROPOSALS_REGENERATE,
     OPENRIDE_APP_UI_ROUTE_DOWNLOAD_REQUIRED,
     OPENRIDE_APP_UI_ROUTE_USE_INSTALLED,
@@ -54,6 +55,13 @@ typedef struct OpenRideAppUIAction {
     int index;
 } OpenRideAppUIAction;
 
+typedef struct OpenRideAppUIMapInsets {
+    double left;
+    double top;
+    double right;
+    double bottom;
+} OpenRideAppUIMapInsets;
+
 OpenRideAppUIAction openride_app_ui_main_menu_hit_test(
     SDL_Renderer *renderer,
     double x,
@@ -74,6 +82,12 @@ OpenRideAppUIAction openride_app_ui_loop_proposals_hit_test(
     uint32_t proposal_count,
     double x,
     double y,
+    int viewport_width,
+    int viewport_height);
+
+OpenRideAppUIMapInsets openride_app_ui_loop_proposals_map_insets(
+    SDL_Renderer *renderer,
+    uint32_t proposal_count,
     int viewport_width,
     int viewport_height);
 

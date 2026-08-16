@@ -9,6 +9,7 @@
 typedef enum OpenRideUILoopProposalsAction {
     OPENRIDE_UI_LOOP_PROPOSALS_NONE = 0,
     OPENRIDE_UI_LOOP_PROPOSALS_SELECT,
+    OPENRIDE_UI_LOOP_PROPOSALS_CONFIRM,
     OPENRIDE_UI_LOOP_PROPOSALS_REGENERATE,
     OPENRIDE_UI_LOOP_PROPOSALS_BACK
 } OpenRideUILoopProposalsAction;
@@ -24,6 +25,7 @@ typedef struct OpenRideUILoopProposalsLayout {
     OpenRideUIRect subtitle;
     OpenRideUIRect items[OPENRIDE_LOOP_MAX_PROPOSALS];
     uint32_t count;
+    OpenRideUIRect confirm;
     OpenRideUIRect regenerate;
     OpenRideUIRect back;
 } OpenRideUILoopProposalsLayout;
@@ -41,6 +43,7 @@ OpenRideUILoopProposalsHit openride_ui_loop_proposals_hit_test(
 OpenRideUILoopProposalsHit openride_ui_loop_proposals_draw(
     OpenRideUIContext *ui,
     const OpenRideLoopProposalSet *proposals,
-    double target_distance_m);
+    double target_distance_m,
+    int preview_index);
 
 #endif

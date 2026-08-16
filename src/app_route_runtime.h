@@ -48,6 +48,18 @@ void openride_app_route_fit_camera_to_gpx(
     double min_zoom,
     double max_zoom);
 
+void openride_app_route_fit_camera_to_route(
+    OpenRideMapCamera *camera,
+    const OpenRideRoute *route,
+    int viewport_width,
+    int viewport_height,
+    double min_zoom,
+    double max_zoom,
+    double padding_left_px,
+    double padding_top_px,
+    double padding_right_px,
+    double padding_bottom_px);
+
 bool openride_app_route_load_gpx_overlay(
     const char *path,
     OpenRideGPXDocument *document,

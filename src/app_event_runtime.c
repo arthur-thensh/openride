@@ -9,6 +9,55 @@
 #define OPENRIDE_LOOP_DISTANCE_MIN_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MAX_M 300000.0
 
+void openride_app_events_fit_route_choice_preview(OpenRideAppEventContext *context)
+{
+    if (!context || !context->renderer || !context->camera || !context->route_choice) {
+        return;
+    }
+    const OpenRideRoute *preview =
+        openride_route_choice_preview_route(context->route_choice);
+    if (!preview) return;
+
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetCurrentRenderOutputSize(context->renderer, &width, &height)
+        || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const OpenRideAppUIMapInsets insets =
+        openride_app_ui_loop_proposals_map_insets(
+            context->renderer,
+            context->route_choice->proposal_count,
+            width,
+            height);
+
+    const OpenRideMBTilesMetadata *metadata =
+        context->metadata ? (*context->metadata) : NULL;
+    const bool scalable =
+        context->scalable_map && (*context->scalable_map);
+    const double min_zoom =
+        context->map_world && scalable
+            ? OPENRIDE_MAP_WORLD_MIN_ZOOM
+            : metadata ? (double)metadata->min_zoom : 1.0;
+    const double max_zoom =
+        scalable
+            ? 18.0
+            : metadata ? (double)metadata->max_zoom : 18.0;
+
+    openride_app_route_fit_camera_to_route(context->camera,
+                                           preview,
+                                           width,
+                                           height,
+                                           min_zoom,
+                                           max_zoom,
+                                           insets.left,
+                                           insets.top,
+                                           insets.right,
+                                           insets.bottom);
+}
+
+
 void openride_app_events_poll(OpenRideAppEventContext *context,
                               uint64_t *map_zoom_loop_started_ns)
 {
@@ -28,8 +77,14 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                     case SDL_EVENT_KEY_DOWN:
                         if ((*context->app_panel) != OPENRIDE_APP_PANEL_NONE) {
                             if (event.key.key == SDLK_TAB) {
+                                if ((*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS) {
+                                    openride_route_choice_reset(context->route_choice);
+                                }
                                 (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
                             } else if (event.key.key == SDLK_ESCAPE) {
+                                if ((*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS) {
+                                    openride_route_choice_reset(context->route_choice);
+                                }
                                 (*context->app_panel) = (*context->app_panel) == OPENRIDE_APP_PANEL_MAIN
                                     ? OPENRIDE_APP_PANEL_NONE
                                     : OPENRIDE_APP_PANEL_MAIN;
@@ -1021,6 +1076,9 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                 (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
                                 (*context->app_panel_selected) = 0U;
                             } else if (mobile_hit.action == OPENRIDE_APP_UI_BACK) {
+                                if ((*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS) {
+                                    openride_route_choice_reset(context->route_choice);
+                                }
                                 (*context->app_panel) =
                                     ((*context->app_panel) == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
                                      || (*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS)
@@ -1056,6 +1114,7 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                             ? OPENRIDE_ROUTING_PROFILE_TRAIL
                                             : OPENRIDE_ROUTING_PROFILE_TOURING;
                                 openride_loop_proposal_set_destroy(context->loop_proposals);
+                                openride_route_choice_reset(context->route_choice);
                                 if (context->app_storage) {
                                     openride_app_storage_set_int(context->app_storage,
                                                                  "routing_profile",
@@ -1075,11 +1134,13 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                     OPENRIDE_LOOP_DISTANCE_MIN_M,
                                     OPENRIDE_LOOP_DISTANCE_MAX_M);
                                 openride_loop_proposal_set_destroy(context->loop_proposals);
+                                openride_route_choice_reset(context->route_choice);
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_ROUTE_LOOP_DIRECTION) {
                                 (*context->loop_direction) =
                                     openride_loop_direction_next((*context->loop_direction));
                                 openride_loop_proposal_set_destroy(context->loop_proposals);
+                                openride_route_choice_reset(context->route_choice);
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_ROUTE_GPS_START) {
                                 (*context->route_map_pick_marker) = OPENRIDE_MARKER_NONE;
@@ -1206,6 +1267,7 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                     }
                                 } else if (openride_map_selection_complete(&(*context->selection))) {
                                     openride_loop_proposal_set_destroy(context->loop_proposals);
+                                    openride_route_choice_reset(context->route_choice);
                                     (*context->loop_active) = false;
                                     (*context->route_dirty) = false;
                                     (*context->planner_async_thread) =
@@ -1250,6 +1312,7 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                                     if ((*context->planner_async_thread)) {
                                         (*context->planner_busy) =
                                             OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS;
+                                        openride_route_choice_reset(context->route_choice);
                                         (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
                                         snprintf(context->route_status,
                                                  context->route_status_size,
@@ -1263,34 +1326,56 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_LOOP_PROPOSAL_SELECT
                                        && mobile_hit.index >= 0) {
-                                openride_app_route_clear_navigation_session(
-                                    &(*context->navigation),
-                                    &(*context->gps_simulator),
-                                    &(*context->navigation_state),
-                                    &(*context->gps_sample),
-                                    &(*context->gps_sample_valid));
-                                openride_navigation_session_reset(&(*context->navigation_session));
-                                openride_location_filter_reset(&(*context->location_filter));
-                                (*context->route_valid) = openride_app_route_take_loop_proposal(
-                                    context->loop_proposals,
-                                    (uint32_t)mobile_hit.index,
-                                    &(*context->route),
-                                    &(*context->loop_stats),
-                                    context->loop_waypoints,
-                                    &(*context->loop_waypoint_count),
-                                    context->route_status,
-                                    context->route_status_size);
-                                (*context->loop_active) = (*context->route_valid);
-                                if ((*context->route_valid)) {
-                                    openride_app_route_prepare_navigation_session(
+                                if (openride_route_choice_select_preview(
+                                        context->route_choice,
+                                        (uint32_t)mobile_hit.index)) {
+                                    openride_app_events_fit_route_choice_preview(context);
+                                    SDL_Log("RidePlanner: preview loop option %u/%u",
+                                            (uint32_t)mobile_hit.index + 1U,
+                                            context->route_choice->proposal_count);
+                                }
+                            } else if (mobile_hit.action
+                                       == OPENRIDE_APP_UI_LOOP_PROPOSAL_CONFIRM) {
+                                uint32_t confirmed_index = 0U;
+                                if (!openride_route_choice_confirm_preview(
+                                        context->route_choice,
+                                        &confirmed_index)) {
+                                    snprintf(context->route_status,
+                                             context->route_status_size,
+                                             "Aucune balade selectionnee");
+                                } else {
+                                    openride_app_route_clear_navigation_session(
                                         &(*context->navigation),
                                         &(*context->gps_simulator),
-                                        &(*context->navigation_instructions),
-                                        &(*context->routing_graph),
+                                        &(*context->navigation_state),
+                                        &(*context->gps_sample),
+                                        &(*context->gps_sample_valid));
+                                    openride_navigation_session_reset(&(*context->navigation_session));
+                                    openride_location_filter_reset(&(*context->location_filter));
+                                    (*context->route_valid) = openride_app_route_take_loop_proposal(
+                                        context->loop_proposals,
+                                        confirmed_index,
                                         &(*context->route),
+                                        &(*context->loop_stats),
+                                        context->loop_waypoints,
+                                        &(*context->loop_waypoint_count),
                                         context->route_status,
                                         context->route_status_size);
-                                    (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
+                                    (*context->loop_active) = (*context->route_valid);
+                                    if ((*context->route_valid)) {
+                                        openride_route_choice_reset(context->route_choice);
+                                        openride_app_route_prepare_navigation_session(
+                                            &(*context->navigation),
+                                            &(*context->gps_simulator),
+                                            &(*context->navigation_instructions),
+                                            &(*context->routing_graph),
+                                            &(*context->route),
+                                            context->route_status,
+                                            context->route_status_size);
+                                        (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
+                                        SDL_Log("RidePlanner: confirmed loop option %u",
+                                                confirmed_index + 1U);
+                                    }
                                 }
                             } else if (mobile_hit.action
                                        == OPENRIDE_APP_UI_ROUTE_DOWNLOAD_REQUIRED) {

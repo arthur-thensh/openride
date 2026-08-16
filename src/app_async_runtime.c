@@ -315,6 +315,7 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                                      ? (*context->events->planner_async_context).status
                                      : "Recherche de balades impossible");
                     } else {
+                        openride_route_choice_reset(context->events->route_choice);
                         openride_loop_proposal_set_destroy(context->events->loop_proposals);
                         (*context->events->loop_proposals) =
                             (*context->events->planner_async_context).proposals;
@@ -323,7 +324,27 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                                sizeof((*context->events->planner_async_context).proposals));
                         (*context->events->start_snap) =
                             (*context->events->planner_async_context).start_snap;
+
+                        const uint32_t choice_count =
+                            (*context->events->loop_proposals).count;
+                        if (openride_route_choice_begin(
+                                context->events->route_choice,
+                                OPENRIDE_ROUTE_CHOICE_LOOP,
+                                choice_count)) {
+                            const uint32_t bound_count =
+                                context->events->route_choice->proposal_count;
+                            for (uint32_t i = 0U; i < bound_count; ++i) {
+                                openride_route_choice_bind(
+                                    context->events->route_choice,
+                                    i,
+                                    &(*context->events->loop_proposals).items[i].route);
+                            }
+                        }
+
                         (*context->events->app_panel) = OPENRIDE_APP_PANEL_LOOP_PROPOSALS;
+                        openride_app_events_fit_route_choice_preview(context->events);
+                        SDL_Log("RidePlanner: route choice ready with %u loop proposal(s)",
+                                choice_count);
                         snprintf(context->events->route_status,
                                  context->events->route_status_size,
                                  "%s",

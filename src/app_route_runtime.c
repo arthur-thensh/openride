@@ -15,26 +15,48 @@ static double app_route_clampd(double value, double min_value, double max_value)
     return value;
 }
 
-void openride_app_route_fit_camera_to_gpx(OpenRideMapCamera *camera,
-                              const OpenRideGPXDocument *document,
-                              int viewport_width,
-                              int viewport_height,
-                              double min_zoom,
-                              double max_zoom)
+static void app_route_fit_camera_to_bounds(
+    OpenRideMapCamera *camera,
+    double min_lat,
+    double min_lon,
+    double max_lat,
+    double max_lon,
+    int viewport_width,
+    int viewport_height,
+    double min_zoom,
+    double max_zoom,
+    double padding_left_px,
+    double padding_top_px,
+    double padding_right_px,
+    double padding_bottom_px)
 {
-    if (!camera || !document || viewport_width <= 100 || viewport_height <= 100) return;
-    const OpenRideGPXBounds bounds = openride_gpx_document_bounds(document);
-    if (!bounds.valid) return;
+    if (!camera || viewport_width <= 0 || viewport_height <= 0) return;
+    if (!isfinite(min_lat) || !isfinite(min_lon)
+        || !isfinite(max_lat) || !isfinite(max_lon)) return;
 
-    const OpenRidePointD nw = openride_mercator_forward(bounds.max_lat, bounds.min_lon);
-    const OpenRidePointD se = openride_mercator_forward(bounds.min_lat, bounds.max_lon);
-    double dx = fabs(se.x - nw.x);
-    if (dx > 0.5) dx = 1.0 - dx;
+    if (padding_left_px < 0.0) padding_left_px = 0.0;
+    if (padding_top_px < 0.0) padding_top_px = 0.0;
+    if (padding_right_px < 0.0) padding_right_px = 0.0;
+    if (padding_bottom_px < 0.0) padding_bottom_px = 0.0;
+
+    const double usable_w =
+        (double)viewport_width - padding_left_px - padding_right_px;
+    const double usable_h =
+        (double)viewport_height - padding_top_px - padding_bottom_px;
+    if (usable_w < 32.0 || usable_h < 32.0) return;
+
+    const OpenRidePointD nw = openride_mercator_forward(max_lat, min_lon);
+    const OpenRidePointD se = openride_mercator_forward(min_lat, max_lon);
+    double x0 = nw.x;
+    double x1 = se.x;
+    if (fabs(x1 - x0) > 0.5) {
+        if (x0 < x1) x0 += 1.0;
+        else x1 += 1.0;
+    }
+
+    const double dx = fabs(x1 - x0);
     const double dy = fabs(se.y - nw.y);
-    const double usable_w = (double)viewport_width - 100.0;
-    const double usable_h = (double)viewport_height - 100.0;
     double zoom = max_zoom;
-
     if (dx > 1e-12 && dy > 1e-12) {
         const double zoom_x = log2(usable_w / (256.0 * dx));
         const double zoom_y = log2(usable_h / (256.0 * dy));
@@ -44,10 +66,112 @@ void openride_app_route_fit_camera_to_gpx(OpenRideMapCamera *camera,
     } else if (dy > 1e-12) {
         zoom = log2(usable_h / (256.0 * dy));
     }
+    zoom = app_route_clampd(zoom, min_zoom, max_zoom);
 
-    camera->zoom = app_route_clampd(zoom, min_zoom, max_zoom);
-    camera->center_lat = (bounds.min_lat + bounds.max_lat) * 0.5;
-    camera->center_lon = (bounds.min_lon + bounds.max_lon) * 0.5;
+    OpenRidePointD bounds_center = {
+        (x0 + x1) * 0.5,
+        (nw.y + se.y) * 0.5
+    };
+    while (bounds_center.x < 0.0) bounds_center.x += 1.0;
+    while (bounds_center.x >= 1.0) bounds_center.x -= 1.0;
+
+    const double usable_center_x =
+        (padding_left_px + ((double)viewport_width - padding_right_px)) * 0.5;
+    const double usable_center_y =
+        (padding_top_px + ((double)viewport_height - padding_bottom_px)) * 0.5;
+    const double world_size = openride_world_size_pixels(zoom);
+
+    OpenRidePointD camera_center = {
+        bounds_center.x
+            - (usable_center_x - (double)viewport_width * 0.5) / world_size,
+        bounds_center.y
+            - (usable_center_y - (double)viewport_height * 0.5) / world_size
+    };
+    while (camera_center.x < 0.0) camera_center.x += 1.0;
+    while (camera_center.x >= 1.0) camera_center.x -= 1.0;
+    camera_center.y = app_route_clampd(camera_center.y, 0.0, 1.0);
+
+    openride_mercator_inverse(camera_center,
+                              &camera->center_lat,
+                              &camera->center_lon);
+    camera->zoom = zoom;
+    camera->bearing_deg = 0.0;
+}
+
+void openride_app_route_fit_camera_to_gpx(OpenRideMapCamera *camera,
+                              const OpenRideGPXDocument *document,
+                              int viewport_width,
+                              int viewport_height,
+                              double min_zoom,
+                              double max_zoom)
+{
+    if (!camera || !document) return;
+    const OpenRideGPXBounds bounds = openride_gpx_document_bounds(document);
+    if (!bounds.valid) return;
+    app_route_fit_camera_to_bounds(camera,
+                                   bounds.min_lat,
+                                   bounds.min_lon,
+                                   bounds.max_lat,
+                                   bounds.max_lon,
+                                   viewport_width,
+                                   viewport_height,
+                                   min_zoom,
+                                   max_zoom,
+                                   50.0,
+                                   50.0,
+                                   50.0,
+                                   50.0);
+}
+
+void openride_app_route_fit_camera_to_route(
+    OpenRideMapCamera *camera,
+    const OpenRideRoute *route,
+    int viewport_width,
+    int viewport_height,
+    double min_zoom,
+    double max_zoom,
+    double padding_left_px,
+    double padding_top_px,
+    double padding_right_px,
+    double padding_bottom_px)
+{
+    if (!camera || !route || !route->geometry || route->geometry_count == 0U) return;
+
+    bool have_bounds = false;
+    double min_lat = 0.0;
+    double min_lon = 0.0;
+    double max_lat = 0.0;
+    double max_lon = 0.0;
+    for (uint32_t i = 0U; i < route->geometry_count; ++i) {
+        const double lat = route->geometry[i].lat;
+        const double lon = route->geometry[i].lon;
+        if (!isfinite(lat) || !isfinite(lon)) continue;
+        if (!have_bounds) {
+            min_lat = max_lat = lat;
+            min_lon = max_lon = lon;
+            have_bounds = true;
+            continue;
+        }
+        if (lat < min_lat) min_lat = lat;
+        if (lat > max_lat) max_lat = lat;
+        if (lon < min_lon) min_lon = lon;
+        if (lon > max_lon) max_lon = lon;
+    }
+    if (!have_bounds) return;
+
+    app_route_fit_camera_to_bounds(camera,
+                                   min_lat,
+                                   min_lon,
+                                   max_lat,
+                                   max_lon,
+                                   viewport_width,
+                                   viewport_height,
+                                   min_zoom,
+                                   max_zoom,
+                                   padding_left_px,
+                                   padding_top_px,
+                                   padding_right_px,
+                                   padding_bottom_px);
 }
 
 bool openride_app_route_load_gpx_overlay(const char *path,

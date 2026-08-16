@@ -333,6 +333,8 @@ int openride_app_run(int argc, char **argv)
     OpenRidePlannerAsyncContext planner_async_context = {0};
     SDL_Thread *planner_async_thread = NULL;
     OpenRideLoopProposalSet loop_proposals = {0};
+    OpenRideRouteChoice route_choice;
+    openride_route_choice_reset(&route_choice);
     bool route_valid = false;
     bool route_dirty = false;
     OpenRideRoutingSnap start_snap = {0};
@@ -624,6 +626,7 @@ int openride_app_run(int argc, char **argv)
         .planner_async_context = &planner_async_context,
         .planner_async_thread = &planner_async_thread,
         .loop_proposals = &loop_proposals,
+        .route_choice = &route_choice,
         .loop_target_distance_m = &loop_target_distance_m,
         .loop_direction = &loop_direction,
         .loop_stats = &loop_stats,
@@ -887,7 +890,8 @@ int openride_app_run(int argc, char **argv)
                                       &gps_sample,
                                       &gpx_last_recorded_position_m);
                 }
-                if (follow_gps && !map_zoom_test.active && !drive_mode.active) {
+                if (follow_gps && !map_zoom_test.active && !drive_mode.active
+                    && !route_choice.active) {
                     camera.center_lat = filtered_location.valid
                         ? filtered_location.lat : gps_sample.lat;
                     camera.center_lon = filtered_location.valid
@@ -933,7 +937,8 @@ int openride_app_run(int argc, char **argv)
                                       &gpx_last_recorded_position_m);
                 }
                 if (follow_gps && !map_zoom_test.active
-                    && gps_simulator.active && !drive_mode.active) {
+                    && gps_simulator.active && !drive_mode.active
+                    && !route_choice.active) {
                     camera.center_lat = filtered_location.valid ? filtered_location.lat : gps_sample.lat;
                     camera.center_lon = filtered_location.valid ? filtered_location.lon : gps_sample.lon;
                 }
@@ -1158,7 +1163,21 @@ int openride_app_run(int argc, char **argv)
                               width,
                               height);
         }
-        if (route_valid) {
+
+        const OpenRideRoute *preview_route =
+            openride_route_choice_preview_route(&route_choice);
+        const bool route_preview_active = preview_route != NULL;
+        if (route_preview_active) {
+            /*
+             * Preview rendering is geometry-only, so regional node ids from
+             * temporary graphs cannot leak into the active graph.
+             */
+            openride_app_render_route_preview(renderer,
+                                              &camera,
+                                              preview_route,
+                                              width,
+                                              height);
+        } else if (route_valid) {
             openride_app_render_route(renderer,
                        &camera,
                        &routing_graph,
@@ -1166,7 +1185,7 @@ int openride_app_run(int argc, char **argv)
                        width,
                        height);
         }
-        if (route_valid && !drive_mode.active) {
+        if (route_valid && !route_preview_active && !drive_mode.active) {
             openride_app_render_snap_connector(renderer,
                                 &camera,
                                 &selection,
@@ -1195,7 +1214,7 @@ int openride_app_run(int argc, char **argv)
             openride_app_render_selection(renderer,
                            &camera,
                            &selection,
-                           !route_valid,
+                           !route_valid && !route_preview_active,
                            width,
                            height);
         }
@@ -1214,7 +1233,7 @@ int openride_app_run(int argc, char **argv)
                                      width,
                                      height);
         }
-        if (!drive_mode.active) {
+        if (!drive_mode.active && !route_preview_active) {
             openride_app_render_center_marker(renderer, width, height);
         }
         if (!drive_mode.active
@@ -1326,6 +1345,7 @@ int openride_app_run(int argc, char **argv)
                            ? planner_async_context.status : NULL,
                        loop_target_distance_m,
                        loop_direction,
+                       &route_choice,
                        &loop_proposals,
                        &route_download_plan,
                        width);

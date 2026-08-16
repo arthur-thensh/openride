@@ -129,14 +129,238 @@ static RouteProjection nearest_projection_range(const OpenRideRoute *route,
     return best;
 }
 
+/*
+ * Closed-loop navigation bootstrap
+ * --------------------------------
+ * A loop starts and ends at (almost) the same geographic position. On the
+ * first GPS sample, a pure nearest-segment search can therefore select the
+ * final segment and report 100% progress immediately.
+ *
+ * While navigation is still close to the beginning of a closed route, prefer
+ * a plausible projection in the first part of the geometry. Once progress has
+ * moved beyond that initial window, normal map matching takes over and the
+ * final segment can be selected normally when the rider actually returns.
+ */
+static bool route_is_closed_loop(const OpenRideNavigationEngine *navigation)
+{
+    if (!navigation || !route_has_geometry(navigation->route)) return false;
+
+    const OpenRideRoutePoint *first = &navigation->route->geometry[0];
+    const OpenRideRoutePoint *last =
+        &navigation->route->geometry[navigation->geometry_count - 1U];
+
+    const double endpoint_distance_m =
+        openride_geo_distance_m(first->lat, first->lon, last->lat, last->lon);
+    const double closed_threshold_m =
+        fmax(100.0, navigation->config.arrival_threshold_m * 4.0);
+
+    return endpoint_distance_m <= closed_threshold_m;
+}
+
+static double loop_start_window_m(const OpenRideNavigationEngine *navigation)
+{
+    if (!navigation || navigation->geometry_distance_m <= 0.0) return 0.0;
+
+    return clampd(navigation->geometry_distance_m * 0.05, 250.0, 1000.0);
+}
+
+static RouteProjection nearest_projection_loop_start(
+    const OpenRideNavigationEngine *navigation,
+    double lat,
+    double lon,
+    double window_m)
+{
+    RouteProjection best;
+    memset(&best, 0, sizeof(best));
+    best.distance_m = INFINITY;
+
+    if (!navigation || !route_has_geometry(navigation->route)
+        || !navigation->cumulative_geometry_m
+        || navigation->geometry_count < 2U) {
+        return best;
+    }
+
+    const uint32_t segment_count = navigation->geometry_count - 1U;
+    uint32_t last_segment = 0U;
+
+    while (last_segment + 1U < segment_count
+           && navigation->cumulative_geometry_m[last_segment + 1U]
+                  <= window_m) {
+        ++last_segment;
+    }
+
+    return nearest_projection_range(navigation->route,
+                                    lat,
+                                    lon,
+                                    0U,
+                                    last_segment);
+}
+
+static bool loop_start_bias_active(const OpenRideNavigationEngine *navigation,
+                                   double window_m)
+{
+    if (!navigation || !route_is_closed_loop(navigation)) return false;
+    if (!navigation->has_last_segment) return true;
+    if (!navigation->cumulative_geometry_m
+        || navigation->last_segment_index >= navigation->geometry_count) {
+        return false;
+    }
+
+    return navigation->cumulative_geometry_m[navigation->last_segment_index]
+        <= window_m;
+}
+
+static uint32_t segment_index_distance(uint32_t a, uint32_t b)
+{
+    return a >= b ? a - b : b - a;
+}
+
+static double normalize_heading_deg(double heading_deg)
+{
+    if (!isfinite(heading_deg)) return 0.0;
+    double normalized = fmod(heading_deg, 360.0);
+    if (normalized < 0.0) normalized += 360.0;
+    return normalized;
+}
+
+static double heading_difference_deg(double a_deg, double b_deg)
+{
+    double delta = fabs(normalize_heading_deg(a_deg)
+                        - normalize_heading_deg(b_deg));
+    if (delta > 180.0) delta = 360.0 - delta;
+    return delta;
+}
+
+static double route_segment_heading_deg(const OpenRideRoutePoint *a,
+                                        const OpenRideRoutePoint *b)
+{
+    if (!a || !b) return 0.0;
+
+    const double lat1 = a->lat * OPENRIDE_DEG_TO_RAD;
+    const double lat2 = b->lat * OPENRIDE_DEG_TO_RAD;
+    const double dlon = (b->lon - a->lon) * OPENRIDE_DEG_TO_RAD;
+
+    const double y = sin(dlon) * cos(lat2);
+    const double x = cos(lat1) * sin(lat2)
+                   - sin(lat1) * cos(lat2) * cos(dlon);
+
+    return normalize_heading_deg(atan2(y, x) / OPENRIDE_DEG_TO_RAD);
+}
+
+/*
+ * Self-crossing arbitration
+ * -------------------------
+ * GPS distance remains the primary signal.
+ * Heading and segment continuity are only used when several nearby route
+ * segments are genuinely plausible.
+ */
+static RouteProjection nearest_projection_range_continuous(
+    const OpenRideRoute *route,
+    double lat,
+    double lon,
+    uint32_t first_segment,
+    uint32_t last_segment,
+    uint32_t preferred_segment,
+    double speed_mps,
+    double heading_deg,
+    double ambiguity_m)
+{
+    RouteProjection geometric = nearest_projection_range(route,
+                                                         lat,
+                                                         lon,
+                                                         first_segment,
+                                                         last_segment);
+    if (!isfinite(geometric.distance_m) || !route_has_geometry(route)) {
+        return geometric;
+    }
+
+    const uint32_t segment_count = route->geometry_count - 1U;
+    if (segment_count == 0U) return geometric;
+    if (first_segment >= segment_count) first_segment = segment_count - 1U;
+    if (last_segment >= segment_count) last_segment = segment_count - 1U;
+    if (last_segment < first_segment) return geometric;
+    if (preferred_segment >= segment_count) preferred_segment = segment_count - 1U;
+
+    const bool heading_reliable =
+        isfinite(heading_deg) && isfinite(speed_mps) && speed_mps >= 2.0;
+
+    const double geometric_heading =
+        route_segment_heading_deg(&route->geometry[geometric.segment_index],
+                                  &route->geometry[geometric.segment_index + 1U]);
+    const double geometric_heading_error =
+        heading_reliable
+            ? heading_difference_deg(heading_deg, geometric_heading)
+            : 0.0;
+
+    /*
+     * A near-perfect geometric match whose direction agrees with movement is
+     * not ambiguous. Keep it immediately.
+     */
+    if (geometric.distance_m <= 2.0
+        && (!heading_reliable || geometric_heading_error <= 35.0)) {
+        return geometric;
+    }
+
+    const double effective_ambiguity_m =
+        heading_reliable ? ambiguity_m : fmin(8.0, ambiguity_m);
+    const double allowed_distance_m =
+        geometric.distance_m + fmax(0.0, effective_ambiguity_m);
+
+    RouteProjection best = geometric;
+    double best_score = INFINITY;
+
+    for (uint32_t i = first_segment; i <= last_segment; ++i) {
+        const RouteProjection candidate =
+            project_on_segment(&route->geometry[i],
+                               &route->geometry[i + 1U],
+                               lat,
+                               lon,
+                               i);
+        if (!isfinite(candidate.distance_m)
+            || candidate.distance_m > allowed_distance_m) {
+            continue;
+        }
+
+        const uint32_t index_delta =
+            segment_index_distance(i, preferred_segment);
+
+        double score = candidate.distance_m;
+
+        if (heading_reliable) {
+            const double segment_heading =
+                route_segment_heading_deg(&route->geometry[i],
+                                          &route->geometry[i + 1U]);
+            const double heading_error =
+                heading_difference_deg(heading_deg, segment_heading);
+            score += heading_error * 0.60;
+        }
+
+        /* Continuity is deliberately bounded. */
+        score += fmin((double)index_delta * 1.5, 12.0);
+
+        if (i < preferred_segment) {
+            score += 2.0;
+        }
+
+        if (score < best_score) {
+            best = candidate;
+            best_score = score;
+        }
+    }
+
+    return best;
+}
+
 static RouteProjection nearest_projection(OpenRideNavigationEngine *navigation,
                                           double lat,
-                                          double lon)
+                                          double lon,
+                                          double speed_mps,
+                                          double heading_deg)
 {
     const uint32_t segment_count = navigation->geometry_count - 1U;
+
     if (!navigation->has_last_segment
-        || navigation->config.local_search_radius_segments == 0U
-        || segment_count <= navigation->config.local_search_radius_segments * 2U + 1U) {
+        || navigation->config.local_search_radius_segments == 0U) {
         return nearest_projection_range(navigation->route,
                                         lat,
                                         lon,
@@ -144,19 +368,48 @@ static RouteProjection nearest_projection(OpenRideNavigationEngine *navigation,
                                         segment_count - 1U);
     }
 
-    const uint32_t radius = navigation->config.local_search_radius_segments;
-    const uint32_t first = navigation->last_segment_index > radius
-        ? navigation->last_segment_index - radius : 0U;
+    const double ambiguity_m =
+        clampd(navigation->config.off_route_threshold_m * 0.75,
+               12.0,
+               35.0);
+
+    const uint32_t radius =
+        navigation->config.local_search_radius_segments;
+
+    if (segment_count <= radius * 2U + 1U) {
+        return nearest_projection_range_continuous(
+            navigation->route,
+            lat,
+            lon,
+            0U,
+            segment_count - 1U,
+            navigation->last_segment_index,
+            speed_mps,
+            heading_deg,
+            ambiguity_m);
+    }
+
+    const uint32_t first =
+        navigation->last_segment_index > radius
+            ? navigation->last_segment_index - radius
+            : 0U;
+
     uint32_t last = navigation->last_segment_index + radius;
-    if (last >= segment_count) last = segment_count - 1U;
+    if (last >= segment_count) {
+        last = segment_count - 1U;
+    }
 
-    RouteProjection best = nearest_projection_range(navigation->route,
-                                                    lat,
-                                                    lon,
-                                                    first,
-                                                    last);
+    RouteProjection best = nearest_projection_range_continuous(
+        navigation->route,
+        lat,
+        lon,
+        first,
+        last,
+        navigation->last_segment_index,
+        speed_mps,
+        heading_deg,
+        ambiguity_m);
 
-    /* A large local miss can mean a GPS jump or a deliberate route deviation. */
     if (best.distance_m > navigation->config.off_route_threshold_m * 2.0) {
         best = nearest_projection_range(navigation->route,
                                         lat,
@@ -164,6 +417,7 @@ static RouteProjection nearest_projection(OpenRideNavigationEngine *navigation,
                                         0U,
                                         segment_count - 1U);
     }
+
     return best;
 }
 
@@ -245,8 +499,33 @@ bool openride_navigation_engine_update(OpenRideNavigationEngine *navigation,
         return false;
     }
 
-    const RouteProjection projection = nearest_projection(navigation, lat, lon);
+    RouteProjection projection = nearest_projection(navigation,
+                                                          lat,
+                                                          lon,
+                                                          speed_mps,
+                                                          heading_deg);
     if (!isfinite(projection.distance_m)) return false;
+
+    /*
+     * At the beginning of a closed loop the last segment may be closer than
+     * the first one because of GPS noise. Do not let that ambiguity initialize
+     * the trip at ~100% progress.
+     */
+    const double start_window_m = loop_start_window_m(navigation);
+    if (loop_start_bias_active(navigation, start_window_m)) {
+        const RouteProjection start_projection =
+            nearest_projection_loop_start(navigation,
+                                          lat,
+                                          lon,
+                                          start_window_m);
+        const double capture_distance_m =
+            fmax(150.0, navigation->config.off_route_threshold_m * 3.0);
+
+        if (isfinite(start_projection.distance_m)
+            && start_projection.distance_m <= capture_distance_m) {
+            projection = start_projection;
+        }
+    }
 
     navigation->last_segment_index = projection.segment_index;
     navigation->has_last_segment = true;

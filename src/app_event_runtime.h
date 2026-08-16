@@ -67,6 +67,7 @@ typedef struct OpenRideAppEventContext {
     OpenRidePlannerAsyncContext *planner_async_context;
     SDL_Thread **planner_async_thread;
     OpenRideLoopProposalSet *loop_proposals;
+    OpenRideRouteChoice *route_choice;
     double *loop_target_distance_m;
     OpenRideLoopDirection *loop_direction;
     OpenRideLoopStats *loop_stats;
@@ -143,5 +144,8 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                               uint64_t *map_zoom_loop_started_ns);
 
 void openride_app_events_dispatch_pending(OpenRideAppEventContext *context);
+
+void openride_app_events_fit_route_choice_preview(
+    OpenRideAppEventContext *context);
 
 #endif

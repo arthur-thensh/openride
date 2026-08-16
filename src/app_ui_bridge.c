@@ -474,6 +474,7 @@ static void draw_ui_app_panel(SDL_Renderer *renderer,
                                   const char *planner_feedback,
                                   double loop_target_distance_m,
                                   OpenRideLoopDirection loop_direction,
+                                  const OpenRideRouteChoice *route_choice,
                                   const OpenRideLoopProposalSet *loop_proposals,
                                   const OpenRideRouteDownloadPlan *route_download_plan_state,
                                   int viewport_width)
@@ -532,7 +533,10 @@ static void draw_ui_app_panel(SDL_Renderer *renderer,
         if (openride_ui_begin(&ui, renderer, width, height)) {
             (void)openride_ui_loop_proposals_draw(&ui,
                                                   loop_proposals,
-                                                  loop_target_distance_m);
+                                                  loop_target_distance_m,
+                                                  route_choice
+                                                      ? route_choice->preview_index
+                                                      : -1);
             openride_ui_end(&ui);
         }
         return;
@@ -697,6 +701,7 @@ void openride_app_ui_draw_panel(SDL_Renderer *renderer,
                            const char *planner_feedback,
                            double loop_target_distance_m,
                            OpenRideLoopDirection loop_direction,
+                           const OpenRideRouteChoice *route_choice,
                            const OpenRideLoopProposalSet *loop_proposals,
                            const OpenRideRouteDownloadPlan *route_download_plan_state,
                            int viewport_width)
@@ -733,6 +738,7 @@ void openride_app_ui_draw_panel(SDL_Renderer *renderer,
                       planner_feedback,
                       loop_target_distance_m,
                       loop_direction,
+                      route_choice,
                       loop_proposals,
                       route_download_plan_state,
                       viewport_width);

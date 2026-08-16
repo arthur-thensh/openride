@@ -329,20 +329,23 @@ static void draw_marker(SDL_Renderer *renderer,
     SDL_RenderDebugText(renderer, center_x - 4.0f, center_y - 4.0f, label);
 }
 
-void openride_app_render_route(SDL_Renderer *renderer,
-                       const OpenRideMapCamera *camera,
-                       const OpenRideRoutingGraph *graph,
-                       const OpenRideRoute *route,
-                       int viewport_width,
-                       int viewport_height)
+static void app_render_route_styled(SDL_Renderer *renderer,
+                                    const OpenRideMapCamera *camera,
+                                    const OpenRideRoutingGraph *graph,
+                                    const OpenRideRoute *route,
+                                    int viewport_width,
+                                    int viewport_height,
+                                    Uint8 route_r,
+                                    Uint8 route_g,
+                                    Uint8 route_b)
 {
-    if (!route) return;
+    if (!renderer || !camera || !route) return;
 
     for (int pass = 0; pass < 2; ++pass) {
         if (pass == 0) {
             SDL_SetRenderDrawColor(renderer, 250, 250, 248, 225);
         } else {
-            SDL_SetRenderDrawColor(renderer, 37, 101, 173, 245);
+            SDL_SetRenderDrawColor(renderer, route_r, route_g, route_b, 245);
         }
         const int width = pass == 0 ? 8 : 4;
 
@@ -360,12 +363,8 @@ void openride_app_render_route(SDL_Renderer *renderer,
                     route->geometry[i].lon,
                     viewport_width,
                     viewport_height);
-                draw_thick_line(renderer,
-                                (float)a.x,
-                                (float)a.y,
-                                (float)b.x,
-                                (float)b.y,
-                                width);
+                draw_thick_line(renderer, (float)a.x, (float)a.y,
+                                (float)b.x, (float)b.y, width);
             }
             continue;
         }
@@ -376,31 +375,44 @@ void openride_app_render_route(SDL_Renderer *renderer,
             const OpenRideRoutingNodeId b_id = route->nodes[i];
             if (a_id >= graph->node_count || b_id >= graph->node_count) continue;
 
-            double a_lat = 0.0;
-            double a_lon = 0.0;
-            double b_lat = 0.0;
-            double b_lon = 0.0;
+            double a_lat = 0.0, a_lon = 0.0, b_lat = 0.0, b_lon = 0.0;
             openride_routing_node_geo(&graph->nodes[a_id], &a_lat, &a_lon);
             openride_routing_node_geo(&graph->nodes[b_id], &b_lat, &b_lon);
-
-            const OpenRidePointD a = openride_geo_to_screen(camera,
-                                                             a_lat,
-                                                             a_lon,
-                                                             viewport_width,
-                                                             viewport_height);
-            const OpenRidePointD b = openride_geo_to_screen(camera,
-                                                             b_lat,
-                                                             b_lon,
-                                                             viewport_width,
-                                                             viewport_height);
-            draw_thick_line(renderer,
-                            (float)a.x,
-                            (float)a.y,
-                            (float)b.x,
-                            (float)b.y,
-                            width);
+            const OpenRidePointD a = openride_geo_to_screen(
+                camera, a_lat, a_lon, viewport_width, viewport_height);
+            const OpenRidePointD b = openride_geo_to_screen(
+                camera, b_lat, b_lon, viewport_width, viewport_height);
+            draw_thick_line(renderer, (float)a.x, (float)a.y,
+                            (float)b.x, (float)b.y, width);
         }
     }
+}
+
+void openride_app_render_route(SDL_Renderer *renderer,
+                       const OpenRideMapCamera *camera,
+                       const OpenRideRoutingGraph *graph,
+                       const OpenRideRoute *route,
+                       int viewport_width,
+                       int viewport_height)
+{
+    app_render_route_styled(renderer, camera, graph, route,
+                            viewport_width, viewport_height,
+                            37, 101, 173);
+}
+
+void openride_app_render_route_preview(SDL_Renderer *renderer,
+                               const OpenRideMapCamera *camera,
+                               const OpenRideRoute *route,
+                               int viewport_width,
+                               int viewport_height)
+{
+    /*
+     * Preview is intentionally geometry-only: regional node ids from a
+     * temporary graph must never be resolved through the active graph.
+     */
+    app_render_route_styled(renderer, camera, NULL, route,
+                            viewport_width, viewport_height,
+                            184, 32, 255);
 }
 
 
