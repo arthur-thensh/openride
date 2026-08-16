@@ -39,6 +39,7 @@
 #include "app_search_runtime.h"
 #include "app_route_runtime.h"
 #include "app_region_runtime.h"
+#include "app_support_runtime.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -68,680 +69,6 @@
 #define OPENRIDE_APP_LIST_MAX 12U
 #define OPENRIDE_REAL_MAP_PATH "data/maps/nord-pas-de-calais.ormap"
 #define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"
-
-typedef enum OpenRideLifecycleSignal {
-    OPENRIDE_LIFECYCLE_SIGNAL_NONE = 0,
-    OPENRIDE_LIFECYCLE_SIGNAL_BACKGROUND,
-    OPENRIDE_LIFECYCLE_SIGNAL_FOREGROUND,
-    OPENRIDE_LIFECYCLE_SIGNAL_LOW_MEMORY,
-    OPENRIDE_LIFECYCLE_SIGNAL_TERMINATING
-} OpenRideLifecycleSignal;
-
-typedef struct OpenRideLifecycleWatch {
-    SDL_AtomicInt pending_signal;
-} OpenRideLifecycleWatch;
-
-#ifdef __ANDROID__
-typedef struct OpenRideAndroidMissedTurnDev {
-    OpenRideGPSSimulator simulator;
-    OpenRideDevMissedTurnPlan plan;
-    bool armed;
-    bool active;
-} OpenRideAndroidMissedTurnDev;
-
-static void openride_android_missed_turn_dev_init(
-    OpenRideAndroidMissedTurnDev *state)
-{
-    if (!state) return;
-    memset(state, 0, sizeof(*state));
-    openride_gps_simulator_init(&state->simulator);
-    openride_dev_missed_turn_plan_init(&state->plan);
-}
-
-static void openride_android_missed_turn_dev_reset(
-    OpenRideAndroidMissedTurnDev *state,
-    OpenRideSimulatedLocationContext *location_context,
-    OpenRideGPSSimulator *base_simulator)
-{
-    if (!state) return;
-    if (location_context
-        && location_context->simulator == &state->simulator) {
-        location_context->simulator = base_simulator;
-    }
-    openride_gps_simulator_clear_route(&state->simulator);
-    openride_dev_missed_turn_plan_destroy(&state->plan);
-    state->armed = false;
-    state->active = false;
-}
-
-static void openride_android_missed_turn_dev_destroy(
-    OpenRideAndroidMissedTurnDev *state,
-    OpenRideSimulatedLocationContext *location_context,
-    OpenRideGPSSimulator *base_simulator)
-{
-    if (!state) return;
-    openride_android_missed_turn_dev_reset(
-        state, location_context, base_simulator);
-    openride_gps_simulator_destroy(&state->simulator);
-}
-
-#endif
-
-static bool SDLCALL openride_lifecycle_event_watch(void *userdata, SDL_Event *event)
-{
-    OpenRideLifecycleWatch *watch = userdata;
-    if (!watch || !event) return true;
-
-    int signal = OPENRIDE_LIFECYCLE_SIGNAL_NONE;
-    switch (event->type) {
-        case SDL_EVENT_WILL_ENTER_BACKGROUND:
-        case SDL_EVENT_DID_ENTER_BACKGROUND:
-            signal = OPENRIDE_LIFECYCLE_SIGNAL_BACKGROUND;
-            break;
-        case SDL_EVENT_WILL_ENTER_FOREGROUND:
-        case SDL_EVENT_DID_ENTER_FOREGROUND:
-            signal = OPENRIDE_LIFECYCLE_SIGNAL_FOREGROUND;
-            break;
-        case SDL_EVENT_LOW_MEMORY:
-            signal = OPENRIDE_LIFECYCLE_SIGNAL_LOW_MEMORY;
-            break;
-        case SDL_EVENT_TERMINATING:
-            signal = OPENRIDE_LIFECYCLE_SIGNAL_TERMINATING;
-            break;
-        default:
-            break;
-    }
-    if (signal != OPENRIDE_LIFECYCLE_SIGNAL_NONE) {
-        SDL_SetAtomicInt(&watch->pending_signal, signal);
-    }
-    return true;
-}
-
-static double clampd(double value, double min_value, double max_value)
-{
-    if (value < min_value) return min_value;
-    if (value > max_value) return max_value;
-    return value;
-}
-
-static bool file_exists(const char *path)
-{
-    return openride_platform_file_exists(path);
-}
-
-static bool is_vector_map(const OpenRideMBTilesMetadata *metadata)
-{
-    if (!metadata) return false;
-    return strcmp(metadata->format, "pbf") == 0
-        || strcmp(metadata->format, "mvt") == 0
-        || strcmp(metadata->format, "application/x-protobuf") == 0;
-}
-
-static bool has_suffix(const char *text, const char *suffix)
-{
-    if (!text || !suffix) return false;
-    const size_t text_len = strlen(text);
-    const size_t suffix_len = strlen(suffix);
-    return text_len >= suffix_len
-        && strcmp(text + text_len - suffix_len, suffix) == 0;
-}
-
-static const char *default_map_path(void)
-{
-    static const char *ormap = "data/maps/nord-pas-de-calais.ormap";
-    static const char *legacy_map = "data/maps/nord-pas-de-calais-shortbread.mbtiles";
-    static const char *demo_map = "data/maps/demo.mbtiles";
-
-    if (file_exists(ormap)) return ormap;
-    if (file_exists(legacy_map)) return legacy_map;
-    return demo_map;
-}
-
-static const char *default_routing_graph_path(void)
-{
-    static const char *graph = "data/routing/nord-pas-de-calais.orgraph";
-    return file_exists(graph) ? graph : NULL;
-}
-
-static void draw_filled_circle(SDL_Renderer *renderer, float cx, float cy, float radius)
-{
-    const int r = (int)ceilf(radius);
-
-    for (int y = -r; y <= r; ++y) {
-        const float fy = (float)y;
-        const float inside = radius * radius - fy * fy;
-        if (inside < 0.0f) continue;
-
-        const float dx = sqrtf(inside);
-        SDL_RenderLine(renderer, cx - dx, cy + fy, cx + dx, cy + fy);
-    }
-}
-
-static void draw_circle_outline(SDL_Renderer *renderer, float cx, float cy, float radius)
-{
-    const int segments = 48;
-    float previous_x = cx + radius;
-    float previous_y = cy;
-
-    for (int i = 1; i <= segments; ++i) {
-        const float angle = (float)(6.28318530717958647692 * (double)i / (double)segments);
-        const float x = cx + cosf(angle) * radius;
-        const float y = cy + sinf(angle) * radius;
-        SDL_RenderLine(renderer, previous_x, previous_y, x, y);
-        previous_x = x;
-        previous_y = y;
-    }
-}
-
-static void draw_thick_line(SDL_Renderer *renderer,
-                            float x1,
-                            float y1,
-                            float x2,
-                            float y2,
-                            int width)
-{
-    const float dx = x2 - x1;
-    const float dy = y2 - y1;
-    const float length = sqrtf(dx * dx + dy * dy);
-
-    if (length < 0.001f || width <= 1) {
-        SDL_RenderLine(renderer, x1, y1, x2, y2);
-        return;
-    }
-
-    const float nx = -dy / length;
-    const float ny = dx / length;
-    const float half = ((float)width - 1.0f) * 0.5f;
-
-    for (int i = 0; i < width; ++i) {
-        const float offset = (float)i - half;
-        SDL_RenderLine(renderer,
-                       x1 + nx * offset,
-                       y1 + ny * offset,
-                       x2 + nx * offset,
-                       y2 + ny * offset);
-    }
-}
-
-static void draw_scaled_text(SDL_Renderer *renderer,
-                             float x,
-                             float y,
-                             float scale,
-                             const char *text)
-{
-    float old_scale_x = 1.0f;
-    float old_scale_y = 1.0f;
-
-    if (!text || scale <= 0.0f) return;
-    if (!SDL_GetRenderScale(renderer, &old_scale_x, &old_scale_y)) return;
-
-    if (SDL_SetRenderScale(renderer, old_scale_x * scale, old_scale_y * scale)) {
-        SDL_RenderDebugText(renderer,
-                            x / scale,
-                            y / scale,
-                            text);
-        SDL_SetRenderScale(renderer, old_scale_x, old_scale_y);
-    }
-}
-
-static void draw_center_marker(SDL_Renderer *renderer, int width, int height)
-{
-    const float cx = (float)width * 0.5f;
-    const float cy = (float)height * 0.5f;
-
-    SDL_SetRenderDrawColor(renderer, 20, 20, 20, SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer, cx - 11.0f, cy, cx + 11.0f, cy);
-    SDL_RenderLine(renderer, cx, cy - 11.0f, cx, cy + 11.0f);
-
-    SDL_SetRenderDrawColor(renderer, 245, 245, 245, SDL_ALPHA_OPAQUE);
-    SDL_RenderLine(renderer, cx - 9.0f, cy, cx + 9.0f, cy);
-    SDL_RenderLine(renderer, cx, cy - 9.0f, cx, cy + 9.0f);
-}
-
-static OpenRidePointD marker_screen_position(const OpenRideMapCamera *camera,
-                                             const OpenRideMapSelection *selection,
-                                             OpenRideSelectionMarker marker,
-                                             int viewport_width,
-                                             int viewport_height)
-{
-    OpenRideGeoPosition position = {0};
-
-    if (marker == OPENRIDE_MARKER_START) {
-        position = selection->start;
-    } else if (marker == OPENRIDE_MARKER_DESTINATION) {
-        position = selection->destination;
-    }
-
-    return openride_geo_to_screen(camera,
-                                  position.lat,
-                                  position.lon,
-                                  viewport_width,
-                                  viewport_height);
-}
-
-static OpenRideSelectionMarker marker_at_screen(const OpenRideMapCamera *camera,
-                                                const OpenRideMapSelection *selection,
-                                                double x,
-                                                double y,
-                                                int viewport_width,
-                                                int viewport_height)
-{
-    const double radius_sq = OPENRIDE_MARKER_HIT_RADIUS * OPENRIDE_MARKER_HIT_RADIUS;
-
-    if (selection->has_destination) {
-        const OpenRidePointD p = marker_screen_position(camera,
-                                                        selection,
-                                                        OPENRIDE_MARKER_DESTINATION,
-                                                        viewport_width,
-                                                        viewport_height);
-        const double dx = x - p.x;
-        const double dy = y - (p.y - 25.0);
-        if (dx * dx + dy * dy <= radius_sq) {
-            return OPENRIDE_MARKER_DESTINATION;
-        }
-    }
-
-    if (selection->has_start) {
-        const OpenRidePointD p = marker_screen_position(camera,
-                                                        selection,
-                                                        OPENRIDE_MARKER_START,
-                                                        viewport_width,
-                                                        viewport_height);
-        const double dx = x - p.x;
-        const double dy = y - (p.y - 25.0);
-        if (dx * dx + dy * dy <= radius_sq) {
-            return OPENRIDE_MARKER_START;
-        }
-    }
-
-    return OPENRIDE_MARKER_NONE;
-}
-
-static void draw_marker(SDL_Renderer *renderer,
-                        OpenRidePointD p,
-                        OpenRideSelectionMarker marker)
-{
-    Uint8 r = 42;
-    Uint8 g = 157;
-    Uint8 b = 84;
-    const char *label = "D";
-    const float center_x = (float)p.x;
-    const float center_y = (float)p.y - 25.0f;
-
-    if (marker == OPENRIDE_MARKER_DESTINATION) {
-        r = 214;
-        g = 66;
-        b = 57;
-        label = "A";
-    }
-
-    /* Pin shadow and stem. The selected coordinate is the tip of the pin. */
-    SDL_SetRenderDrawColor(renderer, 18, 22, 26, 100);
-    draw_filled_circle(renderer, center_x + 2.0f, center_y + 3.0f, 16.0f);
-    draw_thick_line(renderer,
-                    center_x + 2.0f,
-                    center_y + 11.0f,
-                    center_x + 2.0f,
-                    (float)p.y + 2.0f,
-                    5);
-
-    SDL_SetRenderDrawColor(renderer, 248, 248, 246, SDL_ALPHA_OPAQUE);
-    draw_thick_line(renderer,
-                    center_x,
-                    center_y + 10.0f,
-                    center_x,
-                    (float)p.y,
-                    5);
-    draw_filled_circle(renderer, center_x, center_y, 15.0f);
-
-    SDL_SetRenderDrawColor(renderer, r, g, b, SDL_ALPHA_OPAQUE);
-    draw_filled_circle(renderer, center_x, center_y, 12.0f);
-
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-    draw_circle_outline(renderer, center_x, center_y, 12.0f);
-    SDL_RenderDebugText(renderer, center_x - 4.0f, center_y - 4.0f, label);
-}
-
-static void draw_route(SDL_Renderer *renderer,
-                       const OpenRideMapCamera *camera,
-                       const OpenRideRoutingGraph *graph,
-                       const OpenRideRoute *route,
-                       int viewport_width,
-                       int viewport_height)
-{
-    if (!route) return;
-
-    for (int pass = 0; pass < 2; ++pass) {
-        if (pass == 0) {
-            SDL_SetRenderDrawColor(renderer, 250, 250, 248, 225);
-        } else {
-            SDL_SetRenderDrawColor(renderer, 37, 101, 173, 245);
-        }
-        const int width = pass == 0 ? 8 : 4;
-
-        if (route->geometry_count >= 2U && route->geometry) {
-            for (uint32_t i = 1U; i < route->geometry_count; ++i) {
-                const OpenRidePointD a = openride_geo_to_screen(
-                    camera,
-                    route->geometry[i - 1U].lat,
-                    route->geometry[i - 1U].lon,
-                    viewport_width,
-                    viewport_height);
-                const OpenRidePointD b = openride_geo_to_screen(
-                    camera,
-                    route->geometry[i].lat,
-                    route->geometry[i].lon,
-                    viewport_width,
-                    viewport_height);
-                draw_thick_line(renderer,
-                                (float)a.x,
-                                (float)a.y,
-                                (float)b.x,
-                                (float)b.y,
-                                width);
-            }
-            continue;
-        }
-
-        if (!graph || route->node_count < 2U) continue;
-        for (uint32_t i = 1U; i < route->node_count; ++i) {
-            const OpenRideRoutingNodeId a_id = route->nodes[i - 1U];
-            const OpenRideRoutingNodeId b_id = route->nodes[i];
-            if (a_id >= graph->node_count || b_id >= graph->node_count) continue;
-
-            double a_lat = 0.0;
-            double a_lon = 0.0;
-            double b_lat = 0.0;
-            double b_lon = 0.0;
-            openride_routing_node_geo(&graph->nodes[a_id], &a_lat, &a_lon);
-            openride_routing_node_geo(&graph->nodes[b_id], &b_lat, &b_lon);
-
-            const OpenRidePointD a = openride_geo_to_screen(camera,
-                                                             a_lat,
-                                                             a_lon,
-                                                             viewport_width,
-                                                             viewport_height);
-            const OpenRidePointD b = openride_geo_to_screen(camera,
-                                                             b_lat,
-                                                             b_lon,
-                                                             viewport_width,
-                                                             viewport_height);
-            draw_thick_line(renderer,
-                            (float)a.x,
-                            (float)a.y,
-                            (float)b.x,
-                            (float)b.y,
-                            width);
-        }
-    }
-}
-
-
-static void draw_gpx_point_list(SDL_Renderer *renderer,
-                                const OpenRideMapCamera *camera,
-                                const OpenRideGPXPointList *list,
-                                int viewport_width,
-                                int viewport_height,
-                                Uint8 r,
-                                Uint8 g,
-                                Uint8 b,
-                                int width)
-{
-    if (!renderer || !camera || !list || list->count < 2U) return;
-
-    for (int pass = 0; pass < 2; ++pass) {
-        if (pass == 0) {
-            SDL_SetRenderDrawColor(renderer, 250, 250, 248, 210);
-        } else {
-            SDL_SetRenderDrawColor(renderer, r, g, b, 235);
-        }
-        const int draw_width = pass == 0 ? width + 3 : width;
-        for (uint32_t i = 1U; i < list->count; ++i) {
-            if (list->points[i].starts_new_segment) continue;
-            const OpenRidePointD a = openride_geo_to_screen(camera,
-                                                             list->points[i - 1U].lat,
-                                                             list->points[i - 1U].lon,
-                                                             viewport_width,
-                                                             viewport_height);
-            const OpenRidePointD c = openride_geo_to_screen(camera,
-                                                             list->points[i].lat,
-                                                             list->points[i].lon,
-                                                             viewport_width,
-                                                             viewport_height);
-            draw_thick_line(renderer,
-                            (float)a.x,
-                            (float)a.y,
-                            (float)c.x,
-                            (float)c.y,
-                            draw_width);
-        }
-    }
-}
-
-static void draw_gpx_document(SDL_Renderer *renderer,
-                              const OpenRideMapCamera *camera,
-                              const OpenRideGPXDocument *document,
-                              int viewport_width,
-                              int viewport_height)
-{
-    if (!document) return;
-
-    draw_gpx_point_list(renderer,
-                        camera,
-                        &document->track_points,
-                        viewport_width,
-                        viewport_height,
-                        148, 76, 183,
-                        4);
-    draw_gpx_point_list(renderer,
-                        camera,
-                        &document->route_points,
-                        viewport_width,
-                        viewport_height,
-                        229, 126, 34,
-                        3);
-
-    for (uint32_t i = 0U; i < document->waypoints.count; ++i) {
-        const OpenRideGPXPoint *point = &document->waypoints.points[i];
-        const OpenRidePointD p = openride_geo_to_screen(camera,
-                                                         point->lat,
-                                                         point->lon,
-                                                         viewport_width,
-                                                         viewport_height);
-        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
-        draw_filled_circle(renderer, (float)p.x, (float)p.y, 7.0f);
-        SDL_SetRenderDrawColor(renderer, 0, 142, 153, 245);
-        draw_filled_circle(renderer, (float)p.x, (float)p.y, 4.5f);
-    }
-}
-
-static void draw_loop_waypoints(SDL_Renderer *renderer,
-                                const OpenRideMapCamera *camera,
-                                const OpenRideRoutePoint *waypoints,
-                                uint32_t waypoint_count,
-                                int viewport_width,
-                                int viewport_height)
-{
-    if (!waypoints) return;
-    for (uint32_t i = 0U; i < waypoint_count; ++i) {
-        const OpenRidePointD p = openride_geo_to_screen(camera,
-                                                        waypoints[i].lat,
-                                                        waypoints[i].lon,
-                                                        viewport_width,
-                                                        viewport_height);
-        SDL_SetRenderDrawColor(renderer, 250, 250, 248, 235);
-        draw_filled_circle(renderer, (float)p.x, (float)p.y, 6.0f);
-        SDL_SetRenderDrawColor(renderer, 190, 112, 35, 245);
-        draw_filled_circle(renderer, (float)p.x, (float)p.y, 4.0f);
-    }
-}
-
-static void draw_snap_connector(SDL_Renderer *renderer,
-                                const OpenRideMapCamera *camera,
-                                const OpenRideMapSelection *selection,
-                                const OpenRideRoutingSnap *snap,
-                                OpenRideSelectionMarker marker,
-                                int viewport_width,
-                                int viewport_height)
-{
-    if (!snap || snap->segment_id == OPENRIDE_ROUTING_SEGMENT_NONE) return;
-
-    const OpenRideGeoPosition raw = marker == OPENRIDE_MARKER_START
-        ? selection->start : selection->destination;
-    const OpenRidePointD raw_point = openride_geo_to_screen(camera,
-                                                             raw.lat,
-                                                             raw.lon,
-                                                             viewport_width,
-                                                             viewport_height);
-    const OpenRidePointD snapped = openride_geo_to_screen(camera,
-                                                           snap->lat,
-                                                           snap->lon,
-                                                           viewport_width,
-                                                           viewport_height);
-
-    SDL_SetRenderDrawColor(renderer, 53, 63, 72, 190);
-    draw_thick_line(renderer,
-                    (float)raw_point.x,
-                    (float)raw_point.y,
-                    (float)snapped.x,
-                    (float)snapped.y,
-                    2);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-    draw_filled_circle(renderer, (float)snapped.x, (float)snapped.y, 5.0f);
-    SDL_SetRenderDrawColor(renderer, 37, 101, 173, SDL_ALPHA_OPAQUE);
-    draw_filled_circle(renderer, (float)snapped.x, (float)snapped.y, 3.0f);
-}
-
-static void draw_selection(SDL_Renderer *renderer,
-                           const OpenRideMapCamera *camera,
-                           const OpenRideMapSelection *selection,
-                           bool draw_direct_line,
-                           int viewport_width,
-                           int viewport_height)
-{
-    OpenRidePointD start = {0};
-    OpenRidePointD destination = {0};
-
-    if (selection->has_start) {
-        start = marker_screen_position(camera,
-                                       selection,
-                                       OPENRIDE_MARKER_START,
-                                       viewport_width,
-                                       viewport_height);
-    }
-
-    if (selection->has_destination) {
-        destination = marker_screen_position(camera,
-                                             selection,
-                                             OPENRIDE_MARKER_DESTINATION,
-                                             viewport_width,
-                                             viewport_height);
-    }
-
-    if (draw_direct_line && selection->has_start && selection->has_destination) {
-        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 205);
-        draw_thick_line(renderer,
-                        (float)start.x,
-                        (float)start.y,
-                        (float)destination.x,
-                        (float)destination.y,
-                        7);
-        SDL_SetRenderDrawColor(renderer, 41, 91, 139, 225);
-        draw_thick_line(renderer,
-                        (float)start.x,
-                        (float)start.y,
-                        (float)destination.x,
-                        (float)destination.y,
-                        3);
-    }
-
-    if (selection->has_start) {
-        draw_marker(renderer, start, OPENRIDE_MARKER_START);
-    }
-
-    if (selection->has_destination) {
-        draw_marker(renderer, destination, OPENRIDE_MARKER_DESTINATION);
-    }
-}
-
-static SDL_Rect openride_render_safe_area(SDL_Renderer *renderer,
-                                              int viewport_width,
-                                              int viewport_height)
-{
-    SDL_Rect safe = {0, 0, viewport_width, viewport_height};
-    SDL_Rect queried = {0};
-    if (renderer
-        && SDL_GetRenderSafeArea(renderer, &queried)
-        && queried.w > 0
-        && queried.h > 0) {
-        safe = queried;
-    }
-    return safe;
-}
-
-static float openride_ui_scale(SDL_Renderer *renderer)
-{
-    float scale = 1.0f;
-    SDL_Window *window = renderer ? SDL_GetRenderWindow(renderer) : NULL;
-    if (window) {
-        const float queried = SDL_GetWindowDisplayScale(window);
-        if (queried > 0.0f) scale = queried;
-    }
-    if (scale < 1.0f) scale = 1.0f;
-    if (scale > 3.0f) scale = 3.0f;
-    return scale;
-}
-
-static void draw_navigation_position(SDL_Renderer *renderer,
-                                     const OpenRideMapCamera *camera,
-                                     const OpenRideGPSSample *gps,
-                                     const OpenRideNavigationState *navigation,
-                                     int viewport_width,
-                                     int viewport_height)
-{
-    if (!gps || !gps->valid) return;
-
-    const OpenRidePointD raw = openride_geo_to_screen(camera,
-                                                       gps->lat,
-                                                       gps->lon,
-                                                       viewport_width,
-                                                       viewport_height);
-
-    if (navigation && navigation->valid) {
-        const OpenRidePointD matched = openride_geo_to_screen(camera,
-                                                               navigation->matched_lat,
-                                                               navigation->matched_lon,
-                                                               viewport_width,
-                                                               viewport_height);
-        if (navigation->distance_from_route_m > 1.0) {
-            SDL_SetRenderDrawColor(renderer, 54, 65, 76, 180);
-            draw_thick_line(renderer,
-                            (float)raw.x,
-                            (float)raw.y,
-                            (float)matched.x,
-                            (float)matched.y,
-                            2);
-        }
-        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
-        draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 5.0f);
-        SDL_SetRenderDrawColor(renderer, 35, 112, 190, 245);
-        draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 3.0f);
-    }
-
-    SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
-    draw_filled_circle(renderer, (float)raw.x, (float)raw.y, 11.0f);
-    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
-    draw_filled_circle(renderer, (float)raw.x, (float)raw.y, 8.0f);
-
-    const double heading_rad = (gps->heading_deg - camera->bearing_deg)
-        * 0.01745329251994329577;
-    const float hx = (float)raw.x + (float)(sin(heading_rad) * 18.0);
-    const float hy = (float)raw.y - (float)(cos(heading_rad) * 18.0);
-    SDL_SetRenderDrawColor(renderer, 248, 248, 246, 255);
-    draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 5);
-    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
-    draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
-}
 
 int main(int argc, char **argv)
 {
@@ -831,7 +158,7 @@ int main(int argc, char **argv)
             map_path = region_status.map_path;
         } else {
 #ifndef __ANDROID__
-            map_path = default_map_path();
+            map_path = openride_app_support_default_map_path();
 #endif
         }
     }
@@ -839,7 +166,7 @@ int main(int argc, char **argv)
         routing_graph_path = region_status.routing_path;
     }
 #ifndef __ANDROID__
-    if (!routing_graph_path) routing_graph_path = default_routing_graph_path();
+    if (!routing_graph_path) routing_graph_path = openride_app_support_default_routing_graph_path();
 #endif
 
     OpenRideMBTiles *map = NULL;
@@ -856,8 +183,8 @@ int main(int argc, char **argv)
     snprintf(metadata_storage.name, sizeof(metadata_storage.name), "OpenRide");
     snprintf(metadata_storage.attribution, sizeof(metadata_storage.attribution), "OpenStreetMap contributors");
 
-    if (map_path && file_exists(map_path)) {
-        ormap_map = has_suffix(map_path, ".ormap");
+    if (map_path && openride_app_support_file_exists(map_path)) {
+        ormap_map = openride_app_support_has_suffix(map_path, ".ormap");
         if (ormap_map) {
             ormap = openride_ormap_open(map_path, error, sizeof(error));
             if (!ormap) {
@@ -913,7 +240,7 @@ int main(int argc, char **argv)
 
     const OpenRideMBTilesMetadata *metadata = map
         ? openride_mbtiles_metadata(map) : &metadata_storage;
-    bool vector_map = map && is_vector_map(metadata);
+    bool vector_map = map && openride_app_support_is_vector_map(metadata);
     bool scalable_map = vector_map || ormap_map;
     OpenRideMapCamera camera = openride_app_region_camera_from_metadata(metadata);
     OpenRideMapZoomTest map_zoom_test = {0};
@@ -1118,13 +445,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    lifecycle_watch_installed = SDL_AddEventWatch(openride_lifecycle_event_watch,
+    lifecycle_watch_installed = SDL_AddEventWatch(openride_app_support_lifecycle_event_watch,
                                                    &lifecycle_watch);
     if (!lifecycle_watch_installed) {
         SDL_Log("Unable to install lifecycle event watch: %s", SDL_GetError());
     }
 
-    if (file_exists(region_status.search_path)) {
+    if (openride_app_support_file_exists(region_status.search_path)) {
         place_index = openride_place_index_open(region_status.search_path,
                                                 error,
                                                 sizeof(error));
@@ -1217,7 +544,7 @@ int main(int argc, char **argv)
                 error[0] ? error : "unknown error");
         error[0] = '\0';
     }
-    if (file_exists(gpx_import_path)) {
+    if (openride_app_support_file_exists(gpx_import_path)) {
         gpx_loaded = openride_app_route_load_gpx_overlay(gpx_import_path,
                                       &gpx_overlay,
                                       route_status,
@@ -1788,7 +1115,7 @@ int main(int argc, char **argv)
                     } else if (event.key.key == SDLK_PLUS
                                || event.key.key == SDLK_KP_PLUS
                                || event.key.key == SDLK_EQUALS) {
-                        loop_target_distance_m = clampd(
+                        loop_target_distance_m = openride_app_support_clampd(
                             loop_target_distance_m + OPENRIDE_LOOP_DISTANCE_STEP_M,
                             OPENRIDE_LOOP_DISTANCE_MIN_M,
                             OPENRIDE_LOOP_DISTANCE_MAX_M);
@@ -1809,7 +1136,7 @@ int main(int argc, char **argv)
                                  loop_target_distance_m / 1000.0);
                     } else if (event.key.key == SDLK_MINUS
                                || event.key.key == SDLK_KP_MINUS) {
-                        loop_target_distance_m = clampd(
+                        loop_target_distance_m = openride_app_support_clampd(
                             loop_target_distance_m - OPENRIDE_LOOP_DISTANCE_STEP_M,
                             OPENRIDE_LOOP_DISTANCE_MIN_M,
                             OPENRIDE_LOOP_DISTANCE_MAX_M);
@@ -2025,7 +1352,7 @@ int main(int argc, char **argv)
                         mouse_down_x = (double)event.button.x;
                         mouse_down_y = (double)event.button.y;
                         map_drag_moved = false;
-                        dragging_marker = marker_at_screen(&camera,
+                        dragging_marker = openride_app_render_marker_at_screen(&camera,
                                                            &selection,
                                                            mouse_down_x,
                                                            mouse_down_y,
@@ -2047,7 +1374,7 @@ int main(int argc, char **argv)
                             loop_waypoint_count = 0U;
                         }
                     } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                        const OpenRideSelectionMarker marker = marker_at_screen(
+                        const OpenRideSelectionMarker marker = openride_app_render_marker_at_screen(
                             &camera,
                             &selection,
                             (double)event.button.x,
@@ -2158,7 +1485,7 @@ int main(int argc, char **argv)
                     const double min_zoom = map_world && scalable_map
                         ? OPENRIDE_MAP_WORLD_MIN_ZOOM
                         : (double)metadata->min_zoom;
-                    const double target_zoom = clampd(
+                    const double target_zoom = openride_app_support_clampd(
                         camera.zoom + requested_delta,
                         min_zoom,
                         max_zoom);
@@ -3059,7 +2386,7 @@ int main(int argc, char **argv)
                         (route_map_pick_marker != OPENRIDE_MARKER_NONE
                          || drive_mode.active)
                             ? OPENRIDE_MARKER_NONE
-                            : marker_at_screen(&camera,
+                            : openride_app_render_marker_at_screen(&camera,
                                            &selection,
                                            x,
                                            y,
@@ -3287,8 +2614,8 @@ int main(int argc, char **argv)
                         openride_drive_mode_set_auto_zoom(&drive_mode, false);
                     }
                     double zoom_delta = openride_touch_pinch_zoom_delta((double)event.pinch.scale);
-                    zoom_delta = clampd(zoom_delta, -1.0, 1.0);
-                    const double target_zoom = clampd(camera.zoom + zoom_delta,
+                    zoom_delta = openride_app_support_clampd(zoom_delta, -1.0, 1.0);
+                    const double target_zoom = openride_app_support_clampd(camera.zoom + zoom_delta,
                                                        min_zoom,
                                                        max_zoom);
                     const double focus_x = (double)width * 0.5;
@@ -4489,7 +3816,7 @@ int main(int argc, char **argv)
                 if (drive_mode.auto_zoom) {
                     const double max_drive_zoom = scalable_map
                         ? 18.0 : (double)metadata->max_zoom;
-                    camera.zoom = clampd(drive_mode.camera_zoom,
+                    camera.zoom = openride_app_support_clampd(drive_mode.camera_zoom,
                                          (double)metadata->min_zoom,
                                          max_drive_zoom);
                 }
@@ -4590,14 +3917,14 @@ int main(int argc, char **argv)
         }
 
         if (gpx_loaded) {
-            draw_gpx_document(renderer,
+            openride_app_render_gpx_document(renderer,
                               &camera,
                               &gpx_overlay,
                               width,
                               height);
         }
         if (route_valid) {
-            draw_route(renderer,
+            openride_app_render_route(renderer,
                        &camera,
                        &routing_graph,
                        &route,
@@ -4605,7 +3932,7 @@ int main(int argc, char **argv)
                        height);
         }
         if (route_valid && !drive_mode.active) {
-            draw_snap_connector(renderer,
+            openride_app_render_snap_connector(renderer,
                                 &camera,
                                 &selection,
                                 &start_snap,
@@ -4613,7 +3940,7 @@ int main(int argc, char **argv)
                                 width,
                                 height);
             if (!loop_active) {
-                draw_snap_connector(renderer,
+                openride_app_render_snap_connector(renderer,
                                     &camera,
                                     &selection,
                                     &destination_snap,
@@ -4621,7 +3948,7 @@ int main(int argc, char **argv)
                                     width,
                                     height);
             } else {
-                draw_loop_waypoints(renderer,
+                openride_app_render_loop_waypoints(renderer,
                                     &camera,
                                     loop_waypoints,
                                     loop_waypoint_count,
@@ -4630,7 +3957,7 @@ int main(int argc, char **argv)
             }
         }
         if (!drive_mode.active) {
-            draw_selection(renderer,
+            openride_app_render_selection(renderer,
                            &camera,
                            &selection,
                            !route_valid,
@@ -4645,7 +3972,7 @@ int main(int argc, char **argv)
                 display_sample.speed_mps = filtered_location.speed_mps;
                 display_sample.heading_deg = filtered_location.heading_deg;
             }
-            draw_navigation_position(renderer,
+            openride_app_render_navigation_position(renderer,
                                      &camera,
                                      &display_sample,
                                      &navigation_state,
@@ -4653,7 +3980,7 @@ int main(int argc, char **argv)
                                      height);
         }
         if (!drive_mode.active) {
-            draw_center_marker(renderer, width, height);
+            openride_app_render_center_marker(renderer, width, height);
         }
         if (!drive_mode.active) {
             openride_app_ui_draw_map_status_overlay(renderer,
@@ -4779,8 +4106,8 @@ int main(int argc, char **argv)
             openride_app_ui_draw_toolbar(renderer, width, height, route_valid);
         }
         if (map_zoom_test.active) {
-            const SDL_Rect safe = openride_render_safe_area(renderer, width, height);
-            const float ui_scale = openride_ui_scale(renderer);
+            const SDL_Rect safe = openride_app_render_safe_area(renderer, width, height);
+            const float ui_scale = openride_app_render_ui_scale(renderer);
             const float text_scale = ui_scale > 2.0f ? 2.0f : ui_scale;
             const float margin = 8.0f * ui_scale;
             const char *phase = map_zoom_test.direction > 0
@@ -4853,27 +4180,27 @@ int main(int argc, char **argv)
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, 180);
             SDL_RenderRect(renderer, &badge);
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            draw_scaled_text(renderer,
+            openride_app_render_scaled_text(renderer,
                              badge.x + 8.0f * ui_scale,
                              badge.y + 7.0f * ui_scale,
                              text_scale,
                              zoom_line);
-            draw_scaled_text(renderer,
+            openride_app_render_scaled_text(renderer,
                              badge.x + 8.0f * ui_scale,
                              badge.y + 25.0f * ui_scale,
                              text_scale,
                              gps_line);
-            draw_scaled_text(renderer,
+            openride_app_render_scaled_text(renderer,
                              badge.x + 8.0f * ui_scale,
                              badge.y + 43.0f * ui_scale,
                              text_scale,
                              road_line);
-            draw_scaled_text(renderer,
+            openride_app_render_scaled_text(renderer,
                              badge.x + 8.0f * ui_scale,
                              badge.y + 61.0f * ui_scale,
                              text_scale,
                              road_work_line);
-            draw_scaled_text(renderer,
+            openride_app_render_scaled_text(renderer,
                              badge.x + 8.0f * ui_scale,
                              badge.y + 79.0f * ui_scale,
                              text_scale,
@@ -4934,7 +4261,7 @@ int main(int argc, char **argv)
     openride_routing_world_cache_destroy(&routing_world_cache);
 
     if (lifecycle_watch_installed) {
-        SDL_RemoveEventWatch(openride_lifecycle_event_watch, &lifecycle_watch);
+        SDL_RemoveEventWatch(openride_app_support_lifecycle_event_watch, &lifecycle_watch);
         lifecycle_watch_installed = false;
     }
 
