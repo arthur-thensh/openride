@@ -147,6 +147,9 @@ set(OPENRIDE_APP_SOURCES
     src/main.c
     src/app_ui_action.c
     src/app_ui_bridge.c
+    src/app_search_runtime.c
+    src/app_route_runtime.c
+    src/app_region_runtime.c
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c

@@ -36,6 +36,9 @@
 #include "openride/app_toolbar.h"
 #include "openride/app_ui_action.h"
 #include "openride/app_ui_bridge.h"
+#include "app_search_runtime.h"
+#include "app_route_runtime.h"
+#include "app_region_runtime.h"
 #include "openride/drive_mode.h"
 #include "openride/app_lifecycle.h"
 #include "openride/mbtiles.h"
@@ -122,172 +125,6 @@ static void openride_android_missed_turn_dev_destroy(
     openride_gps_simulator_destroy(&state->simulator);
 }
 
-typedef struct OpenRideRegionPrepareThreadContext {
-    OpenRidePlatformPaths paths;
-    const OpenRideRegionDefinition *region;
-    SDL_AtomicInt stage;
-    SDL_AtomicInt done;
-    SDL_AtomicInt success;
-    OpenRideRegionPrepareStats stats;
-    char error[256];
-} OpenRideRegionPrepareThreadContext;
-
-static void region_prepare_progress(OpenRideRegionPrepareStage stage,
-                                    const char *message,
-                                    void *userdata)
-{
-    (void)message;
-    OpenRideRegionPrepareThreadContext *context = userdata;
-    if (context) SDL_SetAtomicInt(&context->stage, (int)stage);
-}
-
-static int SDLCALL region_prepare_thread_main(void *userdata)
-{
-    OpenRideRegionPrepareThreadContext *context = userdata;
-    if (!context) return 1;
-    const bool ok = openride_region_prepare_from_pbf(&context->paths,
-                                                      context->region,
-                                                      false,
-                                                      region_prepare_progress,
-                                                      context,
-                                                      &context->stats,
-                                                      context->error,
-                                                      sizeof(context->error));
-    SDL_SetAtomicInt(&context->success, ok ? 1 : 0);
-    SDL_SetAtomicInt(&context->done, 1);
-    return ok ? 0 : 1;
-}
-
-static SDL_Thread *start_region_prepare_thread(
-    OpenRideRegionPrepareThreadContext *context,
-    const OpenRidePlatformPaths *paths,
-    const OpenRideRegionDefinition *region)
-{
-    if (!context || !paths || !region) return NULL;
-    memset(context, 0, sizeof(*context));
-    context->paths = *paths;
-    context->region = region;
-    SDL_SetAtomicInt(&context->stage, OPENRIDE_REGION_PREPARE_ROUTING);
-    return SDL_CreateThread(region_prepare_thread_main,
-                            "OpenRide-region-prepare",
-                            context);
-}
-
-static const char *region_prepare_stage_text(int stage)
-{
-    switch ((OpenRideRegionPrepareStage)stage) {
-        case OPENRIDE_REGION_PREPARE_ROUTING: return "Preparation 1/3: routage";
-        case OPENRIDE_REGION_PREPARE_SEARCH: return "Preparation 2/3: recherche";
-        case OPENRIDE_REGION_PREPARE_MAP: return "Preparation 3/3: carte .ormap";
-        case OPENRIDE_REGION_PREPARE_FINALIZING: return "Finalisation de la region";
-        case OPENRIDE_REGION_PREPARE_COMPLETE: return "Region prete";
-        case OPENRIDE_REGION_PREPARE_ERROR: return "Erreur de preparation";
-        default: return "Preparation...";
-    }
-}
-
-static double region_prepare_stage_progress(int stage)
-{
-    switch ((OpenRideRegionPrepareStage)stage) {
-        case OPENRIDE_REGION_PREPARE_ROUTING: return 0.18;
-        case OPENRIDE_REGION_PREPARE_SEARCH: return 0.50;
-        case OPENRIDE_REGION_PREPARE_MAP: return 0.72;
-        case OPENRIDE_REGION_PREPARE_FINALIZING: return 0.96;
-        case OPENRIDE_REGION_PREPARE_COMPLETE: return 1.0;
-        default: return -1.0;
-    }
-}
-
-static bool start_android_region_file_download(
-    const OpenRideRegionDefinition *region,
-    bool poly,
-    bool *download_started,
-    bool *download_is_poly,
-    bool *region_busy,
-    double *region_progress,
-    char *work_status,
-    size_t work_status_size)
-{
-    if (!region || !download_started || !download_is_poly
-        || !region_busy || !region_progress || !work_status) return false;
-    const char *url = poly ? region->poly_url : region->pbf_url;
-    const char *filename = poly ? region->poly_filename : region->pbf_filename;
-    const char *directory = poly ? "data/maps" : "data/downloads";
-    char relative_path[384];
-    snprintf(relative_path, sizeof(relative_path), "%s/%s", directory, filename);
-    if (!openride_android_region_download_start(url, relative_path)) {
-        snprintf(work_status,
-                 work_status_size,
-                 "%s",
-                 poly
-                     ? "Impossible de lancer le telechargement du contour"
-                     : "Impossible de lancer le telechargement OSM");
-        return false;
-    }
-    *download_started = true;
-    *download_is_poly = poly;
-    *region_busy = true;
-    *region_progress = 0.0;
-    snprintf(work_status,
-             work_status_size,
-             "%s",
-             poly ? "Telechargement du contour de region"
-                  : "Telechargement des donnees OSM");
-    return true;
-}
-
-static bool begin_android_region_install(
-    const OpenRidePlatformPaths *paths,
-    const OpenRideRegionDefinition *region,
-    OpenRideRegionStatus *status,
-    OpenRideRegionPrepareThreadContext *prepare_context,
-    SDL_Thread **prepare_thread,
-    bool *download_started,
-    bool *download_is_poly,
-    bool *region_busy,
-    double *region_progress,
-    char *work_status,
-    size_t work_status_size,
-    char *error,
-    size_t error_size)
-{
-    if (!paths || !region || !status || !prepare_context || !prepare_thread
-        || !download_started || !download_is_poly || !region_busy
-        || !region_progress || !work_status) return false;
-    if (*region_busy || *prepare_thread || *download_started) return false;
-    if (!openride_region_get_status(paths, region, status, error, error_size)) return false;
-
-    /* The Geofabrik .poly is tiny and provides the exact offline coverage outline. */
-    if (!status->poly_present) {
-        return start_android_region_file_download(region,
-                                                  true,
-                                                  download_started,
-                                                  download_is_poly,
-                                                  region_busy,
-                                                  region_progress,
-                                                  work_status,
-                                                  work_status_size);
-    }
-    if (status->source_pbf_present) {
-        *prepare_thread = start_region_prepare_thread(prepare_context, paths, region);
-        if (!*prepare_thread) {
-            snprintf(work_status, work_status_size, "Impossible de lancer la preparation");
-            return false;
-        }
-        *region_busy = true;
-        *region_progress = region_prepare_stage_progress(OPENRIDE_REGION_PREPARE_ROUTING);
-        snprintf(work_status, work_status_size, "Preparation 1/3: routage");
-        return true;
-    }
-    return start_android_region_file_download(region,
-                                              false,
-                                              download_started,
-                                              download_is_poly,
-                                              region_busy,
-                                              region_progress,
-                                              work_status,
-                                              work_status_size);
-}
 #endif
 
 static bool SDLCALL openride_lifecycle_event_watch(void *userdata, SDL_Event *event)
@@ -347,32 +184,6 @@ static bool has_suffix(const char *text, const char *suffix)
     const size_t suffix_len = strlen(suffix);
     return text_len >= suffix_len
         && strcmp(text + text_len - suffix_len, suffix) == 0;
-}
-
-static void metadata_from_ormap(OpenRideMBTilesMetadata *out,
-                                const OpenRideORMapMetadata *source)
-{
-    if (!out) return;
-    memset(out, 0, sizeof(*out));
-    snprintf(out->name, sizeof(out->name), "%s", source ? source->name : "OpenRide");
-    snprintf(out->format, sizeof(out->format), "ormap");
-    snprintf(out->attribution,
-             sizeof(out->attribution),
-             "%s",
-             source ? source->attribution : "OpenStreetMap contributors");
-    out->min_zoom = source ? source->min_zoom : OPENRIDE_ORMAP_MIN_ROAD_ZOOM;
-    out->max_zoom = source ? source->max_zoom : OPENRIDE_ORMAP_MAX_ROAD_ZOOM;
-    if (source) {
-        out->has_center = source->has_center;
-        out->center_lat = source->center_lat;
-        out->center_lon = source->center_lon;
-        out->center_zoom = source->center_zoom;
-        out->has_bounds = source->has_bounds;
-        out->west = source->west;
-        out->south = source->south;
-        out->east = source->east;
-        out->north = source->north;
-    }
 }
 
 static const char *default_map_path(void)
@@ -744,425 +555,6 @@ static void draw_gpx_document(SDL_Renderer *renderer,
     }
 }
 
-static void fit_camera_to_gpx(OpenRideMapCamera *camera,
-                              const OpenRideGPXDocument *document,
-                              int viewport_width,
-                              int viewport_height,
-                              double min_zoom,
-                              double max_zoom)
-{
-    if (!camera || !document || viewport_width <= 100 || viewport_height <= 100) return;
-    const OpenRideGPXBounds bounds = openride_gpx_document_bounds(document);
-    if (!bounds.valid) return;
-
-    const OpenRidePointD nw = openride_mercator_forward(bounds.max_lat, bounds.min_lon);
-    const OpenRidePointD se = openride_mercator_forward(bounds.min_lat, bounds.max_lon);
-    double dx = fabs(se.x - nw.x);
-    if (dx > 0.5) dx = 1.0 - dx;
-    const double dy = fabs(se.y - nw.y);
-    const double usable_w = (double)viewport_width - 100.0;
-    const double usable_h = (double)viewport_height - 100.0;
-    double zoom = max_zoom;
-
-    if (dx > 1e-12 && dy > 1e-12) {
-        const double zoom_x = log2(usable_w / (256.0 * dx));
-        const double zoom_y = log2(usable_h / (256.0 * dy));
-        zoom = fmin(zoom_x, zoom_y);
-    } else if (dx > 1e-12) {
-        zoom = log2(usable_w / (256.0 * dx));
-    } else if (dy > 1e-12) {
-        zoom = log2(usable_h / (256.0 * dy));
-    }
-
-    camera->zoom = clampd(zoom, min_zoom, max_zoom);
-    camera->center_lat = (bounds.min_lat + bounds.max_lat) * 0.5;
-    camera->center_lon = (bounds.min_lon + bounds.max_lon) * 0.5;
-}
-
-static bool load_gpx_overlay(const char *path,
-                             OpenRideGPXDocument *document,
-                             char *status,
-                             size_t status_size)
-{
-    char error[256] = {0};
-    if (!path || !file_exists(path)) {
-        snprintf(status,
-                 status_size,
-                 "GPX introuvable: %.180s",
-                 path ? path : "-");
-        return false;
-    }
-
-    if (!openride_gpx_load_file(path, document, error, sizeof(error))) {
-        snprintf(status,
-                 status_size,
-                 "import GPX impossible: %.160s",
-                 error[0] ? error : "erreur inconnue");
-        return false;
-    }
-
-    snprintf(status,
-             status_size,
-             "GPX charge: %u track | %u route | %u waypoint",
-             document->track_points.count,
-             document->route_points.count,
-             document->waypoints.count);
-    return true;
-}
-
-static void record_gps_sample(OpenRideGPXDocument *recording,
-                              const OpenRideGPSSample *sample,
-                              double *last_recorded_position_m)
-{
-    if (!recording || !sample || !sample->valid || !last_recorded_position_m) return;
-    if (*last_recorded_position_m >= 0.0
-        && sample->route_position_m >= *last_recorded_position_m
-        && sample->route_position_m - *last_recorded_position_m < OPENRIDE_GPX_RECORDING_MIN_STEP_M) {
-        return;
-    }
-
-    OpenRideGPXPoint point;
-    memset(&point, 0, sizeof(point));
-    point.lat = sample->lat;
-    point.lon = sample->lon;
-    point.starts_new_segment = (recording->track_points.count == 0U);
-    if (openride_gpx_document_append(recording, OPENRIDE_GPX_POINT_TRACK, &point)) {
-        if (recording->track_points.count == 1U) recording->track_segment_count = 1U;
-        *last_recorded_position_m = sample->route_position_m;
-    }
-}
-
-static bool recalculate_route(const OpenRideRoutingGraph *graph,
-                              bool graph_loaded,
-                              const OpenRideMapSelection *selection,
-                              OpenRideRoutingProfile profile,
-                              OpenRideRoute *route,
-                              OpenRideRoutingSnap *start_snap,
-                              OpenRideRoutingSnap *destination_snap,
-                              char *status,
-                              size_t status_size)
-{
-    openride_route_destroy(route);
-    if (start_snap) {
-        memset(start_snap, 0, sizeof(*start_snap));
-        start_snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-    }
-    if (destination_snap) {
-        memset(destination_snap, 0, sizeof(*destination_snap));
-        destination_snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-    }
-
-    if (!graph_loaded) {
-        snprintf(status, status_size, "graphe routier non installe");
-        return false;
-    }
-    if (!openride_map_selection_complete(selection)) {
-        snprintf(status, status_size, "choisis un depart et une destination");
-        return false;
-    }
-
-    OpenRideRoutingSnap local_start = {0};
-    OpenRideRoutingSnap local_destination = {0};
-    local_start.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-    local_destination.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-
-    if (!openride_routing_graph_snap_to_segment(graph,
-                                                selection->start.lat,
-                                                selection->start.lon,
-                                                OPENRIDE_MAX_SNAP_DISTANCE_M,
-                                                &local_start)
-        || !openride_routing_graph_snap_to_segment(graph,
-                                                   selection->destination.lat,
-                                                   selection->destination.lon,
-                                                   OPENRIDE_MAX_SNAP_DISTANCE_M,
-                                                   &local_destination)) {
-        snprintf(status, status_size, "point trop loin du reseau routier");
-        return false;
-    }
-
-    if (start_snap) *start_snap = local_start;
-    if (destination_snap) *destination_snap = local_destination;
-
-    OpenRideSnappedRoutingRequest request = openride_snapped_routing_request_default();
-    request.start = local_start;
-    request.destination = local_destination;
-    request.profile = profile;
-
-    char route_error[256] = {0};
-    if (!openride_routing_engine_calculate_snapped(graph,
-                                                   &request,
-                                                   route,
-                                                   route_error,
-                                                   sizeof(route_error))) {
-        snprintf(status,
-                 status_size,
-                 "itineraire impossible: %.180s",
-                 route_error[0] ? route_error : "erreur inconnue");
-        return false;
-    }
-
-    snprintf(status, status_size, "itineraire calcule sur segments");
-    return true;
-}
-
-
-
-typedef struct OpenRideRoutingWorldThreadContext {
-    OpenRidePlatformPaths paths;
-    const OpenRideRegionDefinition *active_region;
-    const OpenRideRoutingGraph *active_graph;
-    OpenRideRoutingWorldCache *cache;
-    OpenRideMapSelection selection;
-    OpenRideRoutingProfile profile;
-    bool installed_alternative;
-    bool reroute;
-    bool resume_simulator;
-    SDL_AtomicInt done;
-    SDL_AtomicInt success;
-    OpenRideRoute route;
-    OpenRideRoutingWorldResult result;
-    char error[256];
-} OpenRideRoutingWorldThreadContext;
-
-static int SDLCALL routing_world_thread_main(void *userdata)
-{
-    OpenRideRoutingWorldThreadContext *context = userdata;
-    if (!context) return 1;
-
-    const bool ok = context->installed_alternative
-        ? openride_routing_world_calculate_installed_alternative_cached(
-              &context->paths,
-              context->active_region,
-              context->active_graph,
-              context->cache,
-              context->selection.start.lat,
-              context->selection.start.lon,
-              context->selection.destination.lat,
-              context->selection.destination.lon,
-              OPENRIDE_MAX_SNAP_DISTANCE_M,
-              context->profile,
-              &context->route,
-              &context->result,
-              context->error,
-              sizeof(context->error))
-        : openride_routing_world_calculate_selection_cached(
-              &context->paths,
-              context->active_region,
-              context->active_graph,
-              context->cache,
-              &context->selection,
-              OPENRIDE_MAX_SNAP_DISTANCE_M,
-              context->profile,
-              &context->route,
-              &context->result,
-              context->error,
-              sizeof(context->error));
-
-    SDL_SetAtomicInt(&context->success, ok ? 1 : 0);
-    SDL_SetAtomicInt(&context->done, 1);
-    return ok ? 0 : 1;
-}
-
-static SDL_Thread *start_routing_world_thread_mode(
-    OpenRideRoutingWorldThreadContext *context,
-    const OpenRidePlatformPaths *paths,
-    const OpenRideRegionDefinition *active_region,
-    const OpenRideRoutingGraph *active_graph,
-    OpenRideRoutingWorldCache *cache,
-    const OpenRideMapSelection *selection,
-    OpenRideRoutingProfile profile,
-    bool installed_alternative,
-    bool reroute,
-    bool resume_simulator)
-{
-    if (!context || !paths || !selection
-        || !openride_map_selection_complete(selection)) {
-        return NULL;
-    }
-
-    openride_route_destroy(&context->route);
-    memset(context, 0, sizeof(*context));
-    context->paths = *paths;
-    context->active_region = active_region;
-    context->active_graph = active_graph;
-    context->cache = cache;
-    context->selection = *selection;
-    context->profile = profile;
-    context->installed_alternative = installed_alternative;
-    context->reroute = reroute;
-    context->resume_simulator = resume_simulator;
-    SDL_SetAtomicInt(&context->done, 0);
-    SDL_SetAtomicInt(&context->success, 0);
-
-    return SDL_CreateThread(routing_world_thread_main,
-                            "OpenRide-routing-world",
-                            context);
-}
-
-static SDL_Thread *start_routing_world_thread(
-    OpenRideRoutingWorldThreadContext *context,
-    const OpenRidePlatformPaths *paths,
-    const OpenRideRegionDefinition *active_region,
-    const OpenRideRoutingGraph *active_graph,
-    OpenRideRoutingWorldCache *cache,
-    const OpenRideMapSelection *selection,
-    OpenRideRoutingProfile profile,
-    bool reroute,
-    bool resume_simulator)
-{
-    return start_routing_world_thread_mode(
-        context,
-        paths,
-        active_region,
-        active_graph,
-        cache,
-        selection,
-        profile,
-        false,
-        reroute,
-        resume_simulator);
-}
-
-static SDL_Thread *start_routing_world_installed_alternative_thread(
-    OpenRideRoutingWorldThreadContext *context,
-    const OpenRidePlatformPaths *paths,
-    const OpenRideRegionDefinition *active_region,
-    const OpenRideRoutingGraph *active_graph,
-    OpenRideRoutingWorldCache *cache,
-    const OpenRideMapSelection *selection,
-    OpenRideRoutingProfile profile)
-{
-    return start_routing_world_thread_mode(
-        context,
-        paths,
-        active_region,
-        active_graph,
-        cache,
-        selection,
-        profile,
-        true,
-        false,
-        false);
-}
-
-static bool routing_world_request_matches(
-    const OpenRideRoutingWorldThreadContext *context,
-    const OpenRideRegionDefinition *active_region,
-    const OpenRideMapSelection *selection,
-    OpenRideRoutingProfile profile)
-{
-    if (!context || !selection) return false;
-    if (context->active_region != active_region || context->profile != profile) return false;
-    if (context->selection.has_start != selection->has_start
-        || context->selection.has_destination != selection->has_destination) {
-        return false;
-    }
-    if (strcmp(context->selection.start_region_id,
-               selection->start_region_id) != 0
-        || strcmp(context->selection.destination_region_id,
-                  selection->destination_region_id) != 0) {
-        return false;
-    }
-    if (selection->has_start
-        && (context->selection.start.lat != selection->start.lat
-            || context->selection.start.lon != selection->start.lon)) {
-        return false;
-    }
-    if (selection->has_destination
-        && (context->selection.destination.lat != selection->destination.lat
-            || context->selection.destination.lon != selection->destination.lon)) {
-        return false;
-    }
-    return true;
-}
-
-static bool generate_loop_route(const OpenRideRoutingGraph *graph,
-                                bool graph_loaded,
-                                const OpenRideMapSelection *selection,
-                                OpenRideRoutingProfile profile,
-                                double target_distance_m,
-                                OpenRideLoopDirection direction,
-                                uint32_t seed,
-                                OpenRideRoute *route,
-                                OpenRideLoopStats *stats,
-                                OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS],
-                                uint32_t *waypoint_count,
-                                OpenRideRoutingSnap *start_snap,
-                                char *status,
-                                size_t status_size)
-{
-    openride_route_destroy(route);
-    if (stats) memset(stats, 0, sizeof(*stats));
-    if (waypoint_count) *waypoint_count = 0U;
-    if (start_snap) {
-        memset(start_snap, 0, sizeof(*start_snap));
-        start_snap->segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-    }
-
-    if (!graph_loaded) {
-        snprintf(status, status_size, "graphe routier non installe");
-        return false;
-    }
-    if (!selection->has_start) {
-        snprintf(status, status_size, "choisis d'abord un point de depart");
-        return false;
-    }
-
-    OpenRideRoutingSnap local_start = {0};
-    local_start.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-    if (!openride_routing_graph_snap_to_segment(graph,
-                                                selection->start.lat,
-                                                selection->start.lon,
-                                                OPENRIDE_MAX_SNAP_DISTANCE_M,
-                                                &local_start)) {
-        snprintf(status, status_size, "depart trop loin du reseau routier");
-        return false;
-    }
-
-    OpenRideLoopRequest request = openride_loop_request_default();
-    request.start = local_start;
-    request.profile = profile;
-    request.direction = direction;
-    request.target_distance_m = target_distance_m;
-    request.candidate_count = 6U;
-    request.seed = seed;
-
-    OpenRideLoopResult generated = {0};
-    char loop_error[256] = {0};
-    if (!openride_loop_generator_generate(graph,
-                                          &request,
-                                          &generated,
-                                          loop_error,
-                                          sizeof(loop_error))) {
-        snprintf(status,
-                 status_size,
-                 "boucle impossible: %.180s",
-                 loop_error[0] ? loop_error : "erreur inconnue");
-        return false;
-    }
-
-    if (start_snap) *start_snap = local_start;
-    if (stats) *stats = generated.stats;
-    if (waypoints && generated.waypoint_count > 0U) {
-        memcpy(waypoints,
-               generated.waypoints,
-               sizeof(generated.waypoints));
-    }
-    if (waypoint_count) *waypoint_count = generated.waypoint_count;
-
-    *route = generated.route;
-    memset(&generated.route, 0, sizeof(generated.route));
-    snprintf(status,
-             status_size,
-             "boucle %.1f km | score %.0f | %u/%u candidats",
-             route->distance_m / 1000.0,
-             generated.stats.score,
-             generated.stats.successful_candidates,
-             generated.stats.attempted_candidates);
-    openride_loop_result_destroy(&generated);
-    return true;
-}
-
 static void draw_loop_waypoints(SDL_Renderer *renderer,
                                 const OpenRideMapCamera *camera,
                                 const OpenRideRoutePoint *waypoints,
@@ -1300,315 +692,6 @@ static float openride_ui_scale(SDL_Renderer *renderer)
     return scale;
 }
 
-static void utf8_backspace(char *text)
-{
-    if (!text || text[0] == '\0') return;
-    size_t length = strlen(text);
-    do {
-        --length;
-    } while (length > 0U && (((unsigned char)text[length] & 0xC0U) == 0x80U));
-    text[length] = '\0';
-}
-
-static bool refresh_place_search(OpenRidePlaceWorld *world,
-                                 const char *query,
-                                 OpenRidePlaceSearchResult *results,
-                                 uint32_t *result_count,
-                                 uint32_t *selected_result,
-                                 char *status,
-                                 size_t status_size)
-{
-    char error[192] = {0};
-    uint32_t count = 0U;
-    const bool ok = openride_place_world_search(world,
-                                                 query,
-                                                 results,
-                                                 OPENRIDE_SEARCH_MAX_RESULTS,
-                                                 &count,
-                                                 error,
-                                                 sizeof(error));
-    if (!ok) {
-        if (status && status_size > 0U) {
-            snprintf(status,
-                     status_size,
-                     "recherche impossible: %.150s",
-                     error[0] ? error : "erreur inconnue");
-        }
-        return false;
-    }
-    if (result_count) *result_count = count;
-    if (selected_result && (*selected_result >= count || count == 0U)) *selected_result = 0U;
-    return true;
-}
-
-static void set_destination_from_place(OpenRideMapSelection *selection,
-                                       const OpenRideGPSSample *gps,
-                                       bool gps_valid,
-                                       double lat,
-                                       double lon,
-                                       const char *name,
-                                       bool *route_dirty,
-                                       char *status,
-                                       size_t status_size)
-{
-    if (!selection) return;
-#ifdef __ANDROID__
-    if (gps_valid && gps) {
-        openride_map_selection_set(selection,
-                                   OPENRIDE_MARKER_START,
-                                   gps->lat,
-                                   gps->lon);
-    }
-#else
-    (void)gps;
-    (void)gps_valid;
-#endif
-    openride_map_selection_set(selection, OPENRIDE_MARKER_DESTINATION, lat, lon);
-    if (route_dirty) *route_dirty = openride_map_selection_complete(selection);
-    if (status && status_size > 0U) {
-        snprintf(status,
-                 status_size,
-                 openride_map_selection_complete(selection)
-                     ? "destination %.120s | calcul itineraire"
-                     : "destination %.120s | choisis le depart",
-                 name && name[0] ? name : "selectionnee");
-    }
-}
-
-static void refresh_stored_places(OpenRideAppStorage *storage,
-                                  bool favorites,
-                                  OpenRideStoredPlace *places,
-                                  uint32_t *count)
-{
-    char error[160] = {0};
-    if (!storage || !places || !count) return;
-    *count = 0U;
-    if (favorites) {
-        openride_app_storage_list_favorites(storage,
-                                            places,
-                                            OPENRIDE_APP_LIST_MAX,
-                                            count,
-                                            error,
-                                            sizeof(error));
-    } else {
-        openride_app_storage_list_history(storage,
-                                          places,
-                                          OPENRIDE_APP_LIST_MAX,
-                                          count,
-                                          error,
-                                          sizeof(error));
-    }
-}
-
-static void open_place_search(SDL_Window *window,
-                              OpenRidePlaceWorld *place_world,
-                              bool *active,
-                              char *query,
-                              uint32_t *result_count,
-                              uint32_t *selected,
-                              char *status,
-                              size_t status_size)
-{
-    if (!active || !query || !result_count || !selected) return;
-    if (!place_world) {
-        snprintf(status, status_size,
-                 "recherche hors ligne indisponible");
-        return;
-    }
-    *active = true;
-    query[0] = '\0';
-    *result_count = 0U;
-    *selected = 0U;
-    /* Text input is layout-aware: important for '/' on AZERTY keyboards. */
-    SDL_StartTextInput(window);
-}
-
-static void clear_navigation_session(OpenRideNavigationEngine *navigation,
-                                     OpenRideGPSSimulator *simulator,
-                                     OpenRideNavigationState *navigation_state,
-                                     OpenRideGPSSample *gps_sample,
-                                     bool *gps_sample_valid)
-{
-    openride_navigation_engine_clear_route(navigation);
-    openride_gps_simulator_clear_route(simulator);
-    if (navigation_state) memset(navigation_state, 0, sizeof(*navigation_state));
-    if (gps_sample) memset(gps_sample, 0, sizeof(*gps_sample));
-    if (gps_sample_valid) *gps_sample_valid = false;
-}
-
-static bool prepare_navigation_session(OpenRideNavigationEngine *navigation,
-                                       OpenRideGPSSimulator *simulator,
-                                       OpenRideNavigationInstructionList *instructions,
-                                       const OpenRideRoutingGraph *graph,
-                                       const OpenRideRoute *route,
-                                       char *status,
-                                       size_t status_size)
-{
-    char error[192] = {0};
-    if (!openride_navigation_engine_set_route(navigation,
-                                              route,
-                                              error,
-                                              sizeof(error))) {
-        snprintf(status,
-                 status_size,
-                 "navigation indisponible: %.140s",
-                 error[0] ? error : "geometrie invalide");
-        return false;
-    }
-    if (!openride_gps_simulator_set_route(simulator,
-                                          route,
-                                          60.0,
-                                          error,
-                                          sizeof(error))) {
-        openride_navigation_engine_clear_route(navigation);
-        snprintf(status,
-                 status_size,
-                 "simulateur GPS indisponible: %.130s",
-                 error[0] ? error : "geometrie invalide");
-        return false;
-    }
-    openride_navigation_instructions_destroy(instructions);
-    const OpenRideRoutingGraph *instruction_graph =
-        route->nodes && route->node_count > 0U ? graph : NULL;
-    if (!openride_navigation_instructions_build(instruction_graph,
-                                                route,
-                                                instructions,
-                                                error,
-                                                sizeof(error))) {
-        openride_gps_simulator_clear_route(simulator);
-        openride_navigation_engine_clear_route(navigation);
-        snprintf(status,
-                 status_size,
-                 "instructions indisponibles: %.125s",
-                 error[0] ? error : "geometrie invalide");
-        return false;
-    }
-    return true;
-}
-
-
-static bool reroute_navigation_from_position(
-    const OpenRideRoutingGraph *graph,
-    bool graph_loaded,
-    OpenRideMapSelection *selection,
-    OpenRideRoutingProfile profile,
-    double lat,
-    double lon,
-    OpenRideRoute *route,
-    OpenRideRoutingSnap *start_snap,
-    OpenRideRoutingSnap *destination_snap,
-    OpenRideNavigationEngine *navigation,
-    OpenRideGPSSimulator *simulator,
-    OpenRideNavigationInstructionList *instructions,
-    OpenRideNavigationSession *session,
-    OpenRideLocationFilter *location_filter,
-    bool resume_simulator,
-    char *status,
-    size_t status_size)
-{
-    if (!selection || !selection->has_destination || !route || !navigation
-        || !simulator || !instructions || !session || !location_filter) {
-        if (status && status_size) snprintf(status, status_size, "recalcul impossible");
-        return false;
-    }
-
-    openride_navigation_engine_clear_route(navigation);
-    openride_gps_simulator_clear_route(simulator);
-    openride_navigation_instructions_destroy(instructions);
-    openride_map_selection_set(selection, OPENRIDE_MARKER_START, lat, lon);
-
-    const bool ok = recalculate_route(graph,
-                                      graph_loaded,
-                                      selection,
-                                      profile,
-                                      route,
-                                      start_snap,
-                                      destination_snap,
-                                      status,
-                                      status_size);
-    if (!ok) return false;
-
-    if (!prepare_navigation_session(navigation,
-                                    simulator,
-                                    instructions,
-                                    graph,
-                                    route,
-                                    status,
-                                    status_size)) {
-        openride_route_destroy(route);
-        return false;
-    }
-
-    openride_navigation_session_mark_rerouted(session);
-    openride_location_filter_reset(location_filter);
-    if (resume_simulator) openride_gps_simulator_start(simulator);
-    return true;
-}
-
-static bool prepare_gpx_navigation(const OpenRideGPXDocument *document,
-                                   OpenRideRoutingGraph *graph,
-                                   OpenRideMapSelection *selection,
-                                   OpenRideRoute *route,
-                                   OpenRideNavigationEngine *navigation,
-                                   OpenRideGPSSimulator *simulator,
-                                   OpenRideNavigationInstructionList *instructions,
-                                   OpenRideNavigationSession *session,
-                                   OpenRideLocationFilter *location_filter,
-                                   char *status,
-                                   size_t status_size)
-{
-    if (!document || !selection || !route || !navigation || !simulator
-        || !instructions || !session || !location_filter) {
-        return false;
-    }
-
-    char error[192] = {0};
-    openride_navigation_engine_clear_route(navigation);
-    openride_gps_simulator_clear_route(simulator);
-    openride_navigation_instructions_destroy(instructions);
-
-    if (!openride_gpx_build_navigation_route(document,
-                                             OPENRIDE_GPX_NAVIGATION_SPEED_KPH,
-                                             route,
-                                             error,
-                                             sizeof(error))) {
-        snprintf(status,
-                 status_size,
-                 "navigation GPX impossible: %.145s",
-                 error[0] ? error : "trace invalide");
-        return false;
-    }
-
-    openride_map_selection_clear(selection);
-    openride_map_selection_set(selection,
-                               OPENRIDE_MARKER_START,
-                               route->geometry[0].lat,
-                               route->geometry[0].lon);
-    openride_map_selection_set(selection,
-                               OPENRIDE_MARKER_DESTINATION,
-                               route->geometry[route->geometry_count - 1U].lat,
-                               route->geometry[route->geometry_count - 1U].lon);
-
-    if (!prepare_navigation_session(navigation,
-                                    simulator,
-                                    instructions,
-                                    graph,
-                                    route,
-                                    status,
-                                    status_size)) {
-        openride_route_destroy(route);
-        return false;
-    }
-
-    openride_navigation_session_reset(session);
-    openride_location_filter_reset(location_filter);
-    snprintf(status,
-             status_size,
-             "trace GPX prete: %.1f km | S pour simuler",
-             route->distance_m / 1000.0);
-    return true;
-}
-
 static void draw_navigation_position(SDL_Renderer *renderer,
                                      const OpenRideMapCamera *camera,
                                      const OpenRideGPSSample *gps,
@@ -1658,240 +741,6 @@ static void draw_navigation_position(SDL_Renderer *renderer,
     draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 5);
     SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
     draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
-}
-
-static bool add_selection_from_screen(OpenRideMapSelection *selection,
-                                      const OpenRideMapCamera *camera,
-                                      double screen_x,
-                                      double screen_y,
-                                      int viewport_width,
-                                      int viewport_height,
-                                      bool *route_dirty,
-                                      bool *loop_active,
-                                      uint32_t *loop_waypoint_count,
-                                      char *status,
-                                      size_t status_size)
-{
-    double lat = 0.0;
-    double lon = 0.0;
-    if (!selection || !camera) return false;
-    openride_screen_to_geo(camera,
-                           screen_x,
-                           screen_y,
-                           viewport_width,
-                           viewport_height,
-                           &lat,
-                           &lon);
-    const OpenRideSelectionMarker added = openride_map_selection_add(selection, lat, lon);
-    if (added == OPENRIDE_MARKER_NONE) return false;
-    if (loop_active) *loop_active = false;
-    if (loop_waypoint_count) *loop_waypoint_count = 0U;
-    if (route_dirty) *route_dirty = openride_map_selection_complete(selection);
-    if (status && status_size > 0U && route_dirty && !*route_dirty) {
-        snprintf(status, status_size, "choisis la destination");
-    }
-    return true;
-}
-
-static OpenRideMapCamera camera_from_metadata(const OpenRideMBTilesMetadata *metadata)
-{
-    OpenRideMapCamera camera = {
-        .center_lat = 50.370800,
-        .center_lon = 3.080200,
-        .zoom = 12.0
-    };
-
-    if (!metadata) return camera;
-
-    if (metadata->has_center) {
-        camera.center_lat = metadata->center_lat;
-        camera.center_lon = metadata->center_lon;
-        camera.zoom = metadata->center_zoom;
-    }
-    camera.zoom = clampd(camera.zoom,
-                         (double)metadata->min_zoom,
-                         20.0);
-
-    return camera;
-}
-
-static const OpenRideRegionDefinition *region_step(const OpenRideRegionDefinition *region,
-                                                       int direction)
-{
-    const size_t count = openride_region_count();
-    if (count == 0U) return NULL;
-    size_t index = 0U;
-    if (region) {
-        for (size_t i = 0U; i < count; ++i) {
-            const OpenRideRegionDefinition *candidate = openride_region_at(i);
-            if (candidate && strcmp(candidate->id, region->id) == 0) {
-                index = i;
-                break;
-            }
-        }
-    }
-    if (direction < 0) {
-        index = index == 0U ? count - 1U : index - 1U;
-    } else if (direction > 0) {
-        index = (index + 1U) % count;
-    }
-    return openride_region_at(index);
-}
-
-static const OpenRideRegionDefinition *select_initial_region(
-    const OpenRidePlatformPaths *paths,
-    const char *saved_region_id,
-    OpenRideRegionStatus *status,
-    char *error,
-    size_t error_size)
-{
-    const OpenRideRegionDefinition *selected = openride_region_find(saved_region_id);
-    if (!selected) selected = openride_region_default();
-    if (selected
-        && openride_region_get_status(paths, selected, status, error, error_size)
-        && openride_region_status_ready(status)) {
-        return selected;
-    }
-    for (size_t i = 0U; i < openride_region_count(); ++i) {
-        const OpenRideRegionDefinition *candidate = openride_region_at(i);
-        OpenRideRegionStatus candidate_status;
-        if (!candidate) continue;
-        if (openride_region_get_status(paths,
-                                       candidate,
-                                       &candidate_status,
-                                       error,
-                                       error_size)
-            && openride_region_status_ready(&candidate_status)) {
-            if (status) *status = candidate_status;
-            return candidate;
-        }
-    }
-    if (selected) {
-        openride_region_get_status(paths, selected, status, error, error_size);
-    }
-    return selected;
-}
-
-static bool activate_region_runtime(
-    SDL_Renderer *renderer,
-    const OpenRidePlatformPaths *paths,
-    const OpenRideRegionDefinition *region,
-    OpenRideMapStyle map_style,
-    OpenRideMBTiles **map,
-    OpenRideORMap **ormap,
-    bool *ormap_map,
-    bool *vector_map,
-    bool *scalable_map,
-    OpenRideMBTilesMetadata *metadata_storage,
-    const OpenRideMBTilesMetadata **metadata,
-    OpenRideMapRenderer *raster_renderer,
-    OpenRideVectorMapRenderer *vector_renderer,
-    OpenRideORMapRenderer *ormap_renderer,
-    OpenRideRoutingGraph *routing_graph,
-    bool *graph_loaded,
-    OpenRidePlaceIndex **place_index,
-    OpenRideMapCamera *camera,
-    OpenRideRegionStatus *status_out,
-    char *error,
-    size_t error_size)
-{
-    if (!renderer || !paths || !region || !map || !ormap || !ormap_map
-        || !vector_map || !scalable_map || !metadata_storage || !metadata
-        || !raster_renderer || !vector_renderer || !ormap_renderer
-        || !routing_graph || !graph_loaded || !place_index || !camera) {
-        if (error && error_size) snprintf(error, error_size, "invalid runtime region switch");
-        return false;
-    }
-
-    OpenRideRegionStatus status;
-    if (!openride_region_get_status(paths, region, &status, error, error_size)
-        || !openride_region_status_ready(&status)) {
-        if (error && error_size && error[0] == '\0') {
-            snprintf(error, error_size, "region data are not complete");
-        }
-        return false;
-    }
-
-    OpenRideORMap *new_ormap = openride_ormap_open(status.ormap_path, error, error_size);
-    if (!new_ormap) return false;
-
-    OpenRideRoutingGraph new_graph = {0};
-    if (!openride_routing_graph_load(&new_graph, status.routing_path, error, error_size)) {
-        openride_ormap_close(new_ormap);
-        return false;
-    }
-
-    OpenRidePlaceIndex *new_place_index = openride_place_index_open(status.search_path,
-                                                                    error,
-                                                                    error_size);
-    if (!new_place_index) {
-        openride_routing_graph_destroy(&new_graph);
-        openride_ormap_close(new_ormap);
-        return false;
-    }
-
-    OpenRideORMapRenderer *new_renderer = calloc(1U, sizeof(*new_renderer));
-    if (!new_renderer) {
-        if (error && error_size) snprintf(error, error_size, "unable to allocate map renderer");
-        openride_place_index_close(new_place_index);
-        openride_routing_graph_destroy(&new_graph);
-        openride_ormap_close(new_ormap);
-        return false;
-    }
-    if (!openride_ormap_renderer_init(new_renderer, renderer, new_ormap)) {
-        if (error && error_size) snprintf(error, error_size, "unable to initialize .ormap renderer");
-        free(new_renderer);
-        openride_place_index_close(new_place_index);
-        openride_routing_graph_destroy(&new_graph);
-        openride_ormap_close(new_ormap);
-        return false;
-    }
-    openride_ormap_renderer_set_style(new_renderer, map_style);
-
-    if (*ormap_map) {
-        openride_ormap_renderer_destroy(ormap_renderer);
-    } else if (*vector_map) {
-        openride_vector_map_renderer_destroy(vector_renderer);
-    } else if (*map) {
-        openride_map_renderer_destroy(raster_renderer);
-    }
-
-    openride_place_index_close(*place_index);
-    openride_routing_graph_destroy(routing_graph);
-    openride_mbtiles_close(*map);
-    openride_ormap_close(*ormap);
-
-    *map = NULL;
-    *ormap = new_ormap;
-    *ormap_renderer = *new_renderer;
-    free(new_renderer);
-    *routing_graph = new_graph;
-    *graph_loaded = true;
-    *place_index = new_place_index;
-    *ormap_map = true;
-    *vector_map = false;
-    *scalable_map = true;
-    metadata_from_ormap(metadata_storage, openride_ormap_metadata(new_ormap));
-    *metadata = metadata_storage;
-    *camera = camera_from_metadata(*metadata);
-    if (status_out) *status_out = status;
-    if (error && error_size) error[0] = '\0';
-    return true;
-}
-
-
-static void refresh_map_world_overview(OpenRideMapWorld *map_world,
-                                               const OpenRidePlatformPaths *paths)
-{
-    if (!map_world || !paths) return;
-    char world_error[256] = {0};
-    if (!openride_map_world_refresh(map_world,
-                                    paths,
-                                    world_error,
-                                    sizeof(world_error))) {
-        SDL_Log("MapWorld refresh failed: %s",
-                world_error[0] ? world_error : "unknown error");
-    }
 }
 
 int main(int argc, char **argv)
@@ -1949,7 +798,7 @@ int main(int argc, char **argv)
         snprintf(saved_region_id, sizeof(saved_region_id), "nord-pas-de-calais");
         error[0] = '\0';
     }
-    const OpenRideRegionDefinition *region = select_initial_region(&platform_paths,
+    const OpenRideRegionDefinition *region = openride_app_region_select_initial(&platform_paths,
                                                                    saved_region_id,
                                                                    &region_status,
                                                                    error,
@@ -2017,7 +866,7 @@ int main(int argc, char **argv)
                 SDL_Quit();
                 return 1;
             }
-            metadata_from_ormap(&metadata_storage, openride_ormap_metadata(ormap));
+            openride_app_region_metadata_from_ormap(&metadata_storage, openride_ormap_metadata(ormap));
         } else {
             map = openride_mbtiles_open(map_path, error, sizeof(error));
             if (!map) {
@@ -2066,7 +915,7 @@ int main(int argc, char **argv)
         ? openride_mbtiles_metadata(map) : &metadata_storage;
     bool vector_map = map && is_vector_map(metadata);
     bool scalable_map = vector_map || ormap_map;
-    OpenRideMapCamera camera = camera_from_metadata(metadata);
+    OpenRideMapCamera camera = openride_app_region_camera_from_metadata(metadata);
     OpenRideMapZoomTest map_zoom_test = {0};
     OpenRideMapSelection selection;
     openride_map_selection_init(&selection);
@@ -2345,8 +1194,8 @@ int main(int argc, char **argv)
         voice_enabled = saved_voice != 0;
         openride_navigation_session_set_auto_reroute(&navigation_session, auto_reroute);
         openride_voice_guidance_set_enabled(&voice_guidance, voice_enabled);
-        refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
-        refresh_stored_places(app_storage, false, history_places, &history_count);    } else {
+        openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+        openride_app_search_refresh_stored_places(app_storage, false, history_places, &history_count);    } else {
         fprintf(stderr, "App storage unavailable: %s\n", error[0] ? error : "unknown error");
     }
 #ifdef __ANDROID__
@@ -2369,7 +1218,7 @@ int main(int argc, char **argv)
         error[0] = '\0';
     }
     if (file_exists(gpx_import_path)) {
-        gpx_loaded = load_gpx_overlay(gpx_import_path,
+        gpx_loaded = openride_app_route_load_gpx_overlay(gpx_import_path,
                                       &gpx_overlay,
                                       route_status,
                                       sizeof(route_status));
@@ -2377,7 +1226,7 @@ int main(int argc, char **argv)
             int gpx_width = 0;
             int gpx_height = 0;
             SDL_GetCurrentRenderOutputSize(renderer, &gpx_width, &gpx_height);
-            fit_camera_to_gpx(&camera,
+            openride_app_route_fit_camera_to_gpx(&camera,
                               &gpx_overlay,
                               gpx_width,
                               gpx_height,
@@ -2411,7 +1260,7 @@ int main(int argc, char **argv)
                         } else if (app_panel == OPENRIDE_APP_PANEL_MAIN) {
                             if (event.key.key == SDLK_R) {
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
-                                open_place_search(window,
+                                openride_app_search_open(window,
                                                   place_world,
                                                   &place_search_active,
                                                   place_search_query,
@@ -2420,11 +1269,11 @@ int main(int argc, char **argv)
                                                   route_status,
                                                   sizeof(route_status));
                             } else if (event.key.key == SDLK_F) {
-                                refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+                                openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                                 app_panel = OPENRIDE_APP_PANEL_FAVORITES;
                                 app_panel_selected = 0U;
                             } else if (event.key.key == SDLK_H) {
-                                refresh_stored_places(app_storage, false, history_places, &history_count);
+                                openride_app_search_refresh_stored_places(app_storage, false, history_places, &history_count);
                                 app_panel = OPENRIDE_APP_PANEL_HISTORY;
                                 app_panel_selected = 0U;
                             } else if (event.key.key == SDLK_C) {
@@ -2449,7 +1298,7 @@ int main(int argc, char **argv)
                                 place_search_purpose =
                                     OPENRIDE_PLACE_SEARCH_ROUTE_START;
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
-                                open_place_search(window,
+                                openride_app_search_open(window,
                                                   place_world,
                                                   &place_search_active,
                                                   place_search_query,
@@ -2461,7 +1310,7 @@ int main(int argc, char **argv)
                                 place_search_purpose =
                                     OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION;
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
-                                open_place_search(window,
+                                openride_app_search_open(window,
                                                   place_world,
                                                   &place_search_active,
                                                   place_search_query,
@@ -2497,14 +1346,14 @@ int main(int argc, char **argv)
                                                                      items[app_panel_selected].id,
                                                                      error,
                                                                      sizeof(error));
-                                refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+                                openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                                 if (app_panel_selected >= favorite_count && app_panel_selected > 0U) {
                                     --app_panel_selected;
                                 }
                             }
                         } else if (app_panel == OPENRIDE_APP_PANEL_REGIONS) {
                             if ((event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) && !region_busy) {
-                                region = region_step(region, event.key.key == SDLK_LEFT ? -1 : 1);
+                                region = openride_app_region_step(region, event.key.key == SDLK_LEFT ? -1 : 1);
                                 openride_region_get_status(&platform_paths,
                                                            region,
                                                            &region_status,
@@ -2527,7 +1376,7 @@ int main(int argc, char **argv)
                                     }
                                 } else {
 #ifdef __ANDROID__
-                                    begin_android_region_install(&platform_paths,
+                                    openride_app_region_begin_android_install(&platform_paths,
                                                                  region,
                                                                  &region_status,
                                                                  &region_prepare_context,
@@ -2560,7 +1409,7 @@ int main(int argc, char **argv)
                                                                             sizeof(error))) {
                                     openride_region_get_status(&platform_paths, region,
                                                                &region_status, error, sizeof(error));
-                                    refresh_map_world_overview(map_world, &platform_paths);
+                                    openride_app_region_refresh_map_world_overview(map_world, &platform_paths);
                                     snprintf(region_work_status, sizeof(region_work_status),
                                              "Donnees de la region supprimees");
                                 } else {
@@ -2609,8 +1458,8 @@ int main(int argc, char **argv)
                                 OPENRIDE_PLACE_SEARCH_BROWSE;
                             SDL_StopTextInput(window);
                         } else if (event.key.key == SDLK_BACKSPACE) {
-                            utf8_backspace(place_search_query);
-                            refresh_place_search(place_world,
+                            openride_app_search_utf8_backspace(place_search_query);
+                            openride_app_search_refresh(place_world,
                                                  place_search_query,
                                                  place_search_results,
                                                  &place_search_result_count,
@@ -2630,7 +1479,7 @@ int main(int argc, char **argv)
                                    && place_search_result_count > 0U && app_storage) {
                             const OpenRidePlaceSearchResult *chosen = &place_search_results[place_search_selected];
                             if (openride_app_storage_add_favorite(app_storage, chosen->name, chosen->lat, chosen->lon, (int)chosen->kind, error, sizeof(error))) {
-                                refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+                                openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                                 snprintf(route_status, sizeof(route_status), "favori ajoute: %.120s", chosen->name);
                             }
                         } else if ((event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER)
@@ -2697,7 +1546,7 @@ int main(int argc, char **argv)
                                                                  (int)chosen->kind,
                                                                  error,
                                                                  sizeof(error));
-                                refresh_stored_places(app_storage,
+                                openride_app_search_refresh_stored_places(app_storage,
                                                       false,
                                                       history_places,
                                                       &history_count);
@@ -2720,7 +1569,7 @@ int main(int argc, char **argv)
                                    && (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0)) {
                         place_search_purpose =
                             OPENRIDE_PLACE_SEARCH_BROWSE;
-                        open_place_search(window, place_world, &place_search_active,
+                        openride_app_search_open(window, place_world, &place_search_active,
                                           place_search_query, &place_search_result_count,
                                           &place_search_selected, route_status, sizeof(route_status));
                     } else if (event.key.key == SDLK_V) {
@@ -2729,7 +1578,7 @@ int main(int argc, char **argv)
                             const double lon = selection.has_destination ? selection.destination.lon : camera.center_lon;
                             const char *name = selection.has_destination ? "Destination" : "Position carte";
                             if (openride_app_storage_add_favorite(app_storage, name, lat, lon, 0, error, sizeof(error))) {
-                                refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+                                openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                                 snprintf(route_status, sizeof(route_status), "favori ajoute");
                             }
                         }
@@ -2737,7 +1586,7 @@ int main(int argc, char **argv)
                         running = false;
                     } else if (event.key.key == SDLK_C) {
                         openride_map_selection_clear(&selection);
-                        clear_navigation_session(&navigation,
+                        openride_app_route_clear_navigation_session(&navigation,
                                                  &gps_simulator,
                                                  &navigation_state,
                                                  &gps_sample,
@@ -2769,7 +1618,7 @@ int main(int argc, char **argv)
                         }
                         destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
                         route_dirty = false;
-                        clear_navigation_session(&navigation,
+                        openride_app_route_clear_navigation_session(&navigation,
                                                  &gps_simulator,
                                                  &navigation_state,
                                                  &gps_sample,
@@ -2779,7 +1628,7 @@ int main(int argc, char **argv)
                         openride_navigation_session_reset(&navigation_session);
                         openride_location_filter_reset(&location_filter);
                         memset(&filtered_location, 0, sizeof(filtered_location));
-                        route_valid = generate_loop_route(&routing_graph,
+                        route_valid = openride_app_route_generate_loop(&routing_graph,
                                                           graph_loaded,
                                                           &selection,
                                                           routing_profile,
@@ -2795,7 +1644,7 @@ int main(int argc, char **argv)
                                                           sizeof(route_status));
                         loop_active = route_valid;
                         if (route_valid) {
-                            prepare_navigation_session(&navigation,
+                            openride_app_route_prepare_navigation_session(&navigation,
                                                        &gps_simulator,
                                                        &navigation_instructions,
                                                        &routing_graph,
@@ -2886,7 +1735,7 @@ int main(int argc, char **argv)
                                 ? filtered_location.lat : gps_sample.lat;
                             const double reroute_lon = filtered_location.valid
                                 ? filtered_location.lon : gps_sample.lon;
-                            route_valid = reroute_navigation_from_position(
+                            route_valid = openride_app_route_reroute_from_position(
                                 &routing_graph,
                                 graph_loaded,
                                 &selection,
@@ -2922,7 +1771,7 @@ int main(int argc, char **argv)
                     } else if (event.key.key == SDLK_O) {
                         loop_direction = openride_loop_direction_next(loop_direction);
                         if (loop_active) {
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -2944,7 +1793,7 @@ int main(int argc, char **argv)
                             OPENRIDE_LOOP_DISTANCE_MIN_M,
                             OPENRIDE_LOOP_DISTANCE_MAX_M);
                         if (loop_active) {
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -2965,7 +1814,7 @@ int main(int argc, char **argv)
                             OPENRIDE_LOOP_DISTANCE_MIN_M,
                             OPENRIDE_LOOP_DISTANCE_MAX_M);
                         if (loop_active) {
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -2980,7 +1829,7 @@ int main(int argc, char **argv)
                                  "boucle cible %.0f km | B pour generer",
                                  loop_target_distance_m / 1000.0);
                     } else if (event.key.key == SDLK_I) {
-                        gpx_loaded = load_gpx_overlay(gpx_import_path,
+                        gpx_loaded = openride_app_route_load_gpx_overlay(gpx_import_path,
                                                       &gpx_overlay,
                                                       route_status,
                                                       sizeof(route_status));
@@ -2988,7 +1837,7 @@ int main(int argc, char **argv)
                             int gpx_width = 0;
                             int gpx_height = 0;
                             SDL_GetCurrentRenderOutputSize(renderer, &gpx_width, &gpx_height);
-                            fit_camera_to_gpx(&camera,
+                            openride_app_route_fit_camera_to_gpx(&camera,
                                               &gpx_overlay,
                                               gpx_width,
                                               gpx_height,
@@ -3010,7 +1859,7 @@ int main(int argc, char **argv)
                             route_dirty = false;
                             start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
                             destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
-                            route_valid = prepare_gpx_navigation(&gpx_overlay,
+                            route_valid = openride_app_route_prepare_gpx_navigation(&gpx_overlay,
                                                                  &routing_graph,
                                                                  &selection,
                                                                  &route,
@@ -3060,7 +1909,7 @@ int main(int argc, char **argv)
                                 gpx_recording_active = true;
                                 gpx_last_recorded_position_m = -1.0;
                                 if (gps_sample_valid) {
-                                    record_gps_sample(&gpx_recording,
+                                    openride_app_route_record_gps_sample(&gpx_recording,
                                                       &gps_sample,
                                                       &gpx_last_recorded_position_m);
                                 }
@@ -3115,7 +1964,7 @@ int main(int argc, char **argv)
                                      "profil %s enregistre | la trace GPX reste active",
                                      openride_routing_profile_name(routing_profile));
                         } else if (loop_active) {
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -3144,7 +1993,7 @@ int main(int argc, char **argv)
                             memcpy(place_search_query + current,
                                    event.text.text,
                                    incoming + 1U);
-                            refresh_place_search(place_world,
+                            openride_app_search_refresh(place_world,
                                                  place_search_query,
                                                  place_search_results,
                                                  &place_search_result_count,
@@ -3184,7 +2033,7 @@ int main(int argc, char **argv)
                                                            height);
                         dragging_map = dragging_marker == OPENRIDE_MARKER_NONE;
                         if (dragging_marker != OPENRIDE_MARKER_NONE) {
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -3207,7 +2056,7 @@ int main(int argc, char **argv)
                             height);
                         if (marker != OPENRIDE_MARKER_NONE) {
                             openride_map_selection_remove(&selection, marker);
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -3243,7 +2092,7 @@ int main(int argc, char **argv)
                             int width = 0;
                             int height = 0;
                             SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
-                            add_selection_from_screen(&selection,
+                            openride_app_route_add_selection_from_screen(&selection,
                                                       &camera,
                                                       (double)event.button.x,
                                                       (double)event.button.y,
@@ -3393,7 +2242,7 @@ int main(int argc, char **argv)
                             app_panel = OPENRIDE_APP_PANEL_NONE;
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_BROWSE;
-                            open_place_search(window,
+                            openride_app_search_open(window,
                                               place_world,
                                               &place_search_active,
                                               place_search_query,
@@ -3446,7 +2295,7 @@ int main(int argc, char **argv)
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_ROUTE_START;
                             app_panel = OPENRIDE_APP_PANEL_NONE;
-                            open_place_search(window,
+                            openride_app_search_open(window,
                                               place_world,
                                               &place_search_active,
                                               place_search_query,
@@ -3467,7 +2316,7 @@ int main(int argc, char **argv)
                             place_search_purpose =
                                 OPENRIDE_PLACE_SEARCH_ROUTE_DESTINATION;
                             app_panel = OPENRIDE_APP_PANEL_NONE;
-                            open_place_search(window,
+                            openride_app_search_open(window,
                                               place_world,
                                               &place_search_active,
                                               place_search_query,
@@ -3521,7 +2370,7 @@ int main(int argc, char **argv)
                                         &region_status,
                                         error,
                                         sizeof(error));
-                                    begin_android_region_install(
+                                    openride_app_region_begin_android_install(
                                         &platform_paths,
                                         region,
                                         &region_status,
@@ -3555,7 +2404,7 @@ int main(int argc, char **argv)
                                 app_panel = OPENRIDE_APP_PANEL_NONE;
 
                                 routing_world_thread =
-                                    start_routing_world_installed_alternative_thread(
+                                    openride_app_route_start_world_installed_alternative_thread(
                                         &routing_world_context,
                                         &platform_paths,
                                         active_region,
@@ -3577,11 +2426,11 @@ int main(int argc, char **argv)
                                 }
                             }
                         } else if (mobile_hit.action == OPENRIDE_APP_UI_FAVORITES) {
-                            refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+                            openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                             app_panel = OPENRIDE_APP_PANEL_FAVORITES;
                             app_panel_selected = 0U;
                         } else if (mobile_hit.action == OPENRIDE_APP_UI_HISTORY) {
-                            refresh_stored_places(app_storage, false, history_places, &history_count);
+                            openride_app_search_refresh_stored_places(app_storage, false, history_places, &history_count);
                             app_panel = OPENRIDE_APP_PANEL_HISTORY;
                             app_panel_selected = 0U;
                         } else if (mobile_hit.action == OPENRIDE_APP_UI_REGIONS) {
@@ -3620,7 +2469,7 @@ int main(int argc, char **argv)
                                 camera.center_lat = chosen->lat;
                                 camera.center_lon = chosen->lon;
                                 if (camera.zoom < 14.0) camera.zoom = 14.0;
-                                set_destination_from_place(&selection,
+                                openride_app_search_set_destination_from_place(&selection,
                                                            &gps_sample,
                                                            gps_sample_valid,
                                                            chosen->lat,
@@ -3634,7 +2483,7 @@ int main(int argc, char **argv)
                         } else if (mobile_hit.action == OPENRIDE_APP_UI_REGION_PREVIOUS
                                    || mobile_hit.action == OPENRIDE_APP_UI_REGION_NEXT) {
                             if (!region_busy) {
-                                region = region_step(region,
+                                region = openride_app_region_step(region,
                                                      mobile_hit.action == OPENRIDE_APP_UI_REGION_PREVIOUS ? -1 : 1);
                                 openride_region_get_status(&platform_paths,
                                                            region,
@@ -3658,7 +2507,7 @@ int main(int argc, char **argv)
                                         region_activation_requested = true;
                                     }
                                 } else {
-                                    begin_android_region_install(&platform_paths,
+                                    openride_app_region_begin_android_install(&platform_paths,
                                                                  region,
                                                                  &region_status,
                                                                  &region_prepare_context,
@@ -3688,7 +2537,7 @@ int main(int argc, char **argv)
                                                                &region_status,
                                                                error,
                                                                sizeof(error));
-                                    refresh_map_world_overview(map_world, &platform_paths);
+                                    openride_app_region_refresh_map_world_overview(map_world, &platform_paths);
                                     snprintf(region_work_status,
                                              sizeof(region_work_status),
                                              "Donnees de la region supprimees");
@@ -3727,7 +2576,7 @@ int main(int argc, char **argv)
                             }
                             if (!gpx_navigation_active) {
                                 if (loop_active) {
-                                    clear_navigation_session(&navigation,
+                                    openride_app_route_clear_navigation_session(&navigation,
                                                              &gps_simulator,
                                                              &navigation_state,
                                                              &gps_sample,
@@ -4014,7 +2863,7 @@ int main(int argc, char **argv)
                                                                  (int)chosen->kind,
                                                                  error,
                                                                  sizeof(error));
-                                refresh_stored_places(app_storage, false, history_places, &history_count);
+                                openride_app_search_refresh_stored_places(app_storage, false, history_places, &history_count);
                             }
                             if (place_search_purpose
                                 == OPENRIDE_PLACE_SEARCH_ROUTE_START) {
@@ -4057,7 +2906,7 @@ int main(int argc, char **argv)
                                          chosen->name);
                                 app_panel = OPENRIDE_APP_PANEL_ROUTE;
                             } else {
-                                set_destination_from_place(&selection,
+                                openride_app_search_set_destination_from_place(&selection,
                                                            &gps_sample,
                                                            gps_sample_valid,
                                                            chosen->lat,
@@ -4078,7 +2927,7 @@ int main(int argc, char **argv)
                     if (app_panel == OPENRIDE_APP_PANEL_MAIN) {
                         if (openride_app_ui_panel_main_search_at(renderer, x, y, width, height)) {
                             app_panel = OPENRIDE_APP_PANEL_NONE;
-                            open_place_search(window,
+                            openride_app_search_open(window,
                                               place_world,
                                               &place_search_active,
                                               place_search_query,
@@ -4092,9 +2941,9 @@ int main(int argc, char **argv)
                                 app_panel = selected_panel;
                                 app_panel_selected = 0U;
                                 if (selected_panel == OPENRIDE_APP_PANEL_FAVORITES) {
-                                    refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
+                                    openride_app_search_refresh_stored_places(app_storage, true, favorite_places, &favorite_count);
                                 } else if (selected_panel == OPENRIDE_APP_PANEL_HISTORY) {
-                                    refresh_stored_places(app_storage, false, history_places, &history_count);
+                                    openride_app_search_refresh_stored_places(app_storage, false, history_places, &history_count);
                                 }
                             }
                         }
@@ -4112,7 +2961,7 @@ int main(int argc, char **argv)
                             camera.center_lat = chosen->lat;
                             camera.center_lon = chosen->lon;
                             if (camera.zoom < 14.0) camera.zoom = 14.0;
-                            set_destination_from_place(&selection,
+                            openride_app_search_set_destination_from_place(&selection,
                                                        &gps_sample,
                                                        gps_sample_valid,
                                                        chosen->lat,
@@ -4141,7 +2990,7 @@ int main(int argc, char **argv)
                                 }
                             } else {
 #ifdef __ANDROID__
-                                begin_android_region_install(&platform_paths,
+                                openride_app_region_begin_android_install(&platform_paths,
                                                              region,
                                                              &region_status,
                                                              &region_prepare_context,
@@ -4169,7 +3018,7 @@ int main(int argc, char **argv)
                                                                         sizeof(error))) {
                                 openride_region_get_status(&platform_paths, region,
                                                            &region_status, error, sizeof(error));
-                                refresh_map_world_overview(map_world, &platform_paths);
+                                openride_app_region_refresh_map_world_overview(map_world, &platform_paths);
                                 snprintf(region_work_status, sizeof(region_work_status),
                                          "Donnees de la region supprimees");
                             } else {
@@ -4217,7 +3066,7 @@ int main(int argc, char **argv)
                                            width,
                                            height);
                     if (dragging_marker != OPENRIDE_MARKER_NONE) {
-                        clear_navigation_session(&navigation,
+                        openride_app_route_clear_navigation_session(&navigation,
                                                  &gps_simulator,
                                                  &navigation_state,
                                                  &gps_sample,
@@ -4371,7 +3220,7 @@ int main(int argc, char **argv)
                                     OPENRIDE_ROUTING_SEGMENT_NONE;
                             }
 
-                            clear_navigation_session(&navigation,
+                            openride_app_route_clear_navigation_session(&navigation,
                                                      &gps_simulator,
                                                      &navigation_state,
                                                      &gps_sample,
@@ -4394,7 +3243,7 @@ int main(int argc, char **argv)
                             app_panel = OPENRIDE_APP_PANEL_ROUTE;
                             app_panel_selected = 0U;
                         } else {
-                            add_selection_from_screen(&selection,
+                            openride_app_route_add_selection_from_screen(&selection,
                                                       &camera,
                                                       action.x,
                                                       action.y,
@@ -4572,7 +3421,7 @@ int main(int argc, char **argv)
             } else if (action == OPENRIDE_TOOLBAR_SEARCH) {
                 place_search_purpose =
                     OPENRIDE_PLACE_SEARCH_BROWSE;
-                open_place_search(window,
+                openride_app_search_open(window,
                                   place_world,
                                   &place_search_active,
                                   place_search_query,
@@ -4627,7 +3476,7 @@ int main(int argc, char **argv)
                     }
                     destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
                     route_dirty = false;
-                    clear_navigation_session(&navigation,
+                    openride_app_route_clear_navigation_session(&navigation,
                                              &gps_simulator,
                                              &navigation_state,
                                              &gps_sample,
@@ -4637,7 +3486,7 @@ int main(int argc, char **argv)
                     openride_navigation_session_reset(&navigation_session);
                     openride_location_filter_reset(&location_filter);
                     memset(&filtered_location, 0, sizeof(filtered_location));
-                    route_valid = generate_loop_route(&routing_graph,
+                    route_valid = openride_app_route_generate_loop(&routing_graph,
                                                       graph_loaded,
                                                       &selection,
                                                       routing_profile,
@@ -4653,7 +3502,7 @@ int main(int argc, char **argv)
                                                       sizeof(route_status));
                     loop_active = route_valid;
                     if (route_valid) {
-                        prepare_navigation_session(&navigation,
+                        openride_app_route_prepare_navigation_session(&navigation,
                                                    &gps_simulator,
                                                    &navigation_instructions,
                                                    &routing_graph,
@@ -4762,12 +3611,12 @@ int main(int argc, char **argv)
                 openride_region_get_status(&platform_paths, region,
                                            &region_status, error, sizeof(error));
                 if (completed_poly) {
-                    refresh_map_world_overview(map_world, &platform_paths);
+                    openride_app_region_refresh_map_world_overview(map_world, &platform_paths);
                     if (openride_region_status_ready(&region_status)) {
                         region_busy = false;
                         region_progress = 1.0;
                             if (route_download_plan.downloading) {
-                                refresh_map_world_overview(map_world,
+                                openride_app_region_refresh_map_world_overview(map_world,
                                                            &platform_paths);
                                 if (place_world) {
                                     openride_place_world_refresh(place_world,
@@ -4795,7 +3644,7 @@ int main(int argc, char **argv)
                                             &region_status,
                                             error,
                                             sizeof(error));
-                                        begin_android_region_install(
+                                        openride_app_region_begin_android_install(
                                             &platform_paths,
                                             region,
                                             &region_status,
@@ -4844,12 +3693,12 @@ int main(int argc, char **argv)
                                          "Contour de region ajoute a MapWorld");
                             }
                     } else if (region_status.source_pbf_present) {
-                        region_prepare_thread = start_region_prepare_thread(&region_prepare_context,
+                        region_prepare_thread = openride_app_region_start_prepare_thread(&region_prepare_context,
                                                                              &platform_paths,
                                                                              region);
                         if (region_prepare_thread) {
                             region_busy = true;
-                            region_progress = region_prepare_stage_progress(
+                            region_progress = openride_app_region_prepare_stage_progress(
                                 OPENRIDE_REGION_PREPARE_ROUTING);
                             snprintf(region_work_status, sizeof(region_work_status),
                                      "Contour pret - preparation 1/3: routage");
@@ -4859,7 +3708,7 @@ int main(int argc, char **argv)
                             snprintf(region_work_status, sizeof(region_work_status),
                                      "Impossible de lancer la preparation");
                         }
-                    } else if (!start_android_region_file_download(region,
+                    } else if (!openride_app_region_start_android_file_download(region,
                                                                    false,
                                                                    &region_download_started,
                                                                    &region_download_is_poly,
@@ -4871,12 +3720,12 @@ int main(int argc, char **argv)
                         region_progress = -1.0;
                     }
                 } else {
-                    region_prepare_thread = start_region_prepare_thread(&region_prepare_context,
+                    region_prepare_thread = openride_app_region_start_prepare_thread(&region_prepare_context,
                                                                          &platform_paths,
                                                                          region);
                     if (region_prepare_thread) {
                         region_busy = true;
-                        region_progress = region_prepare_stage_progress(
+                        region_progress = openride_app_region_prepare_stage_progress(
                             OPENRIDE_REGION_PREPARE_ROUTING);
                         snprintf(region_work_status, sizeof(region_work_status),
                                  "Telechargement termine - preparation 1/3: routage");
@@ -4909,9 +3758,9 @@ int main(int argc, char **argv)
         if (region_prepare_thread) {
             const int stage = SDL_GetAtomicInt(&region_prepare_context.stage);
             region_busy = true;
-            region_progress = region_prepare_stage_progress(stage);
+            region_progress = openride_app_region_prepare_stage_progress(stage);
             snprintf(region_work_status, sizeof(region_work_status), "%s",
-                     region_prepare_stage_text(stage));
+                     openride_app_region_prepare_stage_text(stage));
             if (SDL_GetAtomicInt(&region_prepare_context.done)) {
                 SDL_WaitThread(region_prepare_thread, NULL);
                 region_prepare_thread = NULL;
@@ -4922,7 +3771,7 @@ int main(int argc, char **argv)
                                            &region_status, error, sizeof(error));
                 if (prepared) {
                     if (route_download_plan.downloading) {
-                        refresh_map_world_overview(map_world, &platform_paths);
+                        openride_app_region_refresh_map_world_overview(map_world, &platform_paths);
                         if (place_world) {
                             openride_place_world_refresh(place_world,
                                                          error,
@@ -4948,7 +3797,7 @@ int main(int argc, char **argv)
                                                            &region_status,
                                                            error,
                                                            sizeof(error));
-                                begin_android_region_install(
+                                openride_app_region_begin_android_install(
                                     &platform_paths,
                                     region,
                                     &region_status,
@@ -5011,7 +3860,7 @@ int main(int argc, char **argv)
             if (region == active_region) {
                 snprintf(region_work_status, sizeof(region_work_status),
                          "Cette region est deja active");
-            } else if (activate_region_runtime(renderer,
+            } else if (openride_app_region_activate_runtime(renderer,
                                                &platform_paths,
                                                region,
                                                map_style,
@@ -5033,7 +3882,7 @@ int main(int argc, char **argv)
                                                error,
                                                sizeof(error))) {
                 active_region = region;
-                refresh_map_world_overview(map_world, &platform_paths);
+                openride_app_region_refresh_map_world_overview(map_world, &platform_paths);
                 if (place_world) {
                     openride_place_world_refresh(place_world,
                                                  error,
@@ -5047,7 +3896,7 @@ int main(int argc, char **argv)
                                                   sizeof(error));
                 }
                 openride_route_destroy(&route);
-                clear_navigation_session(&navigation,
+                openride_app_route_clear_navigation_session(&navigation,
                                          &gps_simulator,
                                          &navigation_state,
                                          &gps_sample,
@@ -5085,7 +3934,7 @@ int main(int argc, char **argv)
             SDL_WaitThread(routing_world_thread, NULL);
             routing_world_thread = NULL;
 
-            const bool request_current = routing_world_request_matches(
+            const bool request_current = openride_app_route_world_request_matches(
                 &routing_world_context,
                 active_region,
                 &selection,
@@ -5206,7 +4055,7 @@ int main(int argc, char **argv)
                 start_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
                 destination_snap.segment_id = OPENRIDE_ROUTING_SEGMENT_NONE;
 
-                route_valid = prepare_navigation_session(&navigation,
+                route_valid = openride_app_route_prepare_navigation_session(&navigation,
                                                          &gps_simulator,
                                                          &navigation_instructions,
                                                          &routing_graph,
@@ -5260,7 +4109,7 @@ int main(int argc, char **argv)
                                                          0,
                                                          error,
                                                          sizeof(error));
-                        refresh_stored_places(app_storage,
+                        openride_app_search_refresh_stored_places(app_storage,
                                               false,
                                               history_places,
                                               &history_count);
@@ -5279,14 +4128,14 @@ int main(int argc, char **argv)
             openride_navigation_session_reset(&navigation_session);
             openride_location_filter_reset(&location_filter);
             memset(&filtered_location, 0, sizeof(filtered_location));
-            clear_navigation_session(&navigation,
+            openride_app_route_clear_navigation_session(&navigation,
                                      &gps_simulator,
                                      &navigation_state,
                                      &gps_sample,
                                      &gps_sample_valid);
             simulator_deviation = false;
 
-            route_valid = recalculate_route(&routing_graph,
+            route_valid = openride_app_route_recalculate(&routing_graph,
                                             graph_loaded,
                                             &selection,
                                             routing_profile,
@@ -5298,7 +4147,7 @@ int main(int argc, char **argv)
 
             bool world_route_started = false;
             if (!route_valid && openride_map_selection_complete(&selection)) {
-                routing_world_thread = start_routing_world_thread(
+                routing_world_thread = openride_app_route_start_world_thread(
                     &routing_world_context,
                     &platform_paths,
                     active_region,
@@ -5324,7 +4173,7 @@ int main(int argc, char **argv)
             }
 
             if (route_valid) {
-                prepare_navigation_session(&navigation,
+                openride_app_route_prepare_navigation_session(&navigation,
                                            &gps_simulator,
                                            &navigation_instructions,
                                            &routing_graph,
@@ -5355,7 +4204,7 @@ int main(int argc, char **argv)
                                                      0,
                                                      error,
                                                      sizeof(error));
-                    refresh_stored_places(app_storage,
+                    openride_app_search_refresh_stored_places(app_storage,
                                           false,
                                           history_places,
                                           &history_count);
@@ -5472,7 +4321,7 @@ int main(int argc, char **argv)
                 }
 
                 if (gpx_recording_active) {
-                    record_gps_sample(&gpx_recording,
+                    openride_app_route_record_gps_sample(&gpx_recording,
                                       &gps_sample,
                                       &gpx_last_recorded_position_m);
                 }
@@ -5517,7 +4366,7 @@ int main(int argc, char **argv)
                                                        navigation_delta_s);
                 }
                 if (gpx_recording_active) {
-                    record_gps_sample(&gpx_recording,
+                    openride_app_route_record_gps_sample(&gpx_recording,
                                       &gps_sample,
                                       &gpx_last_recorded_position_m);
                 }
@@ -5547,7 +4396,7 @@ int main(int argc, char **argv)
                 ? filtered_location.lat : gps_sample.lat;
             const double reroute_lon = filtered_location.valid
                 ? filtered_location.lon : gps_sample.lon;
-            route_valid = reroute_navigation_from_position(
+            route_valid = openride_app_route_reroute_from_position(
                 &routing_graph,
                 graph_loaded,
                 &selection,
