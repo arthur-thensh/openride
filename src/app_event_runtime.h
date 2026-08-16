@@ -2,6 +2,7 @@
 #define OPENRIDE_APP_EVENT_RUNTIME_H
 
 #include "app_support_runtime.h"
+#include "app_planner_async_runtime.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -62,6 +63,9 @@ typedef struct OpenRideAppEventContext {
     const char *gpx_recording_export_path;
 
     OpenRideRidePlannerMode *planner_mode;
+    OpenRideRidePlannerBusy *planner_busy;
+    OpenRidePlannerAsyncContext *planner_async_context;
+    SDL_Thread **planner_async_thread;
     OpenRideLoopProposalSet *loop_proposals;
     double *loop_target_distance_m;
     OpenRideLoopDirection *loop_direction;
