@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# OpenRide Global Audit V2.1
+# OpenRide Global Audit V2.2
 # ------------------------
 # Full project audit orchestrator for macOS + a connected Android device.
 #
@@ -25,20 +25,48 @@ SKIP_BUILD=0
 SKIP_BENCHMARKS=0
 NO_INSTALL=0
 MAKE_ZIP=1
+AUDIT_PROFILE="full"
+ONLY_STEPS=""
+SKIP_STEPS=""
+REUSE_ANDROID=0
+LIST_STEPS=0
+SWEEP_VIDEO=1
 
 usage() {
     cat <<'EOF'
 Usage:
   ./scripts/global_audit.sh [options]
 
-Options:
-  --output DIR         Audit output directory
-  --skip-android       Do not build/test on a physical Android device
-  --skip-build         Reuse the existing macOS build directory
-  --skip-benchmarks    Skip graph/loop benchmarks
-  --no-install         Build Android but do not reinstall the APK
-  --no-zip             Do not create the final ZIP archive
-  -h, --help           Show this help
+Fast profiles:
+  --profile full        Complete audit (default, historical behavior)
+  --profile map         Android map/ORMap visual + zoom checks
+  --profile perf        Android startup/runtime/map performance checks
+  --profile ui          Android Back/UI/lifecycle checks
+  --profile host        Git + macOS build/CTest + routing benchmarks
+  --profile smoke       Short repository + Android interaction sanity check
+
+Fine-grained selection:
+  --only LIST           Run only comma-separated step IDs (+ cheap prerequisites)
+  --skip LIST           Skip comma-separated step IDs
+  --list-steps          Print selectable step IDs and profile contents
+
+Execution:
+  --reuse-android       Reuse the already-installed APK; skip Android check/build/install
+  --output DIR          Audit output directory
+  --skip-android        Do not run Android steps
+  --skip-build          Reuse the existing macOS build directory
+  --skip-benchmarks     Skip graph/loop benchmarks
+  --no-install          Build Android but do not reinstall the APK
+  --no-zip              Do not create the final ZIP archive
+  --no-sweep-video      Disable MP4 recording during android_zoom_sweep
+  -h, --help            Show this help
+
+Examples:
+  ./scripts/global_audit.sh --profile map --reuse-android
+  ./scripts/global_audit.sh --profile perf --reuse-android --no-zip
+  ./scripts/global_audit.sh --only android_zoom_sweep --no-zip
+  ./scripts/global_audit.sh --only android_zoom_gallery,android_zoom_sweep
+  ./scripts/global_audit.sh --profile map --skip android_map_styles
 
 Environment:
   ANDROID_SERIAL                 Select the Android device when several exist
@@ -48,33 +76,128 @@ Environment:
   OPENRIDE_AUDIT_LOOP_KM         Loop benchmark distance (default: 25)
   OPENRIDE_AUDIT_LOOP_PROFILE    Loop profile (default: trail)
 
-What this audit covers:
-  - Git/worktree consistency
-  - macOS configure/build and the complete CTest suite
-  - compiler/CMake warning inventory
-  - routing spatial/segment/loop benchmarks when local graph data exists
-  - Android toolchain, APK build/install and real-device launch
-  - Android app data inventory and Activity + OpenRide-first-frame timings
-  - stabilized CPU/memory/gfx/thread samples at T+2s / T+10s / T+30s
-  - real Android pan gesture, toolbar/menu taps and Android Back behavior
-  - event-synchronized Android pinch-path gallery from minimum to maximum zoom
-  - map captures across zoom levels plus the z9 -> z17 -> z9 renderer sweep
-  - validated Android UI screenshot tour (fails on unchanged/wrong screens)
-  - lifecycle/relaunch stress
-  - crash/FATAL/ANR scan from logcat
-  - screenshot integrity and exact-duplicate detection
-  - a Markdown report, raw logs and a review package for visual inspection
+Selection semantics:
+  --profile full preserves the complete V2.1 audit behavior.
+  --only overrides the profile and selects exact test IDs. For Android tests,
+  device detection/inventory and the cheap deterministic prerequisites are
+  enabled automatically. Screenshot integrity/logcat/crash evidence are also
+  collected when relevant.
+  --skip always wins over profile/--only selection.
 
 Important:
-  V2 tests the application pinch path on the Android build by invoking the same
-  production zoom helper used by SDL_EVENT_PINCH_UPDATE. Stock adb still cannot
-  reliably inject the final physical two-finger Android gesture on every retail
-  device, so that last OS->SDL link remains explicitly identified in the report.
+  Partial profiles are diagnostic runs, not full release gates. Their report
+  explicitly records the profile/selection used.
+EOF
+}
+
+
+list_steps() {
+    cat <<'EOF'
+OpenRide Global Audit V2.2 step IDs
+
+Host/repository:
+  repo_info
+  environment
+  git_diff_check
+  git_worktree
+  data_inventory
+  configure_macos
+  build_macos
+  ctest_inventory
+  ctest_all
+  build_warnings
+  benchmark_spatial
+  benchmark_segment
+  benchmark_loop
+
+Android setup/evidence:
+  android_setup
+  android_device
+  android_check
+  android_build
+  android_install
+  android_package
+  android_permissions
+  android_data
+  android_logcat_clear
+
+Android runtime/map/UI:
+  android_startup
+  android_idle_profile
+  android_map_stability
+  android_pan
+  android_back
+  android_zoom_gallery
+  android_zoom_sweep
+  android_map_styles
+  android_ui_tour
+  android_lifecycle
+  android_logcat
+  android_crash_scan
+
+Evidence/review:
+  screenshot_integrity
+  screenshot_duplicates
+  android_physical_multitouch
+  visual_review
+
+Profiles:
+  full
+    Everything.
+
+  map
+    Repository identity/diff + Android build/install + data inventory +
+    map stability + pan + zoom gallery + renderer sweep + map styles +
+    logcat/crash/screenshot evidence.
+
+  perf
+    Repository identity/diff + Android build/install + startup x3 +
+    T+2/T+10/T+30 runtime profile + map stability + renderer sweep +
+    logcat/crash/screenshot evidence.
+
+  ui
+    Repository identity/diff + Android build/install + Back semantics +
+    UI tour + lifecycle stress + logcat/crash/screenshot evidence.
+
+  host
+    Repository/toolchain + macOS configure/build + complete CTest +
+    warning inventory + routing/loop benchmarks.
+
+  smoke
+    Repository identity/diff + Android build/install + data inventory +
+    map stability + pan + Back + logcat/crash/screenshot evidence.
+
+Tip:
+  Add --reuse-android to map/perf/ui/smoke when the currently installed APK
+  already matches the code you want to test.
 EOF
 }
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --profile)
+            [ "$#" -ge 2 ] || { echo "ERROR: --profile requires a name" >&2; exit 2; }
+            AUDIT_PROFILE="$2"
+            shift 2
+            ;;
+        --only)
+            [ "$#" -ge 2 ] || { echo "ERROR: --only requires a comma-separated step list" >&2; exit 2; }
+            ONLY_STEPS="$2"
+            shift 2
+            ;;
+        --skip)
+            [ "$#" -ge 2 ] || { echo "ERROR: --skip requires a comma-separated step list" >&2; exit 2; }
+            SKIP_STEPS="$2"
+            shift 2
+            ;;
+        --reuse-android)
+            REUSE_ANDROID=1
+            shift
+            ;;
+        --list-steps)
+            LIST_STEPS=1
+            shift
+            ;;
         --output)
             [ "$#" -ge 2 ] || { echo "ERROR: --output requires a directory" >&2; exit 2; }
             OUTPUT_DIR="$2"
@@ -100,6 +223,10 @@ while [ "$#" -gt 0 ]; do
             MAKE_ZIP=0
             shift
             ;;
+        --no-sweep-video)
+            SWEEP_VIDEO=0
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -111,6 +238,166 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "$LIST_STEPS" -eq 1 ]; then
+    list_steps
+    exit 0
+fi
+
+
+KNOWN_STEPS="repo_info,environment,git_diff_check,git_worktree,data_inventory,configure_macos,build_macos,ctest_inventory,ctest_all,build_warnings,benchmark_spatial,benchmark_segment,benchmark_loop,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_data,android_logcat_clear,android_startup,android_idle_profile,android_map_stability,android_pan,android_back,android_zoom_gallery,android_zoom_sweep,android_map_styles,android_ui_tour,android_lifecycle,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,android_physical_multitouch,visual_review"
+
+csv_has() {
+    local list="$1"
+    local item="$2"
+    case ",$list," in
+        *",$item,"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_step_csv() {
+    local list="$1"
+    local option_name="$2"
+    [ -n "$list" ] || return 0
+    local old_ifs="$IFS"
+    IFS=','
+    for item in $list; do
+        [ -n "$item" ] || continue
+        if ! csv_has "$KNOWN_STEPS" "$item"; then
+            IFS="$old_ifs"
+            echo "ERROR: unknown step ID for $option_name: $item" >&2
+            echo "Use --list-steps to see valid IDs." >&2
+            exit 2
+        fi
+    done
+    IFS="$old_ifs"
+}
+
+PROFILE_STEPS=""
+case "$AUDIT_PROFILE" in
+    full)
+        PROFILE_STEPS="*"
+        ;;
+    map)
+        PROFILE_STEPS="repo_info,git_diff_check,git_worktree,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_data,android_logcat_clear,android_map_stability,android_pan,android_zoom_gallery,android_zoom_sweep,android_map_styles,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,android_physical_multitouch,visual_review"
+        ;;
+    perf)
+        PROFILE_STEPS="repo_info,git_diff_check,git_worktree,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_data,android_logcat_clear,android_startup,android_idle_profile,android_map_stability,android_zoom_sweep,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,visual_review"
+        ;;
+    ui)
+        PROFILE_STEPS="repo_info,git_diff_check,git_worktree,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_logcat_clear,android_back,android_ui_tour,android_lifecycle,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,visual_review"
+        ;;
+    host)
+        PROFILE_STEPS="repo_info,environment,git_diff_check,git_worktree,data_inventory,configure_macos,build_macos,ctest_inventory,ctest_all,build_warnings,benchmark_spatial,benchmark_segment,benchmark_loop"
+        ;;
+    smoke)
+        PROFILE_STEPS="repo_info,git_diff_check,git_worktree,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_data,android_logcat_clear,android_map_stability,android_pan,android_back,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,visual_review"
+        ;;
+    *)
+        echo "ERROR: unknown audit profile: $AUDIT_PROFILE" >&2
+        echo "Valid profiles: full, map, perf, ui, host, smoke" >&2
+        exit 2
+        ;;
+esac
+
+ONLY_STEPS="$(printf '%s' "$ONLY_STEPS" | tr -d '[:space:]')"
+SKIP_STEPS="$(printf '%s' "$SKIP_STEPS" | tr -d '[:space:]')"
+validate_step_csv "$ONLY_STEPS" "--only"
+validate_step_csv "$SKIP_STEPS" "--skip"
+
+only_has_android_step() {
+    [ -n "$ONLY_STEPS" ] || return 1
+    local old_ifs="$IFS"
+    IFS=','
+    for item in $ONLY_STEPS; do
+        case "$item" in
+            android_*)
+                IFS="$old_ifs"
+                return 0
+                ;;
+        esac
+    done
+    IFS="$old_ifs"
+    return 1
+}
+
+only_has_interactive_android_step() {
+    local id
+    for id in \
+        android_startup android_idle_profile android_map_stability android_pan \
+        android_back android_zoom_gallery android_zoom_sweep android_map_styles \
+        android_ui_tour android_lifecycle; do
+        if csv_has "$ONLY_STEPS" "$id"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+audit_step_enabled() {
+    local id="$1"
+    if csv_has "$SKIP_STEPS" "$id"; then
+        return 1
+    fi
+
+    if [ -n "$ONLY_STEPS" ]; then
+        if csv_has "$ONLY_STEPS" "$id"; then
+            return 0
+        fi
+        if only_has_android_step; then
+            case "$id" in
+                android_setup|android_device)
+                    return 0
+                    ;;
+            esac
+        fi
+        if only_has_interactive_android_step; then
+            case "$id" in
+                android_permissions|android_logcat_clear|android_logcat|android_crash_scan|screenshot_integrity)
+                    return 0
+                    ;;
+            esac
+        fi
+        if csv_has "$ONLY_STEPS" "android_crash_scan"; then
+            case "$id" in
+                android_logcat_clear|android_logcat)
+                    return 0
+                    ;;
+            esac
+        fi
+        return 1
+    fi
+
+    [ "$PROFILE_STEPS" = "*" ] && return 0
+    csv_has "$PROFILE_STEPS" "$id"
+}
+
+audit_filter_reason() {
+    local id="$1"
+    if csv_has "$SKIP_STEPS" "$id"; then
+        printf '%s\n' "--skip requested for $id"
+    elif [ -n "$ONLY_STEPS" ]; then
+        printf '%s\n' "not selected by --only=$ONLY_STEPS"
+    else
+        printf '%s\n' "not selected by --profile $AUDIT_PROFILE"
+    fi
+}
+
+audit_any_android_enabled() {
+    local id
+    for id in \
+        android_setup android_device android_check android_build android_install \
+        android_package android_permissions android_data android_logcat_clear \
+        android_startup android_idle_profile android_map_stability android_pan \
+        android_back android_zoom_gallery android_zoom_sweep android_map_styles \
+        android_ui_tour android_lifecycle android_logcat android_crash_scan; do
+        if audit_step_enabled "$id"; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/../CMakeLists.txt" ]; then
@@ -132,12 +419,13 @@ LOG_DIR="$OUTPUT_DIR/logs"
 SCREEN_DIR="$OUTPUT_DIR/screenshots"
 METRIC_DIR="$OUTPUT_DIR/metrics"
 DEVICE_DIR="$OUTPUT_DIR/device"
+VIDEO_DIR="$OUTPUT_DIR/videos"
 STATUS_FILE="$OUTPUT_DIR/status.tsv"
 REPORT_FILE="$OUTPUT_DIR/report.md"
 REVIEW_FILE="$OUTPUT_DIR/REVIEW_WITH_CHATGPT.md"
 MANIFEST_FILE="$OUTPUT_DIR/manifest.sha256"
 
-mkdir -p "$LOG_DIR" "$SCREEN_DIR" "$METRIC_DIR" "$DEVICE_DIR"
+mkdir -p "$LOG_DIR" "$SCREEN_DIR" "$METRIC_DIR" "$DEVICE_DIR" "$VIDEO_DIR"
 printf 'id\tlabel\tstatus\trc\tduration_s\tlog\n' > "$STATUS_FILE"
 
 record_status() {
@@ -176,6 +464,11 @@ run_step() {
     local label="$2"
     local severity="$3"
     shift 3
+
+    if ! audit_step_enabled "$id"; then
+        record_skip "$id" "$label" "$(audit_filter_reason "$id")"
+        return 0
+    fi
 
     local log="$LOG_DIR/${id}.log"
     local start end duration rc status
@@ -984,6 +1277,106 @@ android_zoom_gallery() {
     }
 }
 
+ANDROID_SWEEP_VIDEO_REMOTE=""
+ANDROID_SWEEP_VIDEO_PID=""
+
+android_zoom_sweep_video_start() {
+    local destination="$1"
+    mkdir -p "$(dirname "$destination")"
+
+    ANDROID_SWEEP_VIDEO_REMOTE="/sdcard/openride-zoom-sweep-$$.mp4"
+    ANDROID_SWEEP_VIDEO_PID=""
+
+    "${ADB[@]}" shell rm -f "$ANDROID_SWEEP_VIDEO_REMOTE" >/dev/null 2>&1 || true
+
+    local remote_pid
+    remote_pid="$(
+        "${ADB[@]}" shell \
+            "screenrecord --bit-rate 6000000 --time-limit 90 '$ANDROID_SWEEP_VIDEO_REMOTE' >/dev/null 2>&1 & echo \$!" \
+            2>/dev/null | tr -d '\r' | tail -n 1
+    )"
+
+    case "$remote_pid" in
+        ''|*[!0-9]*)
+            echo "Invalid screenrecord PID: ${remote_pid:-<empty>}" >&2
+            return 1
+            ;;
+    esac
+
+    ANDROID_SWEEP_VIDEO_PID="$remote_pid"
+
+    sleep 0.20
+    "${ADB[@]}" shell \
+        "kill -0 '$ANDROID_SWEEP_VIDEO_PID' >/dev/null 2>&1" \
+        >/dev/null 2>&1 || {
+        echo "screenrecord exited immediately." >&2
+        return 1
+    }
+
+    return 0
+}
+
+android_zoom_sweep_video_stop() {
+    local destination="$1"
+
+    [ -n "$ANDROID_SWEEP_VIDEO_PID" ] || return 1
+    [ -n "$ANDROID_SWEEP_VIDEO_REMOTE" ] || return 1
+
+    "${ADB[@]}" shell \
+        "kill -INT '$ANDROID_SWEEP_VIDEO_PID' >/dev/null 2>&1 || true" \
+        >/dev/null 2>&1 || true
+
+    local deadline=$((SECONDS + 6))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if ! "${ADB[@]}" shell \
+            "kill -0 '$ANDROID_SWEEP_VIDEO_PID' >/dev/null 2>&1" \
+            >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.20
+    done
+
+    if "${ADB[@]}" shell \
+        "kill -0 '$ANDROID_SWEEP_VIDEO_PID' >/dev/null 2>&1" \
+        >/dev/null 2>&1; then
+        "${ADB[@]}" shell \
+            "kill -TERM '$ANDROID_SWEEP_VIDEO_PID' >/dev/null 2>&1 || true" \
+            >/dev/null 2>&1 || true
+        sleep 0.50
+    fi
+
+    sleep 0.40
+
+    local remote_bytes
+    remote_bytes="$(
+        "${ADB[@]}" shell \
+            "wc -c < '$ANDROID_SWEEP_VIDEO_REMOTE' 2>/dev/null || echo 0" \
+            | tr -d '\r[:space:]'
+    )"
+    case "$remote_bytes" in
+        ''|*[!0-9]*) remote_bytes=0 ;;
+    esac
+
+    if [ "$remote_bytes" -lt 16384 ]; then
+        echo "Recorded MP4 missing or too small: ${remote_bytes} bytes" >&2
+        return 1
+    fi
+
+    rm -f "$destination"
+    "${ADB[@]}" pull "$ANDROID_SWEEP_VIDEO_REMOTE" "$destination" \
+        >/dev/null 2>&1 || return 1
+
+    [ -s "$destination" ] || return 1
+
+    "${ADB[@]}" shell rm -f "$ANDROID_SWEEP_VIDEO_REMOTE" >/dev/null 2>&1 || true
+
+    echo "Video size: $(wc -c < "$destination" | tr -d ' ') bytes"
+
+    ANDROID_SWEEP_VIDEO_REMOTE=""
+    ANDROID_SWEEP_VIDEO_PID=""
+    return 0
+}
+
 android_zoom_sweep() {
     [ "$ANDROID_READY" -eq 1 ] || return 1
 
@@ -995,6 +1388,22 @@ android_zoom_sweep() {
     pid="$(android_pid)"
     [ -n "$pid" ] || return 1
 
+    local video_started=0
+    local video_path="$VIDEO_DIR/android_zoom_sweep.mp4"
+
+    if [ "$SWEEP_VIDEO" -eq 1 ]; then
+        android_zoom_sweep_video_start "$video_path" || {
+            echo "ERROR: unable to start zoom-sweep video recording."
+            return 1
+        }
+        video_started=1
+        echo "Video recording: $video_path"
+        sleep 0.35
+    else
+        echo "Zoom-sweep video disabled (--no-sweep-video)."
+    fi
+
+    local sweep_rc=0
     local start_before
     start_before="$(android_log_count "$pid" 'AUDIT_ZOOM_SWEEP_STARTED')"
     "${ADB[@]}" shell input keyevent 140 >/dev/null
@@ -1002,39 +1411,64 @@ android_zoom_sweep() {
     android_wait_log_count "$pid" 'AUDIT_ZOOM_SWEEP_STARTED' \
         $((start_before + 1)) 8 || {
         echo "ERROR: zoom sweep start event was not acknowledged."
-        return 1
+        sweep_rc=1
     }
 
-    android_logcat_for_pid "$pid" \
-        | grep 'AUDIT_ZOOM_SWEEP_STARTED' \
-        | tail -n 1
+    if [ "$sweep_rc" -eq 0 ]; then
+        android_logcat_for_pid "$pid" \
+            | grep 'AUDIT_ZOOM_SWEEP_STARTED' \
+            | tail -n 1
+    fi
 
     local csv="$METRIC_DIR/android_map_zoom_test.csv"
     rm -f "$csv"
 
     local i=0
     local deadline=$((SECONDS + 50))
-    while [ "$SECONDS" -lt "$deadline" ]; do
+    while [ "$sweep_rc" -eq 0 ] && [ "$SECONDS" -lt "$deadline" ]; do
         if [ "$i" -le 8 ]; then
-            android_capture "$dir/$(printf '%02d' "$i")_sweep.png" || return 1
+            android_capture "$dir/$(printf '%02d' "$i")_sweep.png" || {
+                echo "ERROR: screenshot capture failed during zoom sweep."
+                sweep_rc=1
+                break
+            }
             i=$((i + 1))
         fi
 
         "${ADB[@]}" exec-out run-as "$PACKAGE" cat files/data/map-zoom-test.csv \
             > "$csv" 2>/dev/null || true
+
         if [ -s "$csv" ] && grep -q '^# samples=' "$csv"; then
             break
         fi
         sleep 3.5
     done
 
-    if [ ! -s "$csv" ] || ! grep -q '^# samples=' "$csv"; then
+    if [ "$sweep_rc" -eq 0 ] \
+        && { [ ! -s "$csv" ] || ! grep -q '^# samples=' "$csv"; }; then
         echo "ERROR: completed data/map-zoom-test.csv was not observed within 50 seconds."
-        return 1
+        sweep_rc=1
     fi
 
+    if [ "$video_started" -eq 1 ]; then
+        android_zoom_sweep_video_stop "$video_path" || {
+            echo "ERROR: zoom-sweep video could not be finalized."
+            sweep_rc=1
+        }
+    fi
+
+    [ "$sweep_rc" -eq 0 ] || return 1
+
     grep '^#' "$csv" | head -n 50
+
+    if [ "$SWEEP_VIDEO" -eq 1 ]; then
+        echo
+        echo "LOD loading video:"
+        echo "  videos/android_zoom_sweep.mp4"
+        echo "NOTE: use --no-sweep-video for strict performance comparisons."
+    fi
 }
+
 
 android_map_style_gallery() {
     [ "$ANDROID_READY" -eq 1 ] || return 1
@@ -1330,14 +1764,25 @@ generate_report() {
     fi
 
     {
-        echo "# OpenRide Global Audit V2.1"
+        echo "# OpenRide Global Audit V2.2"
         echo
         echo "- Date: $(date '+%Y-%m-%d %H:%M:%S %z')"
         echo "- Branch: \`$branch\`"
         echo "- Commit: \`$head\`"
         echo "- Worktree entries at report time: $dirty"
         echo "- Android package: \`$PACKAGE\`"
+        echo "- Audit profile: \`$AUDIT_PROFILE\`"
+        if [ -n "$ONLY_STEPS" ]; then
+            echo "- Explicit only-selection: \`$ONLY_STEPS\`"
+        fi
+        if [ -n "$SKIP_STEPS" ]; then
+            echo "- Explicit skipped steps: \`$SKIP_STEPS\`"
+        fi
+        if [ "$REUSE_ANDROID" -eq 1 ]; then
+            echo "- Android APK mode: reuse already-installed APK"
+        fi
         echo "- Screenshots captured: $screenshot_count"
+        echo "- Zoom-sweep video: $([ "$SWEEP_VIDEO" -eq 1 ] && echo enabled || echo disabled)"
         if [ -n "$test_summary" ]; then
             echo "- CTest: $test_summary"
         fi
@@ -1393,6 +1838,7 @@ generate_report() {
         echo "Review the screenshots for:"
         echo
         echo "- compare the z6..z18 gallery for LOD transitions, missing layers, seams and sudden style changes;"
+        echo "- inspect videos/android_zoom_sweep.mp4 for LOD popping, delayed loading, seams and transient layer changes;"
         echo "- compare the z9->z17->z9 sweep for transient loading artifacts and frame-time spikes;"
         echo "- inspect first-frame-ready versus +500ms captures for black/blank startup frames;"
         echo "- map hierarchy: roads, paths, buildings, water, landcover and route contrast;"
@@ -1407,7 +1853,13 @@ generate_report() {
         echo
         echo "## Decision gate"
         echo
-        if [ "$fail" -gt 0 ]; then
+        if [ "$AUDIT_PROFILE" != "full" ] || [ -n "$ONLY_STEPS" ]; then
+            if [ "$fail" -gt 0 ]; then
+                echo "**Partial audit failed.** Fix the selected failing checks before relying on this diagnostic run."
+            else
+                echo "**Partial diagnostic audit completed.** This profile/selection is intentionally not a full release gate."
+            fi
+        elif [ "$fail" -gt 0 ]; then
             echo "**STOP / fix first.** At least one required automated check failed."
         elif [ "$warn" -gt 0 ]; then
             echo "**Technical gate mostly green.** Resolve or consciously accept WARN items, then perform the visual review before new feature work."
@@ -1427,6 +1879,7 @@ generate_report() {
         echo "- \`metrics/\` — warnings, startup, CPU/memory/gfx and screenshot hashes"
         echo "- \`device/\` — Android device/package/logcat evidence"
         echo "- \`screenshots/\` — UI tour + real gesture captures"
+        echo "- \`videos/android_zoom_sweep.mp4\` — continuous LOD-loading video during renderer sweep"
         echo "- \`manifest.sha256\` — artifact integrity"
     } > "$REPORT_FILE"
 
@@ -1482,6 +1935,10 @@ echo "=============================================================="
 echo "Repository : $ROOT_DIR"
 echo "Output     : $OUTPUT_DIR"
 echo "Package    : $PACKAGE"
+echo "Profile    : $AUDIT_PROFILE"
+[ -z "$ONLY_STEPS" ] || echo "Only       : $ONLY_STEPS"
+[ -z "$SKIP_STEPS" ] || echo "Skip       : $SKIP_STEPS"
+[ "$REUSE_ANDROID" -eq 0 ] || echo "Android APK: reuse installed"
 echo
 
 # ---------------------------------------------------------------------------
@@ -1492,12 +1949,17 @@ run_step "repo_info" "Repository identity" "required" repo_info
 run_step "environment" "Host/toolchain inventory" "required" environment_info
 run_step "git_diff_check" "Git whitespace/diff consistency" "required" git_cleanliness
 
-WORKTREE_COUNT="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
-if [ "$WORKTREE_COUNT" -gt 0 ]; then
-    record_warn "git_worktree" "Git worktree cleanliness" \
-        "$WORKTREE_COUNT worktree entry/entries detected; see repository.txt"
+if audit_step_enabled "git_worktree"; then
+    WORKTREE_COUNT="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$WORKTREE_COUNT" -gt 0 ]; then
+        record_warn "git_worktree" "Git worktree cleanliness" \
+            "$WORKTREE_COUNT worktree entry/entries detected; see repository.txt"
+    else
+        record_status "git_worktree" "Git worktree cleanliness" "PASS" "0" "0" "repository.txt"
+    fi
 else
-    record_status "git_worktree" "Git worktree cleanliness" "PASS" "0" "0" "repository.txt"
+    record_skip "git_worktree" "Git worktree cleanliness" \
+        "$(audit_filter_reason "git_worktree")"
 fi
 
 run_step "data_inventory" "Offline data inventory" "optional" data_inventory
@@ -1540,32 +2002,39 @@ fi
 # Android audit
 # ---------------------------------------------------------------------------
 
-if [ "$SKIP_ANDROID" -eq 1 ]; then
-    record_skip "android_setup" "Android device detection" "--skip-android requested"
-    record_skip "android_check" "Android toolchain validation" "--skip-android requested"
-    record_skip "android_build" "Android APK build" "--skip-android requested"
-    record_skip "android_install" "Android APK install/update" "--skip-android requested"
-    record_skip "android_startup" "Android Activity + first-frame benchmark" "--skip-android requested"
-    record_skip "android_idle_profile" "Android stabilized runtime profile" "--skip-android requested"
-    record_skip "android_map_stability" "Android time-to-stable-map measurement" "--skip-android requested"
-    record_skip "android_pan" "Real Android map pan gesture" "--skip-android requested"
-    record_skip "android_back" "Android Back navigation semantics" "--skip-android requested"
-    record_skip "android_zoom_gallery" "Android pinch-path map zoom gallery" "--skip-android requested"
-    record_skip "android_zoom_sweep" "Android map renderer zoom sweep" "--skip-android requested"
-    record_skip "android_map_styles" "Android map-style gallery" "--skip-android requested"
-    record_skip "android_ui_tour" "Android UI screenshot tour" "--skip-android requested"
+if [ "$SKIP_ANDROID" -eq 1 ] || ! audit_any_android_enabled; then
+    record_skip "android_setup" "Android device detection" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_check" "Android toolchain validation" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_build" "Android APK build" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_install" "Android APK install/update" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_startup" "Android Activity + first-frame benchmark" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_idle_profile" "Android stabilized runtime profile" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_map_stability" "Android time-to-stable-map measurement" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_pan" "Real Android map pan gesture" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_back" "Android Back navigation semantics" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_zoom_gallery" "Android pinch-path map zoom gallery" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_zoom_sweep" "Android map renderer zoom sweep" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_map_styles" "Android map-style gallery" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_ui_tour" "Android UI screenshot tour" "Android steps disabled by --skip-android/profile selection"
 else
     run_step "android_setup" "Android device detection" "required" setup_adb
 
     if [ "$ANDROID_READY" -eq 1 ]; then
         run_step "android_device" "Android device inventory" "required" android_device_info
-        run_step "android_check" "Android toolchain validation" "required" ./scripts/android_check.sh
-        run_step "android_build" "Android APK build" "required" ./scripts/android_build.sh
 
-        if [ "$NO_INSTALL" -eq 0 ]; then
-            run_step "android_install" "Android APK install/update" "required" ./scripts/android_install.sh
+        if [ "$REUSE_ANDROID" -eq 0 ]; then
+            run_step "android_check" "Android toolchain validation" "required" ./scripts/android_check.sh
+            run_step "android_build" "Android APK build" "required" ./scripts/android_build.sh
+
+            if [ "$NO_INSTALL" -eq 0 ]; then
+                run_step "android_install" "Android APK install/update" "required" ./scripts/android_install.sh
+            else
+                record_skip "android_install" "Android APK install/update" "--no-install requested"
+            fi
         else
-            record_skip "android_install" "Android APK install/update" "--no-install requested"
+            record_skip "android_check" "Android toolchain validation" "--reuse-android requested"
+            record_skip "android_build" "Android APK build" "--reuse-android requested"
+            record_skip "android_install" "Android APK install/update" "--reuse-android requested"
         fi
 
         run_step "android_package" "Android package inventory" "optional" android_package_info
@@ -1602,30 +2071,46 @@ fi
 if find "$SCREEN_DIR" -type f -name '*.png' -print -quit 2>/dev/null | grep -q .; then
     run_step "screenshot_integrity" "Screenshot PNG integrity" "required" screenshot_integrity
 
-    # Duplicate screens are not automatically a functional failure: two empty
-    # states can legitimately resemble one another. Surface them as WARN.
-    DUP_LOG="$LOG_DIR/screenshot_duplicates.log"
-    screenshot_duplicate_analysis 2>&1 | tee "$DUP_LOG"
-    DUP_RC=${PIPESTATUS[0]}
-    if [ "$DUP_RC" -eq 2 ]; then
-        record_status "screenshot_duplicates" "Exact screenshot duplicate analysis" "WARN" "2" "0" "logs/screenshot_duplicates.log"
-    elif [ "$DUP_RC" -eq 0 ]; then
-        record_status "screenshot_duplicates" "Exact screenshot duplicate analysis" "PASS" "0" "0" "logs/screenshot_duplicates.log"
+    # Duplicate screens are useful evidence, but explicit/profile selection must
+    # be respected just like every run_step-managed check.
+    if audit_step_enabled "screenshot_duplicates"; then
+        DUP_LOG="$LOG_DIR/screenshot_duplicates.log"
+        screenshot_duplicate_analysis 2>&1 | tee "$DUP_LOG"
+        DUP_RC=${PIPESTATUS[0]}
+        if [ "$DUP_RC" -eq 2 ]; then
+            record_status "screenshot_duplicates" "Exact screenshot duplicate analysis" "WARN" "2" "0" "logs/screenshot_duplicates.log"
+        elif [ "$DUP_RC" -eq 0 ]; then
+            record_status "screenshot_duplicates" "Exact screenshot duplicate analysis" "PASS" "0" "0" "logs/screenshot_duplicates.log"
+        else
+            record_status "screenshot_duplicates" "Exact screenshot duplicate analysis" "WARN" "$DUP_RC" "0" "logs/screenshot_duplicates.log"
+        fi
     else
-        record_status "screenshot_duplicates" "Exact screenshot duplicate analysis" "WARN" "$DUP_RC" "0" "logs/screenshot_duplicates.log"
+        record_skip "screenshot_duplicates" "Exact screenshot duplicate analysis" \
+            "$(audit_filter_reason "screenshot_duplicates")"
     fi
 else
     record_skip "screenshot_integrity" "Screenshot PNG integrity" "no screenshots produced"
     record_skip "screenshot_duplicates" "Exact screenshot duplicate analysis" "no screenshots produced"
 fi
 
-# V2 exercises the Android application pinch path deterministically, but does not
-# pretend stock adb can reproduce the final physical two-finger OS event stream.
-record_warn "android_physical_multitouch" "Physical two-finger Android injection" \
-    "Application pinch handling is exercised and captured by android_zoom_gallery; stock adb still cannot reliably synthesize the final physical two-finger OS->SDL event stream on every retail device."
+# The physical two-finger limitation is only relevant when that coverage was
+# actually selected in this run.
+if audit_step_enabled "android_physical_multitouch"; then
+    record_warn "android_physical_multitouch" "Physical two-finger Android injection" \
+        "Application pinch handling is exercised and captured by android_zoom_gallery; stock adb still cannot reliably synthesize the final physical two-finger OS->SDL event stream on every retail device."
+else
+    record_skip "android_physical_multitouch" "Physical two-finger Android injection" \
+        "$(audit_filter_reason "android_physical_multitouch")"
+fi
 
 # Visual/aesthetic review must use actual images, not fabricated pixel scores.
-record_status "visual_review" "Visual UI/map coherence review" "PENDING" "0" "0" "screenshots/"
+if audit_step_enabled "visual_review" \
+    && find "$SCREEN_DIR" -type f -name '*.png' -print -quit 2>/dev/null | grep -q .; then
+    record_status "visual_review" "Visual UI/map coherence review" "PENDING" "0" "0" "screenshots/"
+else
+    record_skip "visual_review" "Visual UI/map coherence review" \
+        "$(audit_filter_reason "visual_review")"
+fi
 
 # ---------------------------------------------------------------------------
 # Final report + integrity manifest + ZIP

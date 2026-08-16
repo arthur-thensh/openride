@@ -1,5 +1,6 @@
 #include "map/map_world.h"
 #include "map/ormap_renderer.h"
+#include "map/ormap_pyramid_renderer.h"
 
 #include "openride/ormap.h"
 #include "openride/place_search.h"
@@ -94,6 +95,7 @@ typedef struct OpenRideMapWorldRegion {
     WorldLineArray waterways;
     OpenRideORMap *map;
     OpenRideORMapRenderer *detail_renderer;
+    OpenRideORMapPyramidRenderer *pyramid_renderer;
     bool detail_visible;
 } OpenRideMapWorldRegion;
 
@@ -522,6 +524,10 @@ static bool load_major_waterways(OpenRideORMap *map,
 static void world_region_destroy(OpenRideMapWorldRegion *region)
 {
     if (!region) return;
+    if (region->pyramid_renderer) {
+        openride_ormap_pyramid_renderer_destroy(
+            region->pyramid_renderer);
+    }
     if (region->detail_renderer) {
         openride_ormap_renderer_destroy(region->detail_renderer);
         free(region->detail_renderer);
@@ -741,6 +747,62 @@ static bool generalize_region_overview_roads(
     return true;
 }
 
+static bool map_world_file_exists(const char *path)
+{
+    if (!path || path[0] == '\0') return false;
+
+    FILE *file = fopen(path, "rb");
+    if (!file) return false;
+
+    fclose(file);
+    return true;
+}
+
+static bool map_world_v11_sibling_path(
+    const char *ormap_path,
+    char *output,
+    size_t output_size)
+{
+    if (!ormap_path || !output || output_size == 0U) {
+        return false;
+    }
+
+    const char *suffix = ".ormap";
+    const size_t path_length = strlen(ormap_path);
+    const size_t suffix_length = strlen(suffix);
+
+    if (path_length >= suffix_length
+        && strcmp(
+            ormap_path + path_length - suffix_length,
+            suffix) == 0) {
+        const size_t prefix_length =
+            path_length - suffix_length;
+        const char *v11_suffix = ".ormap11";
+        const size_t v11_suffix_length = strlen(v11_suffix);
+
+        if (prefix_length + v11_suffix_length + 1U
+            > output_size) {
+            return false;
+        }
+
+        memcpy(output, ormap_path, prefix_length);
+        memcpy(
+            output + prefix_length,
+            v11_suffix,
+            v11_suffix_length + 1U);
+        return true;
+    }
+
+    const int written = snprintf(
+        output,
+        output_size,
+        "%s11",
+        ormap_path);
+
+    return written > 0
+        && (size_t)written < output_size;
+}
+
 static bool build_world_region(SDL_Renderer *renderer,
                                const OpenRideRegionDefinition *definition,
                                const char *ormap_path,
@@ -797,6 +859,38 @@ static bool build_world_region(SDL_Renderer *renderer,
         world_region_destroy(out);
         return false;
     }
+
+    /*
+     * V3.8.4 is opt-in by sibling .ormap11 presence. Invalid experimental
+     * data never prevents the stable v8 region from loading.
+     */
+    char pyramid_path[768] = {0};
+    if (map_world_v11_sibling_path(
+            ormap_path,
+            pyramid_path,
+            sizeof(pyramid_path))
+        && map_world_file_exists(pyramid_path)) {
+        char pyramid_error[256] = {0};
+
+        out->pyramid_renderer =
+            openride_ormap_pyramid_renderer_create(
+                renderer,
+                pyramid_path,
+                pyramid_error,
+                sizeof(pyramid_error));
+
+        if (!out->pyramid_renderer) {
+            SDL_Log(
+                "OpenRide v11 disabled for %s: %s",
+                definition && definition->id
+                    ? definition->id
+                    : "region",
+                pyramid_error[0]
+                    ? pyramid_error
+                    : "unable to initialize");
+        }
+    }
+
     return true;
 }
 
@@ -2426,6 +2520,14 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
         ++visible_count;
         openride_ormap_renderer_set_style(region->detail_renderer, style);
         openride_ormap_renderer_begin_frame(region->detail_renderer);
+
+        if (region->pyramid_renderer) {
+            openride_ormap_pyramid_renderer_set_style(
+                region->pyramid_renderer,
+                style);
+            openride_ormap_pyramid_renderer_begin_frame(
+                region->pyramid_renderer);
+        }
     }
 
     if (debug_enabled) world->debug.visible_detail_regions = (uint32_t)visible_count;
@@ -2449,6 +2551,27 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
         for (size_t i = 0U; i < world->region_count; ++i) {
             OpenRideMapWorldRegion *region = &world->regions[i];
             if (!region->detail_visible) continue;
+
+            if (region->pyramid_renderer
+                && layer == OPENRIDE_ORMAP_RENDER_LAYER_MASKS) {
+                openride_ormap_pyramid_renderer_draw_surfaces(
+                    region->pyramid_renderer,
+                    camera,
+                    viewport_width,
+                    viewport_height);
+                continue;
+            }
+
+            if (region->pyramid_renderer
+                && layer == OPENRIDE_ORMAP_RENDER_LAYER_AREAS) {
+                openride_ormap_pyramid_renderer_draw_buildings(
+                    region->pyramid_renderer,
+                    camera,
+                    viewport_width,
+                    viewport_height);
+                continue;
+            }
+
             openride_ormap_renderer_draw_layer(region->detail_renderer,
                                                camera,
                                                viewport_width,
@@ -2474,6 +2597,16 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
             if (!region->detail_visible || !region->detail_renderer) continue;
             map_world_accumulate_road_debug(&world->debug.road, &region->detail_renderer->road_debug);
             map_world_accumulate_area_debug(&world->debug.area, &region->detail_renderer->area_debug);
+
+            if (region->pyramid_renderer) {
+                OpenRideORMapAreaDebugStats pyramid_area = {0};
+                openride_ormap_pyramid_renderer_get_area_debug_stats(
+                    region->pyramid_renderer,
+                    &pyramid_area);
+                map_world_accumulate_area_debug(
+                    &world->debug.area,
+                    &pyramid_area);
+            }
         }
         world->debug.ormap_stats_valid = true;
         world->debug.detail_ms +=
@@ -2491,6 +2624,11 @@ bool openride_map_world_needs_followup_frame(
         if (!region->detail_visible || !region->detail_renderer) continue;
         if (openride_ormap_renderer_needs_followup_frame(
                 region->detail_renderer)) {
+            return true;
+        }
+        if (region->pyramid_renderer
+            && openride_ormap_pyramid_renderer_needs_followup_frame(
+                region->pyramid_renderer)) {
             return true;
         }
     }

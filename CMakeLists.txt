@@ -95,6 +95,9 @@ add_library(openride_core STATIC
     src/map/ormap_builder_v7.c
     src/map/ormap_builder_v8.c
     src/map/ormap_landcover_mesh.c
+    src/map/ormap_tile_pyramid.c
+    src/map/ormap_pyramid_surface.c
+    src/map/ormap_pyramid_building.c
     src/map/mvt.c
     src/map/map_style.c
 )
@@ -164,6 +167,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/map_renderer.c
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
+    src/map/ormap_pyramid_renderer.c
     src/map/map_zoom_test_logger.c
     src/map/ormap_renderer_v4.c
     src/map/ormap_renderer_v7.c
@@ -288,6 +292,26 @@ else()
     target_compile_options(openride_ormap_import PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_executable(openride_ormap_pyramid_surface_import
+    src/tools/ormap_pyramid_surface_import_main.c
+)
+target_link_libraries(openride_ormap_pyramid_surface_import PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_ormap_pyramid_surface_import PRIVATE /W4)
+else()
+    target_compile_options(openride_ormap_pyramid_surface_import PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(openride_ormap_pyramid_surface_inspect
+    src/tools/ormap_pyramid_surface_inspect_main.c
+)
+target_link_libraries(openride_ormap_pyramid_surface_inspect PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_ormap_pyramid_surface_inspect PRIVATE /W4)
+else()
+    target_compile_options(openride_ormap_pyramid_surface_inspect PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(openride_france_overview_import
     src/tools/france_overview_import_main.c
 )
@@ -366,6 +390,26 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_ormap_landcover_mesh PRIVATE openride_core)
     add_test(NAME ormap_landcover_mesh COMMAND test_ormap_landcover_mesh)
+
+    add_executable(test_ormap_tile_pyramid
+        tests/test_ormap_tile_pyramid.c
+    )
+    target_link_libraries(test_ormap_tile_pyramid PRIVATE openride_core)
+    add_test(NAME ormap_tile_pyramid COMMAND test_ormap_tile_pyramid)
+
+    add_executable(test_ormap_pyramid_surface
+        tests/test_ormap_pyramid_surface.c
+    )
+    target_include_directories(test_ormap_pyramid_surface
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(test_ormap_pyramid_surface PRIVATE openride_core)
+    add_test(
+        NAME ormap_pyramid_surface
+        COMMAND test_ormap_pyramid_surface
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.osm.pbf"
+    )
 
     add_executable(test_region_install
         tests/test_region_install.c

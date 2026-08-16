@@ -2102,6 +2102,7 @@ typedef struct MapPolygonContext {
     void *userdata;
     OpenRideOSMMapFeatureStats stats;
     bool overview_lines_only;
+    bool building_footprints_only;
 } MapPolygonContext;
 
 typedef enum MapPolygonPass {
@@ -2464,7 +2465,8 @@ static bool parse_map_polygon_way(ProtoSlice message,
     if (!has_id || scratch->refs.count < 2U) return true;
 
     const bool relation_member =
-        context->overview_lines_only
+        (context->overview_lines_only
+         || context->building_footprints_only)
             ? false
             : relation_way_id_needed(context, osm_id);
     const bool closed = scratch->refs.count >= 4U
@@ -2477,6 +2479,20 @@ static bool parse_map_polygon_way(ProtoSlice message,
             &scratch->keys,
             &scratch->vals);
         if (kind == 0) return true;
+    } else if (context->building_footprints_only) {
+        const ProtoSlice building =
+            way_tag_value(
+                table,
+                &scratch->keys,
+                &scratch->vals,
+                "building");
+        if (!closed
+            || !slice_nonempty(building)
+            || tag_is(building, "no")
+            || tag_is(building, "0")) {
+            return true;
+        }
+        kind = OPENRIDE_OSM_MAP_FEATURE_BUILDING_FOOTPRINT;
     } else {
         if (closed) {
             kind = classify_map_area_way(
@@ -3287,6 +3303,83 @@ bool openride_osm_pbf_visit_overview_lines(
     double *latitudes = NULL;
     double *longitudes = NULL;
     uint32_t point_capacity = 0U;
+    if (ok) {
+        ok = emit_standalone_map_ways(
+            &context,
+            &latitudes,
+            &longitudes,
+            &point_capacity,
+            error,
+            error_size);
+    }
+
+    free(latitudes);
+    free(longitudes);
+
+    if (stats) *stats = context.stats;
+    map_polygon_context_destroy(&context);
+
+    if (ok) set_error(error, error_size, "");
+    return ok;
+}
+
+bool openride_osm_pbf_visit_building_footprints(
+    const char *pbf_path,
+    OpenRideOSMMapFeatureVisitor visitor,
+    void *userdata,
+    OpenRideOSMMapFeatureStats *stats,
+    char *error,
+    size_t error_size)
+{
+    if (!pbf_path || !visitor) {
+        set_error(
+            error,
+            error_size,
+            "invalid building footprint import arguments");
+        return false;
+    }
+
+    MapPolygonContext context;
+    memset(&context, 0, sizeof(context));
+    context.visitor = visitor;
+    context.userdata = userdata;
+    context.building_footprints_only = true;
+
+    /*
+     * Dedicated two-pass close-view import:
+     *  1. retain only closed building=* way rings;
+     *  2. resolve only nodes referenced by those rings.
+     *
+     * This deliberately bypasses the low/mid-zoom representative-point
+     * optimization used by the normal cartographic feature visitor.
+     */
+    bool ok = scan_pbf_map(
+        pbf_path,
+        MAP_POLYGON_PASS_WAYS,
+        &context,
+        error,
+        error_size);
+
+    if (ok) {
+        ok = prepare_map_polygon_nodes(
+            &context,
+            error,
+            error_size);
+    }
+
+    if (ok && context.node_count > 0U) {
+        ok = scan_pbf_map(
+            pbf_path,
+            MAP_POLYGON_PASS_NODES,
+            &context,
+            error,
+            error_size);
+    }
+
+    double *latitudes = NULL;
+    double *longitudes = NULL;
+    uint32_t point_capacity = 0U;
+
     if (ok) {
         ok = emit_standalone_map_ways(
             &context,

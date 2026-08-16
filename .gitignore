@@ -21,3 +21,6 @@ data/routing/*.part
 
 # Sauvegardes locales des migrations
 .openride-migrations/
+
+# Cartes ORMap v11 générées localement
+data/maps/*.ormap11

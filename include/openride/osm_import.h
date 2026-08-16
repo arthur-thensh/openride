@@ -31,7 +31,10 @@ typedef enum OpenRideOSMMapFeatureKind {
     OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_COASTLINE = 8,
     OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_MOTORWAY = 9,
     OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_TRUNK = 10,
-    OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_PRIMARY = 11
+    OPENRIDE_OSM_MAP_FEATURE_OVERVIEW_PRIMARY = 11,
+
+    /* Dedicated close-view building geometry. Never treated as BUILTUP. */
+    OPENRIDE_OSM_MAP_FEATURE_BUILDING_FOOTPRINT = 12
 } OpenRideOSMMapFeatureKind;
 
 typedef struct OpenRideOSMMapFeatureStats {
@@ -115,6 +118,23 @@ bool openride_osm_pbf_visit_map_features(
  * not retain unrelated local roads, landcover or multipolygon relations.
  */
 bool openride_osm_pbf_visit_overview_lines(
+    const char *pbf_path,
+    OpenRideOSMMapFeatureVisitor visitor,
+    void *userdata,
+    OpenRideOSMMapFeatureStats *stats,
+    char *error,
+    size_t error_size);
+
+/*
+ * Visit true closed OSM building=* way footprints with their complete node
+ * rings. This is intentionally separate from visit_map_features(), where
+ * individual buildings are reduced to representative points for low/mid-zoom
+ * urban context.
+ *
+ * V3.8.3 handles closed building ways. Building multipolygon relations remain
+ * a later extension so this first close-view layer stays easy to validate.
+ */
+bool openride_osm_pbf_visit_building_footprints(
     const char *pbf_path,
     OpenRideOSMMapFeatureVisitor visitor,
     void *userdata,

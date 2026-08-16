@@ -21,6 +21,7 @@ if ! command -v "$ADB" >/dev/null 2>&1; then
 fi
 
 MAP="$ROOT_DIR/data/maps/nord-pas-de-calais.ormap"
+MAP_V11="$ROOT_DIR/data/maps/nord-pas-de-calais.ormap11"
 GRAPH="$ROOT_DIR/data/routing/nord-pas-de-calais.orgraph"
 SEARCH="$ROOT_DIR/data/search/nord-pas-de-calais.orplaces.sqlite"
 
@@ -43,6 +44,10 @@ if ! "$ADB" shell run-as "$PACKAGE" true >/dev/null 2>&1; then
     exit 1
 fi
 
+# Ne jamais remplacer une base SQLite cartographique pendant qu'OpenRide
+# pourrait encore l'avoir ouverte.
+"$ADB" shell am force-stop "$PACKAGE"
+
 "$ADB" shell run-as "$PACKAGE" mkdir -p \
     "$REMOTE/maps" \
     "$REMOTE/routing" \
@@ -63,8 +68,18 @@ push_app_file() {
     "$ADB" shell rm -f "$temporary"
 }
 
-echo "Copie de la carte .ormap..."
+echo "Copie de la carte stable .ormap..."
 push_app_file "$MAP" "$REMOTE/maps"
+
+if [ -f "$MAP_V11" ]; then
+    echo "Copie de la carte expérimentale .ormap11..."
+    push_app_file "$MAP_V11" "$REMOTE/maps"
+else
+    echo "Carte expérimentale .ormap11 absente : fallback v8 uniquement."
+    "$ADB" shell run-as "$PACKAGE" rm -f \
+        "$REMOTE/maps/nord-pas-de-calais.ormap11"
+fi
+
 echo "Copie du graphe de routage..."
 push_app_file "$GRAPH" "$REMOTE/routing"
 echo "Copie de l'index de recherche..."
@@ -76,6 +91,11 @@ echo "Vérification des fichiers installés..."
     "$REMOTE/maps/nord-pas-de-calais.ormap" \
     "$REMOTE/routing/nord-pas-de-calais.orgraph" \
     "$REMOTE/search/nord-pas-de-calais.orplaces.sqlite"
+
+if [ -f "$MAP_V11" ]; then
+    "$ADB" shell run-as "$PACKAGE" ls -lh \
+        "$REMOTE/maps/nord-pas-de-calais.ormap11"
+fi
 
 echo
 echo "Données hors ligne installées dans le stockage interne OpenRide."
