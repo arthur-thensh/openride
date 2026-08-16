@@ -140,7 +140,7 @@ typedef struct OpenRideAppEventContext {
 #endif
 } OpenRideAppEventContext;
 
-void openride_app_events_poll(OpenRideAppEventContext *context,
+bool openride_app_events_poll(OpenRideAppEventContext *context,
                               uint64_t *map_zoom_loop_started_ns);
 
 void openride_app_events_dispatch_pending(OpenRideAppEventContext *context);

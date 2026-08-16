@@ -63,6 +63,9 @@ void openride_map_world_get_debug_stats(
     const OpenRideMapWorld *world,
     OpenRideMapWorldDebugStats *stats);
 
+bool openride_map_world_needs_followup_frame(
+    const OpenRideMapWorld *world);
+
 size_t openride_map_world_region_count(const OpenRideMapWorld *world);
 
 #endif

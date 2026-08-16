@@ -46,6 +46,8 @@ typedef struct OpenRideMapZoomTest {
     bool active;
     int direction;
     double zoom;
+    double center_lat;
+    double center_lon;
     uint64_t first_present_ns;
     uint64_t last_present_ns;
     OpenRideMapZoomTestSample *samples;

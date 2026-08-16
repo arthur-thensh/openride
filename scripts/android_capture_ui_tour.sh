@@ -166,6 +166,35 @@ capture() {
     echo "OK"
 }
 
+wait_first_frame() {
+    local pid=""
+    local deadline=$((SECONDS + 12))
+    local line=""
+
+    while [[ $SECONDS -lt $deadline ]]; do
+        pid="$("${ADB[@]}" shell pidof "$PACKAGE" 2>/dev/null \
+            | tr -d '\r' | awk '{print $1}')"
+        if [[ -n "$pid" ]]; then
+            if "${ADB[@]}" logcat -d --pid="$pid" -v brief >/dev/null 2>&1; then
+                line="$("${ADB[@]}" logcat -d --pid="$pid" -v brief 2>/dev/null \
+                    | grep 'AUDIT_FIRST_FRAME_READY' | tail -n 1 || true)"
+            else
+                line="$("${ADB[@]}" logcat -d -v brief 2>/dev/null \
+                    | grep "AUDIT_FIRST_FRAME_READY pid=$pid" \
+                    | tail -n 1 || true)"
+            fi
+            if [[ -n "$line" ]]; then
+                printf '  first frame %s\n' "$line"
+                return 0
+            fi
+        fi
+        sleep 0.10
+    done
+
+    echo "ERROR: OpenRide first rendered frame was not observed" >&2
+    return 1
+}
+
 launch_clean() {
     "${ADB[@]}" shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
     "${ADB[@]}" shell monkey \
@@ -175,6 +204,7 @@ launch_clean() {
             echo "ERROR: unable to launch $PACKAGE" >&2
             exit 1
         }
+    wait_first_frame || exit 1
     sleep "$START_DELAY"
 }
 

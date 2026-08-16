@@ -1,5 +1,9 @@
 #include "app_event_runtime.h"
 
+#ifdef __ANDROID__
+#include <SDL3/SDL_system.h>
+#endif
+
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,6 +12,137 @@
 #define OPENRIDE_LOOP_DISTANCE_STEP_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MIN_M 25000.0
 #define OPENRIDE_LOOP_DISTANCE_MAX_M 300000.0
+
+static bool openride_app_events_apply_pinch_zoom(
+    OpenRideAppEventContext *context,
+    double scale,
+    double focus_x,
+    double focus_y)
+{
+    if (!context || !context->renderer || !context->camera
+        || !context->scalable_map || !context->metadata
+        || !context->app_panel || !context->place_search_active) {
+        return false;
+    }
+    if ((*context->place_search_active)
+        || (*context->app_panel) != OPENRIDE_APP_PANEL_NONE) {
+        return false;
+    }
+    if (!isfinite(scale) || scale <= 0.0) return false;
+
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetCurrentRenderOutputSize(context->renderer, &width, &height)
+        || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const OpenRideMBTilesMetadata *metadata = *context->metadata;
+    const double max_zoom = (*context->scalable_map)
+        ? 18.0
+        : metadata ? (double)metadata->max_zoom : 18.0;
+    const double min_zoom = context->map_world && (*context->scalable_map)
+        ? OPENRIDE_MAP_WORLD_MIN_ZOOM
+        : metadata ? (double)metadata->min_zoom : 1.0;
+
+    if (context->drive_mode && (*context->drive_mode).active) {
+        openride_drive_mode_set_auto_zoom(&(*context->drive_mode), false);
+    }
+
+    double zoom_delta = openride_touch_pinch_zoom_delta(scale);
+    zoom_delta = openride_app_support_clampd(zoom_delta, -1.0, 1.0);
+    const double target_zoom = openride_app_support_clampd(
+        (*context->camera).zoom + zoom_delta,
+        min_zoom,
+        max_zoom);
+
+    const double render_focus_x =
+        isfinite(focus_x) && focus_x >= 0.0
+            ? focus_x
+            : (double)width * 0.5;
+    const double render_focus_y =
+        isfinite(focus_y) && focus_y >= 0.0
+            ? focus_y
+            : (double)height * 0.5;
+
+    const double zoom_before = (*context->camera).zoom;
+    openride_camera_zoom_at(&(*context->camera),
+                            target_zoom - (*context->camera).zoom,
+                            render_focus_x,
+                            render_focus_y,
+                            width,
+                            height);
+    return fabs((*context->camera).zoom - zoom_before) > 1e-9;
+}
+
+#ifdef __ANDROID__
+static void openride_app_events_close_search_for_back(
+    OpenRideAppEventContext *context)
+{
+    if (!context || !context->place_search_active
+        || !(*context->place_search_active)) {
+        return;
+    }
+
+    (*context->place_search_active) = false;
+    if ((*context->place_search_purpose)
+        != OPENRIDE_PLACE_SEARCH_BROWSE) {
+        (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
+    }
+    (*context->place_search_purpose) = OPENRIDE_PLACE_SEARCH_BROWSE;
+    SDL_StopTextInput(context->window);
+}
+
+static void openride_app_events_handle_back(OpenRideAppEventContext *context)
+{
+    if (!context) return;
+
+    if (context->place_search_active && (*context->place_search_active)) {
+        openride_app_events_close_search_for_back(context);
+        return;
+    }
+
+    if (context->drive_mode && (*context->drive_mode).active) {
+        openride_drive_mode_set_active(&(*context->drive_mode), false);
+        (*context->camera).bearing_deg = 0.0;
+        if (context->follow_gps) (*context->follow_gps) = false;
+        snprintf(context->route_status,
+                 context->route_status_size,
+                 "mode conduite ferme");
+        return;
+    }
+
+    if (context->app_panel
+        && (*context->app_panel) != OPENRIDE_APP_PANEL_NONE) {
+        const OpenRideAppPanel panel = (*context->app_panel);
+
+        if (panel == OPENRIDE_APP_PANEL_LOOP_PROPOSALS
+            && context->route_choice) {
+            openride_route_choice_reset(context->route_choice);
+        }
+
+        if (panel == OPENRIDE_APP_PANEL_MAIN) {
+            (*context->app_panel) = OPENRIDE_APP_PANEL_NONE;
+        } else if (panel == OPENRIDE_APP_PANEL_ROUTE_DOWNLOADS
+                   || panel == OPENRIDE_APP_PANEL_LOOP_PROPOSALS) {
+            (*context->app_panel) = OPENRIDE_APP_PANEL_ROUTE;
+        } else {
+            (*context->app_panel) = OPENRIDE_APP_PANEL_MAIN;
+        }
+
+        if (context->app_panel_selected) {
+            (*context->app_panel_selected) = 0U;
+        }
+        return;
+    }
+
+#ifdef __ANDROID__
+    SDL_SendAndroidBackButton();
+#else
+    if (context->running) (*context->running) = false;
+#endif
+}
+#endif
 
 void openride_app_events_fit_route_choice_preview(OpenRideAppEventContext *context)
 {
@@ -58,15 +193,18 @@ void openride_app_events_fit_route_choice_preview(OpenRideAppEventContext *conte
 }
 
 
-void openride_app_events_poll(OpenRideAppEventContext *context,
+bool openride_app_events_poll(OpenRideAppEventContext *context,
                               uint64_t *map_zoom_loop_started_ns)
 {
     if (!context || !context->window || !context->renderer
-        || !context->running || !map_zoom_loop_started_ns) return;
+        || !context->running || !map_zoom_loop_started_ns) return false;
+
+    bool had_event = false;
 
             SDL_Event event;
 
             while (SDL_PollEvent(&event)) {
+                had_event = true;
                 SDL_ConvertEventToRenderCoordinates(context->renderer, &event);
 
                 switch (event.type) {
@@ -75,6 +213,67 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                         break;
 
                     case SDL_EVENT_KEY_DOWN:
+#ifdef __ANDROID__
+                        if (event.key.key == SDLK_AC_BACK) {
+                            openride_app_events_handle_back(context);
+                            break;
+                        }
+
+                        /*
+                         * Deterministic Android audit hooks.
+                         *
+                         * F11/F12 go through the exact same pinch application
+                         * helper as SDL_EVENT_PINCH_UPDATE. This validates the
+                         * OpenRide Android pinch path while acknowledging that
+                         * stock adb cannot synthesize a real two-finger stream
+                         * reliably on every phone.
+                         */
+                        if (event.key.key == SDLK_F10) {
+                            if (!(*context->place_search_active)
+                                && (*context->app_panel)
+                                    == OPENRIDE_APP_PANEL_NONE) {
+                                if ((*context->map_zoom_test).active) {
+                                    openride_map_zoom_test_cancel(
+                                        &(*context->map_zoom_test));
+                                    SDL_Log("AUDIT_ZOOM_SWEEP_CANCELED");
+                                } else if (openride_map_zoom_test_start(
+                                               &(*context->map_zoom_test),
+                                               &(*context->camera),
+                                               &(*context->platform_paths))) {
+                                    (*map_zoom_loop_started_ns) =
+                                        SDL_GetTicksNS();
+                                    SDL_Log("AUDIT_ZOOM_SWEEP_STARTED center=%.6f,%.6f zoom=%.3f",
+                                            (*context->map_zoom_test).center_lat,
+                                            (*context->map_zoom_test).center_lon,
+                                            (*context->map_zoom_test).zoom);
+                                }
+                            }
+                            break;
+                        }
+
+                        if (event.key.key == SDLK_F11
+                            || event.key.key == SDLK_F12) {
+                            const double scale =
+                                event.key.key == SDLK_F11 ? 2.0 : 0.5;
+                            const double zoom_before =
+                                (*context->camera).zoom;
+                            const bool changed =
+                                openride_app_events_apply_pinch_zoom(
+                                    context,
+                                    scale,
+                                    -1.0,
+                                    -1.0);
+                            SDL_Log("AUDIT_PINCH_APPLIED direction=%s scale=%.3f zoom_before=%.3f zoom_after=%.3f changed=%d",
+                                    event.key.key == SDLK_F11
+                                        ? "in" : "out",
+                                    scale,
+                                    zoom_before,
+                                    (*context->camera).zoom,
+                                    changed ? 1 : 0);
+                            break;
+                        }
+#endif
+
                         if ((*context->app_panel) != OPENRIDE_APP_PANEL_NONE) {
                             if (event.key.key == SDLK_TAB) {
                                 if ((*context->app_panel) == OPENRIDE_APP_PANEL_LOOP_PROPOSALS) {
@@ -2310,37 +2509,25 @@ void openride_app_events_poll(OpenRideAppEventContext *context,
                         openride_touch_input_cancel(&(*context->touch_input));
                         break;
 
-                    case SDL_EVENT_PINCH_UPDATE: {
-                        if ((*context->place_search_active) || (*context->app_panel) != OPENRIDE_APP_PANEL_NONE) break;
-                        int width = 0;
-                        int height = 0;
-                        SDL_GetCurrentRenderOutputSize(context->renderer, &width, &height);                    const double max_zoom = (*context->scalable_map) ? 18.0 : (double)(*context->metadata)->max_zoom;
-                        const double min_zoom = context->map_world && (*context->scalable_map)
-                            ? OPENRIDE_MAP_WORLD_MIN_ZOOM
-                            : (double)(*context->metadata)->min_zoom;
-                        if ((*context->drive_mode).active) {
-                            openride_drive_mode_set_auto_zoom(&(*context->drive_mode), false);
-                        }
-                        double zoom_delta = openride_touch_pinch_zoom_delta((double)event.pinch.scale);
-                        zoom_delta = openride_app_support_clampd(zoom_delta, -1.0, 1.0);
-                        const double target_zoom = openride_app_support_clampd((*context->camera).zoom + zoom_delta,
-                                                           min_zoom,
-                                                           max_zoom);
-                        const double focus_x = (double)width * 0.5;
-                        const double focus_y = (double)height * 0.5;
-                        openride_camera_zoom_at(&(*context->camera),
-                                                target_zoom - (*context->camera).zoom,
-                                                focus_x,
-                                                focus_y,
-                                                width,
-                                                height);
+                    case SDL_EVENT_PINCH_UPDATE:
+                        /*
+                         * This SDL3 build exposes pinch.scale but no focal
+                         * coordinates on SDL_PinchFingerEvent. The shared
+                         * helper interprets negative focus values as the
+                         * viewport center.
+                         */
+                        (void)openride_app_events_apply_pinch_zoom(
+                            context,
+                            (double)event.pinch.scale,
+                            -1.0,
+                            -1.0);
                         break;
-                    }
 
                     default:
                         break;
                 }
             }
+    return had_event;
 }
 
 void openride_app_events_dispatch_pending(OpenRideAppEventContext *context)

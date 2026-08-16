@@ -26,6 +26,7 @@
 #include "openride/android_voice_guidance.h"
 #include "openride/android_region_download.h"
 #include <SDL3/SDL_system.h>
+#include <unistd.h>
 #endif
 #include "openride/place_search.h"
 #include "openride/place_world.h"
@@ -69,6 +70,52 @@
 #define OPENRIDE_GPX_RECORDING_MIN_STEP_M 10.0
 #define OPENRIDE_GPX_NAVIGATION_SPEED_KPH 50.0
 #define OPENRIDE_SEARCH_MAX_RESULTS 8U
+#define OPENRIDE_INTERACTIVE_FRAME_NS 16666667ULL
+#define OPENRIDE_ACTIVE_FRAME_NS 33333333ULL
+#define OPENRIDE_IDLE_FRAME_NS 66666667ULL
+#define OPENRIDE_INTERACTIVE_HOLD_NS 750000000ULL
+#define OPENRIDE_STARTUP_INTERACTIVE_NS 1500000000ULL
+#define OPENRIDE_RENDER_FOLLOWUP_BUDGET 48U
+
+#ifdef __ANDROID__
+typedef struct OpenRideDirtyRenderAudit {
+    Uint64 window_started_ns;
+    uint32_t loops;
+    uint32_t renders;
+    uint32_t skips;
+} OpenRideDirtyRenderAudit;
+
+static void openride_dirty_render_audit_tick(
+    OpenRideDirtyRenderAudit *audit,
+    bool rendered)
+{
+    if (!audit) return;
+    const Uint64 now_ns = SDL_GetTicksNS();
+    if (audit->window_started_ns == 0U) audit->window_started_ns = now_ns;
+
+    ++audit->loops;
+    if (rendered) ++audit->renders;
+    else ++audit->skips;
+
+    const Uint64 elapsed_ns = now_ns - audit->window_started_ns;
+    if (elapsed_ns < 2000000000ULL) return;
+
+    const double seconds = (double)elapsed_ns / 1000000000.0;
+    SDL_Log(
+        "AUDIT_DIRTY_RENDER window_s=%.3f loop_hz=%.2f render_fps=%.2f loops=%u renders=%u skips=%u",
+        seconds,
+        seconds > 0.0 ? (double)audit->loops / seconds : 0.0,
+        seconds > 0.0 ? (double)audit->renders / seconds : 0.0,
+        audit->loops,
+        audit->renders,
+        audit->skips);
+
+    audit->window_started_ns = now_ns;
+    audit->loops = 0U;
+    audit->renders = 0U;
+    audit->skips = 0U;
+}
+#endif
 #define OPENRIDE_APP_LIST_MAX 12U
 #define OPENRIDE_REAL_MAP_PATH "data/maps/nord-pas-de-calais.ormap"
 #define OPENRIDE_ROUTING_GRAPH_PATH "data/routing/nord-pas-de-calais.orgraph"
@@ -81,6 +128,19 @@ int openride_app_run(int argc, char **argv)
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
+
+    const Uint64 app_started_ns = SDL_GetTicksNS();
+
+#ifdef __ANDROID__
+    /*
+     * SDL leaves Android Back to the system by default. Trap it so OpenRide can
+     * unwind its own panels/search first, then explicitly hand root-level Back
+     * back to Android.
+     */
+    if (!SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1")) {
+        SDL_Log("Unable to enable Android Back trapping");
+    }
+#endif
 
     OpenRidePlatformPaths platform_paths;
     OpenRidePlatformKind platform_kind = OPENRIDE_PLATFORM_DESKTOP;
@@ -391,8 +451,35 @@ int openride_app_run(int argc, char **argv)
     OpenRideVectorMapRenderer vector_renderer;
     OpenRideORMapRenderer ormap_renderer;
     bool renderer_initialized = false;
+    bool renderer_vsync_enabled = false;
+    bool first_frame_logged = false;
+    Uint64 previous_frame_started_ns = 0U;
+    Uint64 interactive_until_ns =
+        SDL_GetTicksNS() + OPENRIDE_STARTUP_INTERACTIVE_NS;
+#ifdef __ANDROID__
+    Uint64 audit_pacing_window_started_ns = SDL_GetTicksNS();
+    uint32_t audit_pacing_interactive_frames = 0U;
+    uint32_t audit_pacing_active_frames = 0U;
+    uint32_t audit_pacing_idle_frames = 0U;
+    double audit_last_presented_zoom = NAN;
+
+    /*
+     * Temporary V3.4.2 diagnostic: profile the first ten normal Android
+     * frames in detail. It is deliberately bounded so instrumentation cannot
+     * become permanent per-frame overhead.
+     */
+    uint32_t audit_frame_profile_remaining = 10U;
+    uint32_t audit_frame_profile_index = 0U;
+#endif
     bool running = true;
     bool render_suspended = false;
+    bool render_dirty = true;
+    uint32_t render_followup_budget = OPENRIDE_RENDER_FOLLOWUP_BUDGET;
+#ifdef __ANDROID__
+    OpenRideDirtyRenderAudit dirty_render_audit = {
+        .window_started_ns = SDL_GetTicksNS()
+    };
+#endif
     bool lifecycle_watch_installed = false;
     bool dragging_map = false;
     bool map_drag_moved = false;
@@ -420,6 +507,20 @@ int openride_app_run(int argc, char **argv)
         openride_mbtiles_close(map);
         SDL_Quit();
         return 1;
+    }
+
+    renderer_vsync_enabled = SDL_SetRenderVSync(renderer, 1);
+    if (!renderer_vsync_enabled) {
+        SDL_Log("Renderer VSync unavailable: %s; 60 fps frame cap remains active",
+                SDL_GetError());
+    } else {
+        int actual_vsync = 0;
+        if (SDL_GetRenderVSync(renderer, &actual_vsync)) {
+            SDL_Log("Renderer VSync enabled (interval=%d), OpenRide capped at <=60 fps",
+                    actual_vsync);
+        } else {
+            SDL_Log("Renderer VSync enabled, OpenRide capped at <=60 fps");
+        }
     }
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -706,12 +807,91 @@ int openride_app_run(int argc, char **argv)
     };
 
     while (running) {
+        /*
+         * Adaptive foreground pacing:
+         *   - 60 fps during gestures/zoom-test/recent visual changes;
+         *   - 30 fps while GPS/navigation/async work is continuously active;
+         *   - 15 fps on a static map or static panel.
+         *
+         * A static OpenRide screen was previously redrawn at 60 fps forever,
+         * which kept the Pixel audit around one full CPU core even with VSync.
+         */
+        const Uint64 pacing_now_ns = SDL_GetTicksNS();
+        bool runtime_continuous_activity =
+            map_zoom_test.active
+            || drive_mode.active
+            || planner_busy != OPENRIDE_RIDE_PLANNER_IDLE
+            || planner_async_thread != NULL
+            || routing_world_thread != NULL
+            || region_busy;
+#ifdef __ANDROID__
+        /*
+         * A running GPS provider is not, by itself, a reason to redraw at
+         * 30 fps. A location sample that actually changes the camera is caught
+         * below by frame_camera_changed and temporarily boosts rendering.
+         */
+        runtime_continuous_activity =
+            runtime_continuous_activity
+            || region_prepare_thread != NULL
+            || region_download_started;
+#endif
+
+        const Uint64 target_frame_ns =
+            map_zoom_test.active || pacing_now_ns < interactive_until_ns
+                ? OPENRIDE_INTERACTIVE_FRAME_NS
+                : runtime_continuous_activity
+                    ? OPENRIDE_ACTIVE_FRAME_NS
+                    : OPENRIDE_IDLE_FRAME_NS;
+
+#ifdef __ANDROID__
+        if (target_frame_ns == OPENRIDE_INTERACTIVE_FRAME_NS) {
+            ++audit_pacing_interactive_frames;
+        } else if (target_frame_ns == OPENRIDE_ACTIVE_FRAME_NS) {
+            ++audit_pacing_active_frames;
+        } else {
+            ++audit_pacing_idle_frames;
+        }
+#endif
+
+        if (previous_frame_started_ns != 0U) {
+            const Uint64 next_frame_ns =
+                previous_frame_started_ns + target_frame_ns;
+            if (pacing_now_ns < next_frame_ns) {
+                /*
+                 * This is an energy-saving frame wait, not a sub-millisecond
+                 * timing benchmark. SDL_DelayNS can sleep; DelayPrecise may
+                 * busy-wait near the deadline and defeat the CPU saving.
+                 */
+                SDL_DelayNS(next_frame_ns - pacing_now_ns);
+            }
+        }
+        previous_frame_started_ns = SDL_GetTicksNS();
+
+#ifdef __ANDROID__
+        const bool audit_frame_profile_active =
+            audit_frame_profile_remaining > 0U
+            && !map_zoom_test.active;
+        const Uint64 audit_frame_profile_started_ns =
+            audit_frame_profile_active ? SDL_GetTicksNS() : 0U;
+#endif
+
+        const OpenRideMapCamera frame_camera_before_update = camera;
+        const OpenRideAppPanel frame_panel_before_update = app_panel;
+        const bool frame_search_before_update = place_search_active;
+        const bool frame_drive_before_update = drive_mode.active;
+
         uint64_t map_zoom_loop_started_ns =
             map_zoom_test.active ? SDL_GetTicksNS() : 0U;
 
 
-        openride_app_events_poll(&event_context,
-                                 &map_zoom_loop_started_ns);
+        const bool event_activity =
+            openride_app_events_poll(&event_context,
+                                     &map_zoom_loop_started_ns);
+        if (event_activity) {
+            render_dirty = true;
+            render_followup_budget = OPENRIDE_RENDER_FOLLOWUP_BUDGET;
+        }
+        bool gps_visual_changed = false;
 
         const int lifecycle_signal = SDL_SetAtomicInt(&lifecycle_watch.pending_signal,
                                                        OPENRIDE_LIFECYCLE_SIGNAL_NONE);
@@ -733,6 +913,8 @@ int openride_app_run(int argc, char **argv)
         } else if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_FOREGROUND) {
             openride_app_lifecycle_enter_foreground(&app_lifecycle);
             render_suspended = false;
+            render_dirty = true;
+            render_followup_budget = OPENRIDE_RENDER_FOLLOWUP_BUDGET;
             last_frame_ticks = SDL_GetTicks();
             openride_location_filter_reset(&location_filter);
             memset(&filtered_location, 0, sizeof(filtered_location));
@@ -765,6 +947,8 @@ int openride_app_run(int argc, char **argv)
             }
         } else if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_LOW_MEMORY) {
             snprintf(route_status, sizeof(route_status), "memoire faible: navigation conservee");
+            render_dirty = true;
+            render_followup_budget = OPENRIDE_RENDER_FOLLOWUP_BUDGET;
         } else if (lifecycle_signal == OPENRIDE_LIFECYCLE_SIGNAL_TERMINATING) {
             running = false;
         }
@@ -831,6 +1015,7 @@ int openride_app_run(int argc, char **argv)
                     android_location_provider,
                     delta_seconds,
                     &real_sample)) {
+                gps_visual_changed = true;
                 android_gps_sample_age_s = 0.0;
                 android_gps_accuracy_m = real_sample.accuracy_m;
                 gps_sample_valid = real_sample.valid;
@@ -910,6 +1095,7 @@ int openride_app_run(int argc, char **argv)
             if (openride_gps_simulator_update(&gps_simulator,
                                               navigation_delta_s,
                                               &gps_sample)) {
+                gps_visual_changed = true;
                 gps_sample_valid = true;
                 if (openride_location_filter_update(&location_filter,
                                                     gps_sample.lat,
@@ -1075,6 +1261,40 @@ int openride_app_run(int argc, char **argv)
                                                  &navigation_state);
         }
 
+        const bool frame_camera_changed =
+            fabs(camera.center_lat - frame_camera_before_update.center_lat) > 1e-10
+            || fabs(camera.center_lon - frame_camera_before_update.center_lon) > 1e-10
+            || fabs(camera.zoom - frame_camera_before_update.zoom) > 1e-7
+            || fabs(camera.bearing_deg - frame_camera_before_update.bearing_deg) > 1e-5;
+        const bool frame_ui_changed =
+            app_panel != frame_panel_before_update
+            || place_search_active != frame_search_before_update
+            || drive_mode.active != frame_drive_before_update;
+
+        if (event_activity
+            || frame_camera_changed
+            || frame_ui_changed
+            || gps_visual_changed) {
+            render_dirty = true;
+            render_followup_budget = OPENRIDE_RENDER_FOLLOWUP_BUDGET;
+            interactive_until_ns =
+                SDL_GetTicksNS() + OPENRIDE_INTERACTIVE_HOLD_NS;
+        }
+
+        if (map_zoom_test.active
+            || drive_mode.active
+            || runtime_continuous_activity) {
+            render_dirty = true;
+            render_followup_budget = OPENRIDE_RENDER_FOLLOWUP_BUDGET;
+        }
+
+        if (!render_dirty) {
+#ifdef __ANDROID__
+            openride_dirty_render_audit_tick(&dirty_render_audit, false);
+#endif
+            continue;
+        }
+
         int width = 0;
         int height = 0;
         if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height)) {
@@ -1084,30 +1304,39 @@ int openride_app_run(int argc, char **argv)
 
         const bool world_available = map_world
             && openride_map_world_region_count(map_world) > 0U;
-        const bool world_overview_only = world_available
-            && camera.zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM;
         OpenRideMapZoomFrameProfile map_zoom_profile;
         OpenRideMapWorldDebugStats map_zoom_world_debug;
         memset(&map_zoom_profile, 0, sizeof(map_zoom_profile));
         memset(&map_zoom_world_debug, 0, sizeof(map_zoom_world_debug));
         map_zoom_world_debug.road.prewarm_zoom = -1;
-        if (map_zoom_test.active && map_world) openride_map_world_debug_begin_frame(map_world);
-        const uint64_t map_zoom_map_started_ns = map_zoom_test.active ? SDL_GetTicksNS() : 0U;
-        if (world_overview_only) {
-            const OpenRideMapPalette palette = openride_map_palette(map_style);
-            SDL_SetRenderDrawColor(renderer,
-                                   palette.background.r,
-                                   palette.background.g,
-                                   palette.background.b,
-                                   SDL_ALPHA_OPAQUE);
-            SDL_RenderClear(renderer);
-            openride_map_world_draw(map_world,
-                                    &camera,
-                                    map_style,
-                                    NULL,
-                                    width,
-                                    height);
-        } else if (ormap_map) {
+
+#ifdef __ANDROID__
+        OpenRideMapWorldDebugStats audit_frame_world_debug;
+        memset(&audit_frame_world_debug, 0, sizeof(audit_frame_world_debug));
+        audit_frame_world_debug.road.prewarm_zoom = -1;
+#endif
+
+        bool map_debug_frame = map_zoom_test.active;
+#ifdef __ANDROID__
+        map_debug_frame = map_debug_frame || audit_frame_profile_active;
+#endif
+        if (map_debug_frame && map_world) {
+            openride_map_world_debug_begin_frame(map_world);
+        }
+
+        const uint64_t map_zoom_map_started_ns =
+            map_zoom_test.active ? SDL_GetTicksNS() : 0U;
+#ifdef __ANDROID__
+        const Uint64 audit_frame_profile_map_started_ns =
+            audit_frame_profile_active ? SDL_GetTicksNS() : 0U;
+#endif
+        if (ormap_map) {
+            /*
+             * Installed regions are ORMap-owned at every application zoom.
+             * MapWorld remains the multi-region coordinator, but its old
+             * generalized overview renderer is no longer part of the installed
+             * region render path. This removes the z10 engine handoff entirely.
+             */
             if (world_available) {
                 openride_map_world_draw_detail(map_world,
                                                &camera,
@@ -1115,7 +1344,10 @@ int openride_app_run(int argc, char **argv)
                                                width,
                                                height);
             } else {
-                openride_ormap_renderer_draw(&ormap_renderer, &camera, width, height);
+                openride_ormap_renderer_draw(&ormap_renderer,
+                                             &camera,
+                                             width,
+                                             height);
             }
         } else {
             if (vector_map) {
@@ -1138,7 +1370,17 @@ int openride_app_run(int argc, char **argv)
                                         height);
             }
         }
-        const uint64_t map_zoom_map_finished_ns = map_zoom_test.active ? SDL_GetTicksNS() : 0U;
+        const uint64_t map_zoom_map_finished_ns =
+            map_zoom_test.active ? SDL_GetTicksNS() : 0U;
+#ifdef __ANDROID__
+        const Uint64 audit_frame_profile_map_finished_ns =
+            audit_frame_profile_active ? SDL_GetTicksNS() : 0U;
+        if (audit_frame_profile_active && map_world) {
+            openride_map_world_get_debug_stats(
+                map_world,
+                &audit_frame_world_debug);
+        }
+#endif
         if (map_zoom_test.active) {
             if (map_zoom_loop_started_ns != 0U) map_zoom_profile.update_ms=(double)(map_zoom_map_started_ns-map_zoom_loop_started_ns)/1000000.0;
             map_zoom_profile.map_ms=(double)(map_zoom_map_finished_ns-map_zoom_map_started_ns)/1000000.0;
@@ -1399,9 +1641,9 @@ int openride_app_run(int argc, char **argv)
             snprintf(zoom_line, sizeof(zoom_line),
                      "TEST LOD  %s  z=%.3f", phase, map_zoom_test.zoom);
             snprintf(gps_line, sizeof(gps_line),
-                     "GPS %.6f, %.6f",
-                     OPENRIDE_MAP_ZOOM_TEST_LAT,
-                     OPENRIDE_MAP_ZOOM_TEST_LON);
+                     "CENTER %.6f, %.6f",
+                     map_zoom_test.center_lat,
+                     map_zoom_test.center_lon);
             snprintf(road_line,
                      sizeof(road_line),
                      "R %.1fms L%.1f H%u M%u P%u D%u X%u z%d",
@@ -1471,9 +1713,218 @@ int openride_app_run(int argc, char **argv)
                              area_line);
         }
 
-        const uint64_t map_zoom_ui_finished_ns = map_zoom_test.active ? SDL_GetTicksNS() : 0U;
-        if (map_zoom_test.active) map_zoom_profile.ui_ms=(double)(map_zoom_ui_finished_ns-map_zoom_map_finished_ns)/1000000.0;
+        const uint64_t map_zoom_ui_finished_ns =
+            map_zoom_test.active ? SDL_GetTicksNS() : 0U;
+        if (map_zoom_test.active) {
+            map_zoom_profile.ui_ms =
+                (double)(map_zoom_ui_finished_ns - map_zoom_map_finished_ns)
+                / 1000000.0;
+        }
+#ifdef __ANDROID__
+        const Uint64 audit_frame_profile_ui_finished_ns =
+            audit_frame_profile_active ? SDL_GetTicksNS() : 0U;
+#endif
+
         SDL_RenderPresent(renderer);
+
+        bool map_followup_required = false;
+        if (world_available && map_world) {
+            map_followup_required =
+                openride_map_world_needs_followup_frame(map_world);
+        } else if (ormap_map && renderer_initialized) {
+            map_followup_required =
+                openride_ormap_renderer_needs_followup_frame(&ormap_renderer);
+        }
+        if (map_followup_required && render_followup_budget > 0U) {
+            --render_followup_budget;
+            render_dirty = true;
+        } else {
+#ifdef __ANDROID__
+            if (map_followup_required && render_followup_budget == 0U) {
+                SDL_Log(
+                    "AUDIT_DIRTY_FOLLOWUP_CAPPED budget=%u zoom=%.3f",
+                    OPENRIDE_RENDER_FOLLOWUP_BUDGET,
+                    camera.zoom);
+            }
+#endif
+            render_dirty = false;
+        }
+
+#ifdef __ANDROID__
+        openride_dirty_render_audit_tick(&dirty_render_audit, true);
+        if (audit_frame_profile_active) {
+            const Uint64 audit_frame_profile_present_ns = SDL_GetTicksNS();
+            const double audit_frame_ms =
+                (double)(audit_frame_profile_present_ns
+                         - audit_frame_profile_started_ns)
+                / 1000000.0;
+            const double audit_update_ms =
+                (double)(audit_frame_profile_map_started_ns
+                         - audit_frame_profile_started_ns)
+                / 1000000.0;
+            const double audit_map_ms =
+                (double)(audit_frame_profile_map_finished_ns
+                         - audit_frame_profile_map_started_ns)
+                / 1000000.0;
+            const double audit_ui_ms =
+                (double)(audit_frame_profile_ui_finished_ns
+                         - audit_frame_profile_map_finished_ns)
+                / 1000000.0;
+            const double audit_present_ms =
+                (double)(audit_frame_profile_present_ns
+                         - audit_frame_profile_ui_finished_ns)
+                / 1000000.0;
+
+            OpenRideORMapRoadDebugStats audit_road_debug;
+            OpenRideORMapAreaDebugStats audit_area_debug;
+            memset(&audit_road_debug, 0, sizeof(audit_road_debug));
+            memset(&audit_area_debug, 0, sizeof(audit_area_debug));
+            audit_road_debug.prewarm_zoom = -1;
+
+            if (audit_frame_world_debug.ormap_stats_valid) {
+                audit_road_debug = audit_frame_world_debug.road;
+                audit_area_debug = audit_frame_world_debug.area;
+            } else if (!world_available
+                       && ormap_map
+                       && renderer_initialized) {
+                openride_ormap_renderer_get_road_debug_stats(
+                    &ormap_renderer,
+                    &audit_road_debug);
+                openride_ormap_renderer_get_area_debug_stats(
+                    &ormap_renderer,
+                    &audit_area_debug);
+            }
+
+            SDL_Log(
+                "AUDIT_FRAME_PROFILE idx=%u zoom=%.3f frame_ms=%.3f update_ms=%.3f map_ms=%.3f ui_ms=%.3f present_ms=%.3f world_detail_ms=%.3f masks_ms=%.3f areas_layer_ms=%.3f waterways_ms=%.3f roads_layer_ms=%.3f labels_ms=%.3f regions=%u stats=%d",
+                audit_frame_profile_index,
+                camera.zoom,
+                audit_frame_ms,
+                audit_update_ms,
+                audit_map_ms,
+                audit_ui_ms,
+                audit_present_ms,
+                audit_frame_world_debug.detail_ms,
+                audit_frame_world_debug.masks_ms,
+                audit_frame_world_debug.areas_ms,
+                audit_frame_world_debug.waterways_ms,
+                audit_frame_world_debug.roads_ms,
+                audit_frame_world_debug.labels_ms,
+                audit_frame_world_debug.visible_detail_regions,
+                audit_frame_world_debug.ormap_stats_valid ? 1 : 0);
+
+            SDL_Log(
+                "AUDIT_FRAME_PROFILE_ROADS idx=%u roads_ms=%.3f load_ms=%.3f hits=%u misses=%u prewarm=%u draw=%u deferred=%u tiles=%u segments=%u batches=%u prewarm_z=%d",
+                audit_frame_profile_index,
+                audit_road_debug.roads_ms,
+                audit_road_debug.load_ms,
+                audit_road_debug.cache_hits,
+                audit_road_debug.cache_misses,
+                audit_road_debug.prewarm_loads,
+                audit_road_debug.draw_loads,
+                audit_road_debug.deferred_loads,
+                audit_road_debug.tiles_visited,
+                audit_road_debug.segments_drawn,
+                audit_road_debug.batches,
+                audit_road_debug.prewarm_zoom);
+
+            SDL_Log(
+                "AUDIT_FRAME_PROFILE_AREAS idx=%u areas_ms=%.3f load_ms=%.3f mask_compile_ms=%.3f tiles=%u triangles=%u batches=%u prewarm=%u draw=%u deferred=%u mask_tiles=%u mask_rects=%u mask_batches=%u mask_compile_rects=%u mask_hits=%u mask_misses=%u mask_fail=%u",
+                audit_frame_profile_index,
+                audit_area_debug.areas_ms,
+                audit_area_debug.load_ms,
+                audit_area_debug.mask_compile_ms,
+                audit_area_debug.tiles_visited,
+                audit_area_debug.triangles_drawn,
+                audit_area_debug.batches,
+                audit_area_debug.prewarm_loads,
+                audit_area_debug.draw_loads,
+                audit_area_debug.deferred_loads,
+                audit_area_debug.mask_tiles,
+                audit_area_debug.mask_rects,
+                audit_area_debug.mask_batches,
+                audit_area_debug.mask_compile_rects,
+                audit_area_debug.mask_cache_hits,
+                audit_area_debug.mask_cache_misses,
+                audit_area_debug.mask_compile_failures);
+
+            if (map_world) {
+                openride_map_world_debug_end_frame(map_world);
+            }
+
+            ++audit_frame_profile_index;
+            --audit_frame_profile_remaining;
+            if (audit_frame_profile_remaining == 0U) {
+                SDL_Log(
+                    "AUDIT_FRAME_PROFILE_DONE frames=%u zoom=%.3f",
+                    audit_frame_profile_index,
+                    camera.zoom);
+            }
+        }
+
+        if (!isfinite(audit_last_presented_zoom)
+            || fabs(camera.zoom - audit_last_presented_zoom) > 1e-7) {
+            SDL_Log("AUDIT_FRAME_PRESENT zoom=%.3f", camera.zoom);
+            audit_last_presented_zoom = camera.zoom;
+        }
+
+        const Uint64 audit_pacing_now_ns = SDL_GetTicksNS();
+        const Uint64 audit_pacing_elapsed_ns =
+            audit_pacing_now_ns - audit_pacing_window_started_ns;
+        if (audit_pacing_elapsed_ns >= 2000000000ULL) {
+            const uint32_t audit_pacing_total_frames =
+                audit_pacing_interactive_frames
+                + audit_pacing_active_frames
+                + audit_pacing_idle_frames;
+            const double audit_pacing_window_s =
+                (double)audit_pacing_elapsed_ns / 1000000000.0;
+            const double audit_pacing_fps =
+                audit_pacing_window_s > 0.0
+                    ? (double)audit_pacing_total_frames / audit_pacing_window_s
+                    : 0.0;
+            const int audit_pacing_target_fps =
+                target_frame_ns == OPENRIDE_INTERACTIVE_FRAME_NS ? 60
+                : target_frame_ns == OPENRIDE_ACTIVE_FRAME_NS ? 30
+                : 15;
+
+            SDL_Log("AUDIT_FRAME_PACING window_s=%.3f fps=%.2f interactive=%u active=%u idle=%u target_fps=%d",
+                    audit_pacing_window_s,
+                    audit_pacing_fps,
+                    audit_pacing_interactive_frames,
+                    audit_pacing_active_frames,
+                    audit_pacing_idle_frames,
+                    audit_pacing_target_fps);
+
+            audit_pacing_window_started_ns = audit_pacing_now_ns;
+            audit_pacing_interactive_frames = 0U;
+            audit_pacing_active_frames = 0U;
+            audit_pacing_idle_frames = 0U;
+        }
+#endif
+
+        if (!first_frame_logged) {
+            const Uint64 first_frame_ns = SDL_GetTicksNS();
+            const double first_frame_elapsed_ms =
+                (double)(first_frame_ns - app_started_ns) / 1000000.0;
+#ifdef __ANDROID__
+            SDL_Log("AUDIT_FIRST_FRAME_READY pid=%ld elapsed_ms=%.3f width=%d height=%d zoom=%.3f vsync=%d",
+                    (long)getpid(),
+                    first_frame_elapsed_ms,
+                    width,
+                    height,
+                    camera.zoom,
+                    renderer_vsync_enabled ? 1 : 0);
+#else
+            SDL_Log("Runtime first frame ready elapsed_ms=%.3f width=%d height=%d zoom=%.3f vsync=%d",
+                    first_frame_elapsed_ms,
+                    width,
+                    height,
+                    camera.zoom,
+                    renderer_vsync_enabled ? 1 : 0);
+#endif
+            first_frame_logged = true;
+        }
+
         if (map_zoom_test.active) {
             const uint64_t map_zoom_present_ns=SDL_GetTicksNS();
             map_zoom_profile.present_ms=(double)(map_zoom_present_ns-map_zoom_ui_finished_ns)/1000000.0;

@@ -154,6 +154,8 @@ void openride_ormap_renderer_get_road_debug_stats(
 void openride_ormap_renderer_get_area_debug_stats(
     const OpenRideORMapRenderer *renderer,
     OpenRideORMapAreaDebugStats *stats);
+bool openride_ormap_renderer_needs_followup_frame(
+    const OpenRideORMapRenderer *renderer);
 void openride_ormap_renderer_draw_layer(OpenRideORMapRenderer *renderer,
                                         const OpenRideMapCamera *camera,
                                         int viewport_width,

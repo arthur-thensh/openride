@@ -61,11 +61,6 @@ static uint8_t ormap_scaled_alpha(uint8_t alpha, double factor)
     return (uint8_t)lround((double)alpha * factor);
 }
 
-static double ormap_detail_handoff_fade(double zoom)
-{
-    return ormap_zoom_smoothstep(zoom, 10.0, 11.30);
-}
-
 static void ormap_scale_color_alpha(OpenRideMapColor *color, double factor)
 {
     if (!color) return;
@@ -100,6 +95,50 @@ static void rotate_point(const OpenRideMapCamera *camera,
 static void set_color(SDL_Renderer *renderer, OpenRideMapColor color)
 {
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+}
+
+/*
+ * At low application zoom a z8 road tile is only 64 px wide. Iterating the
+ * whole viewport would therefore probe hundreds of SQLite tiles that cannot
+ * belong to this regional extract. Intersect road/prewarm ranges with the
+ * robust ORMap metadata bounds before touching the cache/database.
+ */
+static void clip_tile_range_to_map_bounds(
+    const OpenRideORMapRenderer *renderer,
+    int zoom,
+    int *first_x,
+    int *last_x,
+    int *first_y,
+    int *last_y)
+{
+    if (!renderer || !first_x || !last_x || !first_y || !last_y) return;
+
+    const OpenRideORMapMetadata *metadata =
+        openride_ormap_metadata(renderer->map);
+    if (!metadata || !metadata->has_bounds || metadata->west > metadata->east) {
+        return;
+    }
+
+    const int count = 1 << zoom;
+    const OpenRidePointD northwest =
+        openride_mercator_forward(metadata->north, metadata->west);
+    const OpenRidePointD southeast =
+        openride_mercator_forward(metadata->south, metadata->east);
+
+    int min_x = (int)floor(northwest.x * count) - 1;
+    int max_x = (int)floor(southeast.x * count) + 1;
+    int min_y = (int)floor(northwest.y * count) - 1;
+    int max_y = (int)floor(southeast.y * count) + 1;
+
+    if (min_x < 0) min_x = 0;
+    if (max_x >= count) max_x = count - 1;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= count) max_y = count - 1;
+
+    if (*first_x < min_x) *first_x = min_x;
+    if (*last_x > max_x) *last_x = max_x;
+    if (*first_y < min_y) *first_y = min_y;
+    if (*last_y > max_y) *last_y = max_y;
 }
 
 static bool ensure_geometry_scratch(OpenRideORMapRenderer *renderer,
@@ -1360,8 +1399,7 @@ static void draw_area_level(OpenRideORMapRenderer *renderer,
     OpenRideMapColor water_color =
         area_color(renderer, OPENRIDE_ORMAP_AREA_WATER);
 
-    const double water_fade =
-        ormap_detail_handoff_fade(camera->zoom) * level_fade;
+    const double water_fade = level_fade;
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
     const bool v6 = metadata && metadata->format_version >= 6;
     const double builtup_fade =
@@ -1430,7 +1468,7 @@ static void draw_areas(OpenRideORMapRenderer *renderer,
     renderer->area_debug_active = true;
 
     const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
-    if (metadata && metadata->format_version >= 3 && camera->zoom >= 10.0) {
+    if (metadata && metadata->format_version >= 3 && camera->zoom >= 10.75) {
         const bool v6 = metadata->format_version >= 6;
         if (v6) {
             /* Detail prewarm is owned by draw_masks(), the first surface
@@ -1704,8 +1742,7 @@ static void apply_road_fades(double zoom,
 {
     if (!paint) return;
     const double fade =
-        ormap_detail_handoff_fade(zoom)
-        * android_road_class_fade(zoom, road_class)
+        android_road_class_fade(zoom, road_class)
         * level_fade;
     ormap_scale_color_alpha(&paint->line, fade);
     ormap_scale_color_alpha(&paint->casing, fade);
@@ -1866,10 +1903,16 @@ static void draw_road_pass(OpenRideORMapRenderer *renderer,
     const double bearing = camera->bearing_deg * 3.14159265358979323846 / 180.0;
     const double half_w = fabs(cos(bearing)) * width * 0.5 + fabs(sin(bearing)) * height * 0.5;
     const double half_h = fabs(sin(bearing)) * width * 0.5 + fabs(cos(bearing)) * height * 0.5;
-    const int first_x = (int)floor((center_x - half_w) / tile_size);
-    const int last_x = (int)floor((center_x + half_w) / tile_size);
-    const int first_y = (int)floor((center_y - half_h) / tile_size);
-    const int last_y = (int)floor((center_y + half_h) / tile_size);
+    int first_x = (int)floor((center_x - half_w) / tile_size);
+    int last_x = (int)floor((center_x + half_w) / tile_size);
+    int first_y = (int)floor((center_y - half_h) / tile_size);
+    int last_y = (int)floor((center_y + half_h) / tile_size);
+    clip_tile_range_to_map_bounds(renderer,
+                                  zoom,
+                                  &first_x,
+                                  &last_x,
+                                  &first_y,
+                                  &last_y);
     GeometryBatch batch = {0};
 
     for (int ty = first_y; ty <= last_y; ++ty) {
@@ -2093,10 +2136,16 @@ static uint32_t prewarm_road_level(OpenRideORMapRenderer *renderer,
         + fabs(sin(bearing)) * height * 0.5;
     const double half_h = fabs(sin(bearing)) * width * 0.5
         + fabs(cos(bearing)) * height * 0.5;
-    const int first_x = (int)floor((center_x - half_w) / tile_size);
-    const int last_x = (int)floor((center_x + half_w) / tile_size);
-    const int first_y = (int)floor((center_y - half_h) / tile_size);
-    const int last_y = (int)floor((center_y + half_h) / tile_size);
+    int first_x = (int)floor((center_x - half_w) / tile_size);
+    int last_x = (int)floor((center_x + half_w) / tile_size);
+    int first_y = (int)floor((center_y - half_h) / tile_size);
+    int last_y = (int)floor((center_y + half_h) / tile_size);
+    clip_tile_range_to_map_bounds(renderer,
+                                  zoom,
+                                  &first_x,
+                                  &last_x,
+                                  &first_y,
+                                  &last_y);
 
     uint32_t loaded = 0U;
     for (int ty = first_y; ty <= last_y; ++ty) {
@@ -2306,11 +2355,12 @@ static bool boxes_overlap(LabelBox a, LabelBox b)
     return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
-static bool label_is_region_reference(const OpenRideORMapLabel *labels,
-                                      uint32_t count,
-                                      uint32_t label_index)
+static uint32_t label_collect_region_references(
+    const OpenRideORMapLabel *labels,
+    uint32_t count,
+    uint32_t references[3])
 {
-    if (!labels || label_index >= count) return false;
+    if (!labels || !references) return 0U;
 
     uint32_t selected = 0U;
     for (int pass = 0; pass < 3 && selected < 3U; ++pass) {
@@ -2324,11 +2374,20 @@ static bool label_is_region_reference(const OpenRideORMapLabel *labels,
             if (labels[i].kind != wanted_kind || labels[i].name[0] == '\0') {
                 continue;
             }
-            if (i == label_index) return true;
-            ++selected;
+            references[selected++] = i;
         }
     }
+    return selected;
+}
 
+static bool label_index_is_region_reference(
+    const uint32_t references[3],
+    uint32_t reference_count,
+    uint32_t label_index)
+{
+    for (uint32_t i = 0U; i < reference_count; ++i) {
+        if (references[i] == label_index) return true;
+    }
     return false;
 }
 
@@ -2360,9 +2419,9 @@ static double label_lod_fade(const OpenRideORMapLabel *label, double zoom)
     if (!label) return 0.0;
     switch ((OpenRideORMapLabelLOD)label->lod) {
         case OPENRIDE_ORMAP_LABEL_LOD_REGIONAL:
-            return ormap_zoom_smoothstep(zoom, 10.0, 10.55);
+            return ormap_zoom_smoothstep(zoom, 6.0, 6.55);
         case OPENRIDE_ORMAP_LABEL_LOD_OVERVIEW:
-            return ormap_zoom_smoothstep(zoom, 10.55, 11.25);
+            return ormap_zoom_smoothstep(zoom, 9.50, 10.35);
         case OPENRIDE_ORMAP_LABEL_LOD_LOCAL:
             return ormap_zoom_smoothstep(zoom, 11.85, 12.80);
         case OPENRIDE_ORMAP_LABEL_LOD_DETAIL:
@@ -2403,10 +2462,15 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
                         int width,
                         int height)
 {
+    const uint64_t labels_started_ns = SDL_GetTicksNS();
+
     uint32_t count = 0U;
-    const OpenRideORMapLabel *labels = openride_ormap_labels(renderer->map, &count);
+    const OpenRideORMapLabel *labels =
+        openride_ormap_labels(renderer->map, &count);
     if (!labels || count == 0U) return;
-    const OpenRideORMapMetadata *metadata = openride_ormap_metadata(renderer->map);
+
+    const OpenRideORMapMetadata *metadata =
+        openride_ormap_metadata(renderer->map);
 
     const OpenRidePointD center =
         openride_mercator_forward(camera->center_lat, camera->center_lon);
@@ -2419,40 +2483,121 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
         renderer->label_world_positions
         && renderer->label_world_position_count == count;
 
+    /*
+     * The ORMap label array is globally rank-sorted. Keep a deliberately
+     * sparse hierarchy at regional/local zooms; this is both faster and more
+     * readable on a motorcycle screen.
+     */
+    uint32_t max_boxes = ORMAP_LABEL_BOX_MAX;
+    if (camera->zoom < 8.0) {
+        max_boxes = 6U;
+    } else if (camera->zoom < 10.0) {
+        max_boxes = 8U;
+    } else if (camera->zoom < 12.5) {
+        max_boxes = 12U;
+    } else if (camera->zoom < 14.0) {
+        max_boxes = 20U;
+    } else if (camera->zoom < 16.0) {
+        max_boxes = 32U;
+    } else {
+        max_boxes = 48U;
+    }
+    if (max_boxes > ORMAP_LABEL_BOX_MAX) {
+        max_boxes = ORMAP_LABEL_BOX_MAX;
+    }
+
+    /*
+     * Resolve the at-most-three persistent regional references once.
+     * Membership checks inside the main loop are then constant-time instead
+     * of rescanning the full label array for every candidate.
+     */
+    uint32_t region_references[3] = {0U, 0U, 0U};
+    const uint32_t region_reference_count =
+        label_collect_region_references(
+            labels,
+            count,
+            region_references);
+
     LabelBox boxes[ORMAP_LABEL_BOX_MAX];
     uint32_t box_count = 0U;
-    const OpenRideMapPalette palette = openride_map_palette(renderer->style);
+    const OpenRideMapPalette palette =
+        openride_map_palette(renderer->style);
+
+    uint32_t semantic_candidates = 0U;
+    uint32_t faded_candidates = 0U;
+    uint32_t projected_candidates = 0U;
+    uint32_t onscreen_candidates = 0U;
+    uint32_t collision_rejections = 0U;
 
     SDL_BlendMode previous_blend_mode = SDL_BLENDMODE_NONE;
     const bool have_previous_blend_mode =
-        SDL_GetRenderDrawBlendMode(renderer->renderer, &previous_blend_mode);
-    SDL_SetRenderDrawBlendMode(renderer->renderer, SDL_BLENDMODE_BLEND);
+        SDL_GetRenderDrawBlendMode(
+            renderer->renderer,
+            &previous_blend_mode);
+    SDL_SetRenderDrawBlendMode(
+        renderer->renderer,
+        SDL_BLENDMODE_BLEND);
 
-    /*
-     * Some labels (notably city/town) have a semantic visibility threshold
-     * below the Android detail-renderer handoff. Without a global handoff
-     * fade, those labels arrive already at full opacity the first frame the
-     * detailed renderer becomes active.
-     */
-    const double detail_label_fade =
-        ormap_detail_handoff_fade(camera->zoom);
-
-    for (uint32_t i = 0U; i < count && box_count < ORMAP_LABEL_BOX_MAX; ++i) {
+    for (uint32_t i = 0U;
+         i < count && box_count < max_boxes;
+         ++i) {
         const OpenRideORMapLabel *label = &labels[i];
+        if (label->name[0] == '\0') continue;
+
         const char *kind = label_kind_name(label->kind);
-        if (!openride_map_place_label_visible(kind, 0, camera->zoom)) continue;
+        const bool persistent_region_reference =
+            label_index_is_region_reference(
+                region_references,
+                region_reference_count,
+                i);
+
+        if (!persistent_region_reference
+            && !openride_map_place_label_visible(
+                kind,
+                0,
+                camera->zoom)) {
+            continue;
+        }
+        ++semantic_candidates;
+
+        double label_fade = 0.0;
+        if (metadata && metadata->format_version >= 6) {
+            label_fade = label_lod_fade(label, camera->zoom);
+        } else {
+            label_fade =
+                label_fade_factor(kind, camera->zoom);
+        }
+
+        if (persistent_region_reference) {
+            const double regional_reference_fade =
+                ormap_zoom_smoothstep(
+                    camera->zoom,
+                    6.0,
+                    6.55);
+            if (regional_reference_fade > label_fade) {
+                label_fade = regional_reference_fade;
+            }
+        }
+
+        if (label_fade <= 0.001) continue;
+        ++faded_candidates;
 
         const OpenRidePointD world = cached_positions
             ? renderer->label_world_positions[i]
-            : openride_mercator_forward(label->lat_e7 / 10000000.0,
-                                        label->lon_e7 / 10000000.0);
-        const OpenRidePointD p = label_world_to_screen(world,
-                                                       center,
-                                                       world_size,
-                                                       bearing_cos,
-                                                       bearing_sin,
-                                                       width,
-                                                       height);
+            : openride_mercator_forward(
+                label->lat_e7 / 10000000.0,
+                label->lon_e7 / 10000000.0);
+        ++projected_candidates;
+
+        const OpenRidePointD p =
+            label_world_to_screen(
+                world,
+                center,
+                world_size,
+                bearing_cos,
+                bearing_sin,
+                width,
+                height);
 
         if (p.x < -100.0
             || p.x > width + 100.0
@@ -2460,9 +2605,11 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
             || p.y > height + 40.0) {
             continue;
         }
+        ++onscreen_candidates;
 
-        const float text_w = (float)strlen(label->name) * 8.0f;
-        LabelBox box = {
+        const float text_w =
+            (float)strlen(label->name) * 8.0f;
+        const LabelBox box = {
             .left = (float)p.x - text_w * 0.5f - 4.0f,
             .top = (float)p.y - 7.0f,
             .right = (float)p.x + text_w * 0.5f + 4.0f,
@@ -2476,16 +2623,10 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
                 break;
             }
         }
-        if (collision) continue;
-
-        const bool persistent_region_reference =
-            label_is_region_reference(labels, count, i);
-        const double label_fade = metadata && metadata->format_version >= 6
-            ? detail_label_fade * label_lod_fade(label, camera->zoom)
-            : (persistent_region_reference
-                ? detail_label_fade
-                : detail_label_fade * label_fade_factor(kind, camera->zoom));
-        if (label_fade <= 0.0) continue;
+        if (collision) {
+            ++collision_rejections;
+            continue;
+        }
 
         OpenRideMapColor label_halo = palette.label_halo;
         OpenRideMapColor label_color = palette.label;
@@ -2493,16 +2634,20 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
         ormap_scale_color_alpha(&label_color, label_fade);
 
         boxes[box_count++] = box;
+
         set_color(renderer->renderer, label_halo);
-        SDL_RenderDebugText(renderer->renderer,
-                            (float)p.x - text_w * 0.5f + 1.0f,
-                            (float)p.y + 1.0f,
-                            label->name);
+        SDL_RenderDebugText(
+            renderer->renderer,
+            (float)p.x - text_w * 0.5f + 1.0f,
+            (float)p.y + 1.0f,
+            label->name);
+
         set_color(renderer->renderer, label_color);
-        SDL_RenderDebugText(renderer->renderer,
-                            (float)p.x - text_w * 0.5f,
-                            (float)p.y,
-                            label->name);
+        SDL_RenderDebugText(
+            renderer->renderer,
+            (float)p.x - text_w * 0.5f,
+            (float)p.y,
+            label->name);
     }
 
     SDL_SetRenderDrawBlendMode(
@@ -2510,6 +2655,26 @@ static void draw_labels(OpenRideORMapRenderer *renderer,
         have_previous_blend_mode
             ? previous_blend_mode
             : SDL_BLENDMODE_NONE);
+
+#ifdef __ANDROID__
+    if (renderer->frame_counter <= 10U) {
+        SDL_Log(
+            "AUDIT_LABEL_STATS frame=%llu zoom=%.3f total=%u semantic=%u faded=%u projected=%u onscreen=%u collisions=%u drawn=%u max=%u references=%u ms=%.3f",
+            (unsigned long long)renderer->frame_counter,
+            camera->zoom,
+            count,
+            semantic_candidates,
+            faded_candidates,
+            projected_candidates,
+            onscreen_candidates,
+            collision_rejections,
+            box_count,
+            max_boxes,
+            region_reference_count,
+            (double)(SDL_GetTicksNS() - labels_started_ns)
+                / 1000000.0);
+    }
+#endif
 }
 
 bool openride_ormap_renderer_init(OpenRideORMapRenderer *renderer,
@@ -2602,6 +2767,14 @@ void openride_ormap_renderer_get_road_debug_stats(
     } else if (renderer) {
         *stats = renderer->road_debug;
     }
+}
+
+bool openride_ormap_renderer_needs_followup_frame(
+    const OpenRideORMapRenderer *renderer)
+{
+    if (!renderer) return false;
+    return renderer->road_debug.deferred_loads > 0U
+        || renderer->area_debug.deferred_loads > 0U;
 }
 
 void openride_ormap_renderer_get_area_debug_stats(

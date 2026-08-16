@@ -1733,6 +1733,12 @@ static bool detail_region_maybe_visible(const OpenRideMapWorldRegion *region,
     return !(all_left || all_right || all_above || all_below);
 }
 
+/*
+ * Multi-region ORMap compositor for installed regions.
+ *
+ * The historical name is kept to avoid a broad API rename in this migration,
+ * but this path now owns the full z6-z18 installed-region cartography.
+ */
 void openride_map_world_draw_detail(OpenRideMapWorld *world,
                                     const OpenRideMapCamera *camera,
                                     OpenRideMapStyle style,
@@ -1741,7 +1747,7 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
 {
     if (!world || !world->renderer || !camera
         || viewport_width <= 0 || viewport_height <= 0
-        || camera->zoom < OPENRIDE_MAP_WORLD_DETAIL_ZOOM) {
+        || camera->zoom < OPENRIDE_MAP_WORLD_MIN_ZOOM) {
         return;
     }
 
@@ -1824,6 +1830,21 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
     }
 }
 
+
+bool openride_map_world_needs_followup_frame(
+    const OpenRideMapWorld *world)
+{
+    if (!world) return false;
+    for (size_t i = 0U; i < world->region_count; ++i) {
+        const OpenRideMapWorldRegion *region = &world->regions[i];
+        if (!region->detail_visible || !region->detail_renderer) continue;
+        if (openride_ormap_renderer_needs_followup_frame(
+                region->detail_renderer)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 size_t openride_map_world_region_count(const OpenRideMapWorld *world)
 {

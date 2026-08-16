@@ -1,4 +1,5 @@
 #include "map/map_zoom_test_logger.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +22,7 @@ static bool write_results(const OpenRideMapZoomTest *test)
     FILE *file=fopen(test->output_path,"wb");if(!file){free(frame_times);return false;}
     const double mean=frame_sum_ms/(double)test->sample_count;const double fps=frame_sum_ms>0.0?1000.0*(double)test->sample_count/frame_sum_ms:0.0;const OpenRideMapZoomTestSample*worst=&test->samples[max_frame_index];
     fprintf(file,"# OpenRide map zoom benchmark\n# format_version=3\n");
-    fprintf(file,"# latitude=%.6f\n# longitude=%.6f\n# zoom_min=%.3f\n# zoom_max=%.3f\n# zoom_speed=%.3f\n",OPENRIDE_MAP_ZOOM_TEST_LAT,OPENRIDE_MAP_ZOOM_TEST_LON,OPENRIDE_MAP_ZOOM_TEST_MIN,OPENRIDE_MAP_ZOOM_TEST_MAX,OPENRIDE_MAP_ZOOM_TEST_SPEED);
+    fprintf(file,"# latitude=%.6f\n# longitude=%.6f\n# zoom_min=%.3f\n# zoom_max=%.3f\n# zoom_speed=%.3f\n",test->center_lat,test->center_lon,OPENRIDE_MAP_ZOOM_TEST_MIN,OPENRIDE_MAP_ZOOM_TEST_MAX,OPENRIDE_MAP_ZOOM_TEST_SPEED);
     fprintf(file,"# samples=%zu\n# dropped_samples=%zu\n# duration_ms=%.3f\n# fps_average=%.3f\n# frame_ms_mean=%.3f\n",test->sample_count,test->dropped_samples,frame_sum_ms,fps,mean);
     fprintf(file,"# frame_ms_p50=%.3f\n# frame_ms_p75=%.3f\n# frame_ms_p90=%.3f\n# frame_ms_p95=%.3f\n# frame_ms_p99=%.3f\n# frame_ms_max=%.3f\n",percentile_sorted(frame_times,test->sample_count,0.50),percentile_sorted(frame_times,test->sample_count,0.75),percentile_sorted(frame_times,test->sample_count,0.90),percentile_sorted(frame_times,test->sample_count,0.95),percentile_sorted(frame_times,test->sample_count,0.99),max_frame_ms);
     fprintf(file,"# worst_frame=%zu\n# worst_zoom=%.5f\n# worst_direction=%d\n",max_frame_index,worst->zoom,worst->direction);
@@ -32,8 +33,74 @@ static bool write_results(const OpenRideMapZoomTest *test)
     const bool ok=fclose(file)==0;free(frame_times);return ok;
 }
 
-bool openride_map_zoom_test_start(OpenRideMapZoomTest*t,OpenRideMapCamera*c,const OpenRidePlatformPaths*p){if(!t||!c||!p)return false;openride_map_zoom_test_cancel(t);t->samples=calloc(OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES,sizeof(*t->samples));if(!t->samples)return false;if(!openride_platform_path_join(t->output_path,sizeof(t->output_path),p->data_dir,OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME)){release_samples(t);return false;}(void)remove(t->output_path);t->active=true;t->direction=1;t->zoom=OPENRIDE_MAP_ZOOM_TEST_MIN;c->center_lat=OPENRIDE_MAP_ZOOM_TEST_LAT;c->center_lon=OPENRIDE_MAP_ZOOM_TEST_LON;c->zoom=t->zoom;c->bearing_deg=0.0;return true;}
-void openride_map_zoom_test_update(OpenRideMapZoomTest*t,OpenRideMapCamera*c,double d){if(!t||!c||!t->active||t->direction==0)return;if(d<0.0)d=0.0;t->zoom+=(double)t->direction*OPENRIDE_MAP_ZOOM_TEST_SPEED*d;if(t->direction>0&&t->zoom>=OPENRIDE_MAP_ZOOM_TEST_MAX){t->zoom=OPENRIDE_MAP_ZOOM_TEST_MAX;t->direction=-1;}else if(t->direction<0&&t->zoom<=OPENRIDE_MAP_ZOOM_TEST_MIN){t->zoom=OPENRIDE_MAP_ZOOM_TEST_MIN;t->direction=0;}c->center_lat=OPENRIDE_MAP_ZOOM_TEST_LAT;c->center_lon=OPENRIDE_MAP_ZOOM_TEST_LON;c->zoom=t->zoom;c->bearing_deg=0.0;}
-void openride_map_zoom_test_cancel(OpenRideMapZoomTest*t){if(!t)return;release_samples(t);t->active=false;t->direction=0;t->zoom=OPENRIDE_MAP_ZOOM_TEST_MIN;}
+bool openride_map_zoom_test_start(OpenRideMapZoomTest *t,
+                                  OpenRideMapCamera *c,
+                                  const OpenRidePlatformPaths *p)
+{
+    if (!t || !c || !p) return false;
+    openride_map_zoom_test_cancel(t);
+
+    t->samples = calloc(OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES,
+                        sizeof(*t->samples));
+    if (!t->samples) return false;
+
+    if (!openride_platform_path_join(t->output_path,
+                                     sizeof(t->output_path),
+                                     p->data_dir,
+                                     OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME)) {
+        release_samples(t);
+        return false;
+    }
+
+    (void)remove(t->output_path);
+    t->center_lat = isfinite(c->center_lat)
+        ? c->center_lat : OPENRIDE_MAP_ZOOM_TEST_LAT;
+    t->center_lon = isfinite(c->center_lon)
+        ? c->center_lon : OPENRIDE_MAP_ZOOM_TEST_LON;
+    t->active = true;
+    t->direction = 1;
+    t->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
+
+    c->center_lat = t->center_lat;
+    c->center_lon = t->center_lon;
+    c->zoom = t->zoom;
+    c->bearing_deg = 0.0;
+    return true;
+}
+void openride_map_zoom_test_update(OpenRideMapZoomTest *t,
+                                   OpenRideMapCamera *c,
+                                   double d)
+{
+    if (!t || !c || !t->active || t->direction == 0) return;
+    if (d < 0.0) d = 0.0;
+
+    t->zoom += (double)t->direction
+        * OPENRIDE_MAP_ZOOM_TEST_SPEED * d;
+
+    if (t->direction > 0
+        && t->zoom >= OPENRIDE_MAP_ZOOM_TEST_MAX) {
+        t->zoom = OPENRIDE_MAP_ZOOM_TEST_MAX;
+        t->direction = -1;
+    } else if (t->direction < 0
+               && t->zoom <= OPENRIDE_MAP_ZOOM_TEST_MIN) {
+        t->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
+        t->direction = 0;
+    }
+
+    c->center_lat = t->center_lat;
+    c->center_lon = t->center_lon;
+    c->zoom = t->zoom;
+    c->bearing_deg = 0.0;
+}
+void openride_map_zoom_test_cancel(OpenRideMapZoomTest *t)
+{
+    if (!t) return;
+    release_samples(t);
+    t->active = false;
+    t->direction = 0;
+    t->zoom = OPENRIDE_MAP_ZOOM_TEST_MIN;
+    t->center_lat = OPENRIDE_MAP_ZOOM_TEST_LAT;
+    t->center_lon = OPENRIDE_MAP_ZOOM_TEST_LON;
+}
 void openride_map_zoom_test_destroy(OpenRideMapZoomTest*t){openride_map_zoom_test_cancel(t);}
 bool openride_map_zoom_test_record_present(OpenRideMapZoomTest*t,uint64_t ns,const OpenRideMapZoomFrameProfile*p,const OpenRideORMapRoadDebugStats*r,const OpenRideORMapAreaDebugStats*a,char*status,size_t status_size){if(!t||!t->active)return false;if(t->last_present_ns==0U){t->first_present_ns=ns;t->last_present_ns=ns;}else{if(t->sample_count<OPENRIDE_MAP_ZOOM_TEST_MAX_SAMPLES){OpenRideMapZoomTestSample*s=&t->samples[t->sample_count++];s->elapsed_ms=(double)(ns-t->first_present_ns)/1000000.0;s->frame_ms=(double)(ns-t->last_present_ns)/1000000.0;s->zoom=t->zoom;s->direction=t->direction;if(p)s->profile=*p;if(r)s->road=*r;if(a)s->area=*a;}else ++t->dropped_samples;t->last_present_ns=ns;}if(t->direction!=0)return false;const bool written=write_results(t);if(status&&status_size>0U){if(written)snprintf(status,status_size,"test zoom termine: data/%s (%zu frames)",OPENRIDE_MAP_ZOOM_TEST_LOG_FILENAME,t->sample_count);else snprintf(status,status_size,"test zoom termine mais log impossible (%zu frames)",t->sample_count);}release_samples(t);t->active=false;return true;}
