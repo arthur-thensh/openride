@@ -68,14 +68,14 @@ static int SDLCALL planner_thread_main(void *userdata)
     return ok ? 0 : 1;
 }
 
-static SDL_Thread *start_job(OpenRidePlannerAsyncContext *context,
-                             OpenRideRidePlannerBusy kind,
-                             const OpenRideRoutingGraph *graph,
-                             bool graph_loaded,
-                             const OpenRideMapSelection *selection,
-                             OpenRideRoutingProfile profile)
+static bool prepare_job(OpenRidePlannerAsyncContext *context,
+                        OpenRideRidePlannerBusy kind,
+                        const OpenRideRoutingGraph *graph,
+                        bool graph_loaded,
+                        const OpenRideMapSelection *selection,
+                        OpenRideRoutingProfile profile)
 {
-    if (!context || !selection || kind == OPENRIDE_RIDE_PLANNER_IDLE) return NULL;
+    if (!context || !selection || kind == OPENRIDE_RIDE_PLANNER_IDLE) return false;
     openride_app_planner_async_reset(context);
     context->kind = kind;
     context->graph = graph;
@@ -84,7 +84,11 @@ static SDL_Thread *start_job(OpenRidePlannerAsyncContext *context,
     context->profile = profile;
     SDL_SetAtomicInt(&context->done, 0);
     SDL_SetAtomicInt(&context->success, 0);
+    return true;
+}
 
+static SDL_Thread *launch_job(OpenRidePlannerAsyncContext *context)
+{
     SDL_Thread *thread = SDL_CreateThread(planner_thread_main,
                                           "OpenRide-planner",
                                           context);
@@ -102,12 +106,15 @@ SDL_Thread *openride_app_planner_async_start_route(
     OpenRideRoutingProfile profile)
 {
     if (!selection || !openride_map_selection_complete(selection)) return NULL;
-    return start_job(context,
+    if (!prepare_job(context,
                      OPENRIDE_RIDE_PLANNER_CALCULATING_ROUTE,
                      graph,
                      graph_loaded,
                      selection,
-                     profile);
+                     profile)) {
+        return NULL;
+    }
+    return launch_job(context);
 }
 
 SDL_Thread *openride_app_planner_async_start_loops(
@@ -121,17 +128,18 @@ SDL_Thread *openride_app_planner_async_start_loops(
     uint32_t seed)
 {
     if (!selection || !selection->has_start) return NULL;
-    SDL_Thread *thread = start_job(context,
-                                   OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS,
-                                   graph,
-                                   graph_loaded,
-                                   selection,
-                                   profile);
-    if (!thread) return NULL;
+    if (!prepare_job(context,
+                     OPENRIDE_RIDE_PLANNER_GENERATING_LOOPS,
+                     graph,
+                     graph_loaded,
+                     selection,
+                     profile)) {
+        return NULL;
+    }
     context->loop_target_distance_m = target_distance_m;
     context->loop_direction = direction;
     context->loop_seed = seed;
-    return thread;
+    return launch_job(context);
 }
 
 bool openride_app_planner_async_route_request_matches(
