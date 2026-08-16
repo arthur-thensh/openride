@@ -61,6 +61,8 @@ typedef struct OpenRideAppEventContext {
     const char *gpx_route_export_path;
     const char *gpx_recording_export_path;
 
+    OpenRideRidePlannerMode *planner_mode;
+    OpenRideLoopProposalSet *loop_proposals;
     double *loop_target_distance_m;
     OpenRideLoopDirection *loop_direction;
     OpenRideLoopStats *loop_stats;
