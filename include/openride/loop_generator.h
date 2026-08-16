@@ -10,6 +10,7 @@
 
 #define OPENRIDE_LOOP_MAX_WAYPOINTS 3U
 #define OPENRIDE_LOOP_MAX_CANDIDATES 16U
+#define OPENRIDE_LOOP_MAX_PROPOSALS 3U
 
 typedef enum OpenRideLoopDirection {
     OPENRIDE_LOOP_DIRECTION_ANY = 0,
@@ -66,14 +67,50 @@ typedef struct OpenRideLoopResult {
     OpenRideLoopStats stats;
 } OpenRideLoopResult;
 
+/*
+ * A retained, fully-routable loop proposal. Route ownership belongs to the
+ * proposal set until the caller explicitly moves a route out of it.
+ */
+typedef struct OpenRideLoopProposal {
+    OpenRideRoute route;
+    OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS];
+    uint32_t waypoint_count;
+    uint32_t source_candidate_index;
+    OpenRideLoopCandidateStats stats;
+} OpenRideLoopProposal;
+
+typedef struct OpenRideLoopProposalSet {
+    OpenRideLoopProposal items[OPENRIDE_LOOP_MAX_PROPOSALS];
+    uint32_t count;
+    OpenRideLoopStats generation_stats;
+} OpenRideLoopProposalSet;
+
 OpenRideLoopRequest openride_loop_request_default(void);
 void openride_loop_result_destroy(OpenRideLoopResult *result);
+void openride_loop_proposal_set_destroy(OpenRideLoopProposalSet *proposals);
 
 bool openride_loop_generator_generate(const OpenRideRoutingGraph *graph,
                                       const OpenRideLoopRequest *request,
                                       OpenRideLoopResult *result,
                                       char *error,
                                       size_t error_size);
+
+/* Generate and retain the best loop routes, sorted by descending score. */
+bool openride_loop_generator_generate_proposals(
+    const OpenRideRoutingGraph *graph,
+    const OpenRideLoopRequest *request,
+    OpenRideLoopProposalSet *proposals,
+    char *error,
+    size_t error_size);
+
+/* Move one proposal route to the caller and discard the remaining proposals. */
+bool openride_loop_proposal_set_take(OpenRideLoopProposalSet *proposals,
+                                     uint32_t index,
+                                     OpenRideRoute *route,
+                                     OpenRideRoutePoint waypoints[OPENRIDE_LOOP_MAX_WAYPOINTS],
+                                     uint32_t *waypoint_count,
+                                     OpenRideLoopCandidateStats *stats,
+                                     uint32_t *source_candidate_index);
 
 const char *openride_loop_direction_name(OpenRideLoopDirection direction);
 OpenRideLoopDirection openride_loop_direction_next(OpenRideLoopDirection direction);
