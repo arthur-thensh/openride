@@ -41,7 +41,6 @@ with target.open("w", encoding="utf-8") as out:
         out.write(", ".join(f"0x{value:02x}" for value in chunk))
         out.write(",\n")
     out.write("};\n")
-    out.write(f"static const unsigned int openride_ui_font_data_size = {len(data)}U;\n")
 
 print(f"Generated {target} ({len(data)} font bytes)")
 PY
