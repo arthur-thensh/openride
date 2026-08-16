@@ -2,6 +2,7 @@
 #define OPENRIDE_APP_ROUTE_RUNTIME_H
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_atomic.h>
 
 #include "openride/gps_simulator.h"
 #include "openride/gpx.h"
