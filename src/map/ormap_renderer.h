@@ -83,6 +83,8 @@ typedef struct OpenRideORMapAreaCacheEntry {
 typedef struct OpenRideORMapRoadDebugStats {
     double roads_ms;
     double load_ms;
+    double geometry_ms;
+    double compositor_ms;
     uint32_t cache_hits;
     uint32_t cache_misses;
     uint32_t prewarm_loads;
@@ -98,6 +100,8 @@ typedef struct OpenRideORMapAreaDebugStats {
     double areas_ms;
     double load_ms;
     double mask_compile_ms;
+    double surface_plan_alpha;
+    double surface_draw_alpha;
     uint32_t tiles_visited;
     uint32_t triangles_drawn;
     uint32_t batches;
@@ -111,6 +115,17 @@ typedef struct OpenRideORMapAreaDebugStats {
     uint32_t mask_cache_hits;
     uint32_t mask_cache_misses;
     uint32_t mask_compile_failures;
+    uint32_t surface_plan_tiles;
+    uint32_t surface_plan_requests;
+    uint32_t surface_plan_pending;
+    uint32_t surface_plan_blending;
+    uint32_t surface_cache_entries;
+    uint32_t surface_texture_entries;
+    uint32_t surface_draw_tiles;
+    uint32_t surface_missing_data;
+    uint32_t surface_missing_textures;
+    uint32_t surface_draw_failures;
+    uint32_t surface_empty_plans;
 } OpenRideORMapAreaDebugStats;
 
 typedef struct OpenRideORMapRenderer {

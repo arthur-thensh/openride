@@ -558,18 +558,11 @@ static V11SurfaceCacheEntry *surface_find(
 {
     if (!renderer) return NULL;
 
-    const size_t base =
-        cache_set_base(
-            V11_SURFACE_CACHE_CAPACITY,
-            zoom,
-            x,
-            y);
-
     for (size_t way = 0U;
-         way < V11_CACHE_ASSOCIATIVITY;
+         way < V11_SURFACE_CACHE_CAPACITY;
          ++way) {
         V11SurfaceCacheEntry *entry =
-            &renderer->surfaces[base + way];
+            &renderer->surfaces[way];
 
         if (entry->occupied
             && entry->zoom == zoom
@@ -585,29 +578,28 @@ static V11SurfaceCacheEntry *surface_find(
 }
 
 static V11SurfaceCacheEntry *surface_victim(
-    OpenRideORMapPyramidRenderer *renderer,
-    int zoom,
-    int x,
-    int y)
+    OpenRideORMapPyramidRenderer *renderer)
 {
     if (!renderer) return NULL;
-
-    const size_t base =
-        cache_set_base(
-            V11_SURFACE_CACHE_CAPACITY,
-            zoom,
-            x,
-            y);
 
     V11SurfaceCacheEntry *victim = NULL;
 
     for (size_t way = 0U;
-         way < V11_CACHE_ASSOCIATIVITY;
+         way < V11_SURFACE_CACHE_CAPACITY;
          ++way) {
         V11SurfaceCacheEntry *entry =
-            &renderer->surfaces[base + way];
+            &renderer->surfaces[way];
 
         if (!entry->occupied) return entry;
+
+        /*
+         * An entry touched in this frame may already be part of the surface
+         * plan. Evicting it while a deeper child is requested would leave a
+         * stale draw key in the plan and produce a one-frame hole.
+         */
+        if (entry->last_used == renderer->frame_counter) {
+            continue;
+        }
 
         if (!victim
             || entry->last_used < victim->last_used) {
@@ -658,18 +650,11 @@ static V11SurfaceTextureEntry *surface_texture_find(
         return NULL;
     }
 
-    const size_t base =
-        cache_set_base(
-            V11_SURFACE_TEXTURE_CACHE_CAPACITY,
-            zoom,
-            x,
-            y);
-
     for (size_t way = 0U;
-         way < V11_CACHE_ASSOCIATIVITY;
+         way < V11_SURFACE_TEXTURE_CACHE_CAPACITY;
          ++way) {
         V11SurfaceTextureEntry *entry =
-            &renderer->surface_textures[base + way];
+            &renderer->surface_textures[way];
 
         if (entry->occupied
             && entry->zoom == zoom
@@ -685,30 +670,79 @@ static V11SurfaceTextureEntry *surface_texture_find(
     return NULL;
 }
 
+static void surface_pin_previous_plan(
+    OpenRideORMapPyramidRenderer *renderer)
+{
+    if (!renderer) return;
+
+    /*
+     * Keep the last drawable fallback alive until the replacement plan is
+     * complete. Tiles that left the buffered viewport remain immediately
+     * evictable, so a pan can still make forward progress without growing the
+     * caches.
+     */
+    for (uint32_t i = 0U;
+         i < renderer->surface_plan.count;
+         ++i) {
+        OpenRideORMapPyramidTileKey key =
+            renderer->surface_plan.tiles[i].key;
+
+        /*
+         * The planner must traverse every ancestor again before it can reach
+         * this drawable leaf. Keep that complete ownership chain alive: if an
+         * ancestor were evicted, a budget-deferred reload would omit its whole
+         * already-cached descendant subtree from the next frame.
+         */
+        for (;;) {
+            if (tile_is_visible(
+                    renderer,
+                    key.zoom,
+                    key.x,
+                    key.y)) {
+                (void)surface_find(
+                    renderer,
+                    key.zoom,
+                    key.x,
+                    key.y);
+
+                if (renderer->surface_texture_supported) {
+                    (void)surface_texture_find(
+                        renderer,
+                        key.zoom,
+                        key.x,
+                        key.y);
+                }
+            }
+
+            if (key.zoom <= OPENRIDE_ORMAP_PYRAMID_MIN_ZOOM) {
+                break;
+            }
+
+            --key.zoom;
+            key.x /= 2;
+            key.y /= 2;
+        }
+    }
+}
+
 static V11SurfaceTextureEntry *surface_texture_victim(
-    OpenRideORMapPyramidRenderer *renderer,
-    int zoom,
-    int x,
-    int y)
+    OpenRideORMapPyramidRenderer *renderer)
 {
     if (!renderer) return NULL;
-
-    const size_t base =
-        cache_set_base(
-            V11_SURFACE_TEXTURE_CACHE_CAPACITY,
-            zoom,
-            x,
-            y);
 
     V11SurfaceTextureEntry *victim = NULL;
 
     for (size_t way = 0U;
-         way < V11_CACHE_ASSOCIATIVITY;
+         way < V11_SURFACE_TEXTURE_CACHE_CAPACITY;
          ++way) {
         V11SurfaceTextureEntry *entry =
-            &renderer->surface_textures[base + way];
+            &renderer->surface_textures[way];
 
         if (!entry->occupied) return entry;
+
+        if (entry->last_used == renderer->frame_counter) {
+            continue;
+        }
 
         if (!victim
             || entry->last_used < victim->last_used) {
@@ -721,6 +755,34 @@ static V11SurfaceTextureEntry *surface_texture_victim(
     }
 
     return victim;
+}
+
+static uint32_t surface_cache_occupancy(
+    const OpenRideORMapPyramidRenderer *renderer)
+{
+    if (!renderer) return 0U;
+
+    uint32_t count = 0U;
+    for (uint32_t i = 0U;
+         i < V11_SURFACE_CACHE_CAPACITY;
+         ++i) {
+        if (renderer->surfaces[i].occupied) ++count;
+    }
+    return count;
+}
+
+static uint32_t surface_texture_cache_occupancy(
+    const OpenRideORMapPyramidRenderer *renderer)
+{
+    if (!renderer) return 0U;
+
+    uint32_t count = 0U;
+    for (uint32_t i = 0U;
+         i < V11_SURFACE_TEXTURE_CACHE_CAPACITY;
+         ++i) {
+        if (renderer->surface_textures[i].occupied) ++count;
+    }
+    return count;
 }
 
 static void surface_raster_colors(
@@ -937,19 +999,23 @@ static bool surface_texture_compile(
         return false;
     }
 
+    V11SurfaceTextureEntry *entry =
+        surface_texture_victim(renderer);
+
+    if (!entry) {
+        /*
+         * All four ways are already needed by this frame. Treat saturation as
+         * a normal deferral, not as a GPU capability failure.
+         */
+        renderer->surface_texture_compile_budget = 0U;
+        renderer->needs_followup = true;
+        return false;
+    }
+
     --renderer->surface_texture_compile_budget;
 
     const uint64_t started_ns =
         SDL_GetTicksNS();
-
-    V11SurfaceTextureEntry *entry =
-        surface_texture_victim(
-            renderer,
-            surface->zoom,
-            surface->x,
-            surface->y);
-
-    if (!entry) return false;
 
     SDL_Texture *base =
         surface_create_target(
@@ -1888,6 +1954,7 @@ static bool surface_composite_pass(
                 draw->key.y);
 
         if (!entry) {
+            ++renderer->debug.surface_missing_textures;
             ok = false;
             break;
         }
@@ -1907,6 +1974,12 @@ static bool surface_composite_pass(
                 viewport_height)) {
             ok = false;
             break;
+        }
+
+        if (pass == V11_SURFACE_TEXTURE_PASS_BASE) {
+            ++renderer->debug.surface_draw_tiles;
+            renderer->debug.surface_draw_alpha +=
+                draw->alpha * global_factor;
         }
     }
 
@@ -2011,15 +2084,6 @@ static OpenRideORMapPyramidTileState surface_state(
         return OPENRIDE_ORMAP_PYRAMID_TILE_EMPTY;
     }
 
-    if (renderer->surface_texture_supported
-        && surface_texture_find(
-            renderer,
-            key.zoom,
-            key.x,
-            key.y)) {
-        return OPENRIDE_ORMAP_PYRAMID_TILE_READY;
-    }
-
     V11SurfaceCacheEntry *entry =
         surface_find(
             renderer,
@@ -2040,10 +2104,22 @@ static OpenRideORMapPyramidTileState surface_state(
         return OPENRIDE_ORMAP_PYRAMID_TILE_EMPTY;
     }
 
+    if (entry->state
+            == OPENRIDE_ORMAP_PYRAMID_TILE_READY
+        && surface_texture_find(
+            renderer,
+            key.zoom,
+            key.x,
+            key.y)) {
+        return OPENRIDE_ORMAP_PYRAMID_TILE_READY;
+    }
+
     /*
-     * Data is available but its GPU tile is still being rasterized. REQUESTED
-     * keeps the nearest ready parent fully alive; availability ramp timing
-     * only starts once all four child textures genuinely exist.
+     * Data is available but its GPU tile is still being rasterized. Conversely,
+     * a surviving texture without its vector data was reported UNKNOWN above
+     * so the backend blend cannot expose a vector-side hole. REQUESTED keeps
+     * the nearest ready parent fully alive; availability ramp timing only
+     * starts once all four child textures genuinely exist.
      */
     if (entry->state
         == OPENRIDE_ORMAP_PYRAMID_TILE_READY) {
@@ -2072,7 +2148,7 @@ static void surface_request(
     }
 
     V11SurfaceCacheEntry *entry =
-        surface_victim(renderer, key.zoom, key.x, key.y);
+        surface_victim(renderer);
     if (!entry) {
         ++renderer->debug.deferred_loads;
         renderer->needs_followup = true;
@@ -2238,6 +2314,7 @@ static void draw_surface_plan(
         if (!entry
             || entry->state
                 != OPENRIDE_ORMAP_PYRAMID_TILE_READY) {
+            ++renderer->debug.surface_missing_data;
             continue;
         }
 
@@ -2888,7 +2965,7 @@ openride_ormap_pyramid_renderer_create(
     }
 
     SDL_Log(
-        "AUDIT_ORMAP_V11_ACTIVE path=%s surfaces=z9..z14 buildings=%s hotpath=hashed-affine surface_gpu=%s",
+        "AUDIT_ORMAP_V11_ACTIVE path=%s surfaces=z9..z14 buildings=%s hotpath=bounded-lru surface_gpu=%s",
         ormap11_path,
         renderer->building_available ? "z16" : "off",
         renderer->surface_texture_supported
@@ -2989,6 +3066,8 @@ void openride_ormap_pyramid_renderer_draw_surfaces(
         viewport_width,
         viewport_height);
 
+    surface_pin_previous_plan(renderer);
+
     if (renderer->surface_texture_supported) {
         surface_prepare_visible_textures(
             renderer,
@@ -3025,6 +3104,31 @@ void openride_ormap_pyramid_renderer_draw_surfaces(
         if (!planned) {
             renderer->needs_followup = true;
         } else {
+            renderer->debug.surface_plan_tiles +=
+                renderer->surface_plan.count;
+            renderer->debug.surface_plan_requests +=
+                renderer->surface_plan.requests_issued;
+            renderer->debug.surface_plan_pending +=
+                renderer->surface_plan.pending_tiles;
+            renderer->debug.surface_plan_blending +=
+                renderer->surface_plan.blending_families;
+            renderer->debug.surface_cache_entries +=
+                surface_cache_occupancy(renderer);
+            renderer->debug.surface_texture_entries +=
+                surface_texture_cache_occupancy(renderer);
+
+            for (uint32_t i = 0U;
+                 i < renderer->surface_plan.count;
+                 ++i) {
+                renderer->debug.surface_plan_alpha +=
+                    renderer->surface_plan.tiles[i].alpha;
+            }
+
+            if (root_count > 0U
+                && renderer->surface_plan.count == 0U) {
+                ++renderer->debug.surface_empty_plans;
+            }
+
             if (renderer->surface_plan.needs_followup_frame
                 || renderer->surface_plan.pending_tiles > 0U) {
                 renderer->needs_followup = true;
@@ -3085,6 +3189,7 @@ void openride_ormap_pyramid_renderer_draw_surfaces(
                                 viewport_width,
                                 viewport_height,
                                 alpha)) {
+                            ++renderer->debug.surface_draw_failures;
                             surface_disable_texture_path(
                                 renderer);
                             renderer->needs_followup = true;
@@ -3104,6 +3209,7 @@ void openride_ormap_pyramid_renderer_draw_surfaces(
                                 viewport_width,
                                 viewport_height,
                                 alpha)) {
+                            ++renderer->debug.surface_draw_failures;
                             surface_disable_texture_path(
                                 renderer);
                             renderer->needs_followup = true;

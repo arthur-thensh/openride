@@ -364,29 +364,35 @@ static double family_availability(
         / (double)pyramid->config.ready_ramp_ms);
 }
 
-static void request_if_unknown(
+static OpenRideORMapPyramidTileState request_if_unknown(
     OpenRideORMapPyramidTileKey key,
     OpenRideORMapPyramidStateFn state_fn,
     OpenRideORMapPyramidRequestFn request_fn,
     void *userdata,
     OpenRideORMapPyramidPlan *plan)
 {
-    if (!state_fn || !plan) return;
+    if (!state_fn || !plan) {
+        return OPENRIDE_ORMAP_PYRAMID_TILE_UNKNOWN;
+    }
 
-    const OpenRideORMapPyramidTileState state =
+    OpenRideORMapPyramidTileState state =
         state_fn(userdata, key);
 
     if (state == OPENRIDE_ORMAP_PYRAMID_TILE_UNKNOWN) {
         if (request_fn) {
             request_fn(userdata, key);
             ++plan->requests_issued;
+            state = state_fn(userdata, key);
         }
-        ++plan->pending_tiles;
-        plan->needs_followup_frame = true;
-    } else if (state == OPENRIDE_ORMAP_PYRAMID_TILE_REQUESTED) {
+    }
+
+    if (!state_resolved(state)
+        && state != OPENRIDE_ORMAP_PYRAMID_TILE_FAILED) {
         ++plan->pending_tiles;
         plan->needs_followup_frame = true;
     }
+
+    return state;
 }
 
 static bool children_states(
@@ -420,17 +426,19 @@ static bool plan_node(
 {
     if (!pyramid || !state_fn || !plan) return false;
 
-    const OpenRideORMapPyramidTileState own_state =
+    OpenRideORMapPyramidTileState own_state =
         state_fn(userdata, key);
 
     if (!state_resolved(own_state)) {
-        request_if_unknown(
+        own_state = request_if_unknown(
             key,
             state_fn,
             request_fn,
             userdata,
             plan);
-        return true;
+        if (!state_resolved(own_state)) {
+            return true;
+        }
     }
 
     if (key.zoom >= pyramid->config.max_zoom) {

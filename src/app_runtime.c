@@ -1650,6 +1650,7 @@ int openride_app_run(int argc, char **argv)
             char road_line[160];
             char road_work_line[96];
             char area_line[160];
+            char surface_line[192];
             OpenRideORMapRoadDebugStats road_debug;
             OpenRideORMapAreaDebugStats area_debug;
             memset(&road_debug, 0, sizeof(road_debug));
@@ -1698,6 +1699,21 @@ int openride_app_run(int argc, char **argv)
                      area_debug.prewarm_loads,
                      area_debug.draw_loads,
                      area_debug.deferred_loads);
+            snprintf(surface_line,
+                     sizeof(surface_line),
+                     "Q%u R%u P%u F%u C%u/%u O%u A%.1f/%.1f M%u/%u E%u",
+                     area_debug.surface_plan_tiles,
+                     area_debug.surface_plan_requests,
+                     area_debug.surface_plan_pending,
+                     area_debug.surface_plan_blending,
+                     area_debug.surface_cache_entries,
+                     area_debug.surface_texture_entries,
+                     area_debug.surface_draw_tiles,
+                     area_debug.surface_plan_alpha,
+                     area_debug.surface_draw_alpha,
+                     area_debug.surface_missing_data,
+                     area_debug.surface_missing_textures,
+                     area_debug.surface_empty_plans);
             float badge_width = 330.0f * ui_scale;
             const float max_badge_width = (float)safe.w - 2.0f * margin;
             if (badge_width > max_badge_width) badge_width = max_badge_width;
@@ -1705,7 +1721,7 @@ int openride_app_run(int argc, char **argv)
                 (float)safe.x + margin,
                 (float)safe.y + margin,
                 badge_width,
-                98.0f * ui_scale
+                116.0f * ui_scale
             };
             SDL_SetRenderDrawColor(renderer, 12, 16, 20, 224);
             SDL_RenderFillRect(renderer, &badge);
@@ -1737,6 +1753,11 @@ int openride_app_run(int argc, char **argv)
                              badge.y + 79.0f * ui_scale,
                              text_scale,
                              area_line);
+            openride_app_render_scaled_text(renderer,
+                             badge.x + 8.0f * ui_scale,
+                             badge.y + 97.0f * ui_scale,
+                             text_scale,
+                             surface_line);
         }
 
         const uint64_t map_zoom_ui_finished_ns =
@@ -1767,10 +1788,31 @@ int openride_app_run(int argc, char **argv)
         } else {
 #ifdef __ANDROID__
             if (map_followup_required && render_followup_budget == 0U) {
-                SDL_Log(
-                    "AUDIT_DIRTY_FOLLOWUP_CAPPED budget=%u zoom=%.3f",
-                    OPENRIDE_RENDER_FOLLOWUP_BUDGET,
-                    camera.zoom);
+                if (world_available && map_world) {
+                    OpenRideMapWorldFollowupSources sources = {0};
+                    openride_map_world_get_followup_sources(
+                        map_world,
+                        &sources);
+                    SDL_Log(
+                        "AUDIT_DIRTY_FOLLOWUP_CAPPED budget=%u zoom=%.3f detail_v8=%u detail_deferred=%u pyramid_v11=%u pyramid_draw=%u pyramid_deferred=%u overlay_v11=%u overlay_draw=%u overlay_deferred=%u overlay_hits=%u overlay_misses=%u",
+                        OPENRIDE_RENDER_FOLLOWUP_BUDGET,
+                        camera.zoom,
+                        sources.detail_v8 ? 1U : 0U,
+                        sources.detail_v8_deferred_loads,
+                        sources.pyramid_v11 ? 1U : 0U,
+                        sources.pyramid_v11_draw_loads,
+                        sources.pyramid_v11_deferred_loads,
+                        sources.overlay_v11 ? 1U : 0U,
+                        sources.overlay_v11_draw_loads,
+                        sources.overlay_v11_deferred_loads,
+                        sources.overlay_v11_cache_hits,
+                        sources.overlay_v11_cache_misses);
+                } else {
+                    SDL_Log(
+                        "AUDIT_DIRTY_FOLLOWUP_CAPPED budget=%u zoom=%.3f standalone_v8=1",
+                        OPENRIDE_RENDER_FOLLOWUP_BUDGET,
+                        camera.zoom);
+                }
             }
 #endif
             render_dirty = false;
@@ -1840,10 +1882,12 @@ int openride_app_run(int argc, char **argv)
                 audit_frame_world_debug.ormap_stats_valid ? 1 : 0);
 
             SDL_Log(
-                "AUDIT_FRAME_PROFILE_ROADS idx=%u roads_ms=%.3f load_ms=%.3f hits=%u misses=%u prewarm=%u draw=%u deferred=%u tiles=%u segments=%u batches=%u prewarm_z=%d",
+                "AUDIT_FRAME_PROFILE_ROADS idx=%u roads_ms=%.3f load_ms=%.3f geometry_ms=%.3f compositor_ms=%.3f hits=%u misses=%u prewarm=%u draw=%u deferred=%u tiles=%u segments=%u batches=%u prewarm_z=%d",
                 audit_frame_profile_index,
                 audit_road_debug.roads_ms,
                 audit_road_debug.load_ms,
+                audit_road_debug.geometry_ms,
+                audit_road_debug.compositor_ms,
                 audit_road_debug.cache_hits,
                 audit_road_debug.cache_misses,
                 audit_road_debug.prewarm_loads,
@@ -1855,7 +1899,7 @@ int openride_app_run(int argc, char **argv)
                 audit_road_debug.prewarm_zoom);
 
             SDL_Log(
-                "AUDIT_FRAME_PROFILE_AREAS idx=%u areas_ms=%.3f load_ms=%.3f mask_compile_ms=%.3f tiles=%u triangles=%u batches=%u prewarm=%u draw=%u deferred=%u mask_tiles=%u mask_rects=%u mask_batches=%u mask_compile_rects=%u mask_hits=%u mask_misses=%u mask_fail=%u",
+                "AUDIT_FRAME_PROFILE_AREAS idx=%u areas_ms=%.3f load_ms=%.3f mask_compile_ms=%.3f tiles=%u triangles=%u batches=%u prewarm=%u draw=%u deferred=%u mask_tiles=%u mask_rects=%u mask_batches=%u mask_compile_rects=%u mask_hits=%u mask_misses=%u mask_fail=%u surface_plan=%u surface_requests=%u surface_pending=%u surface_blending=%u surface_cache=%u surface_textures=%u surface_draw_tiles=%u surface_plan_alpha=%.3f surface_draw_alpha=%.3f surface_missing_data=%u surface_missing_textures=%u surface_draw_failures=%u surface_empty_plans=%u",
                 audit_frame_profile_index,
                 audit_area_debug.areas_ms,
                 audit_area_debug.load_ms,
@@ -1872,7 +1916,20 @@ int openride_app_run(int argc, char **argv)
                 audit_area_debug.mask_compile_rects,
                 audit_area_debug.mask_cache_hits,
                 audit_area_debug.mask_cache_misses,
-                audit_area_debug.mask_compile_failures);
+                audit_area_debug.mask_compile_failures,
+                audit_area_debug.surface_plan_tiles,
+                audit_area_debug.surface_plan_requests,
+                audit_area_debug.surface_plan_pending,
+                audit_area_debug.surface_plan_blending,
+                audit_area_debug.surface_cache_entries,
+                audit_area_debug.surface_texture_entries,
+                audit_area_debug.surface_draw_tiles,
+                audit_area_debug.surface_plan_alpha,
+                audit_area_debug.surface_draw_alpha,
+                audit_area_debug.surface_missing_data,
+                audit_area_debug.surface_missing_textures,
+                audit_area_debug.surface_draw_failures,
+                audit_area_debug.surface_empty_plans);
 
             if (map_world) {
                 openride_map_world_debug_end_frame(map_world);

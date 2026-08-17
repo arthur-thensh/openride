@@ -98,6 +98,7 @@ add_library(openride_core STATIC
     src/map/ormap_tile_pyramid.c
     src/map/ormap_pyramid_surface.c
     src/map/ormap_pyramid_building.c
+    src/map/ormap_pyramid_overlay_data.c
     src/map/mvt.c
     src/map/map_style.c
 )
@@ -168,6 +169,7 @@ set(OPENRIDE_APP_SOURCES
     src/map/vector_map_renderer.c
     src/map/ormap_renderer.c
     src/map/ormap_pyramid_renderer.c
+    src/map/ormap_pyramid_overlay_renderer.c
     src/map/map_zoom_test_logger.c
     src/map/ormap_renderer_v4.c
     src/map/ormap_renderer_v7.c
@@ -312,6 +314,16 @@ else()
     target_compile_options(openride_ormap_pyramid_surface_inspect PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_executable(openride_ormap_pyramid_overlay_append
+    src/tools/ormap_pyramid_overlay_append_main.c
+)
+target_link_libraries(openride_ormap_pyramid_overlay_append PRIVATE openride_core)
+if(MSVC)
+    target_compile_options(openride_ormap_pyramid_overlay_append PRIVATE /W4)
+else()
+    target_compile_options(openride_ormap_pyramid_overlay_append PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(openride_france_overview_import
     src/tools/france_overview_import_main.c
 )
@@ -396,6 +408,12 @@ if(OPENRIDE_BUILD_TESTS)
     )
     target_link_libraries(test_ormap_tile_pyramid PRIVATE openride_core)
     add_test(NAME ormap_tile_pyramid COMMAND test_ormap_tile_pyramid)
+
+    add_executable(test_ormap_pyramid_overlay
+        tests/test_ormap_pyramid_overlay.c
+    )
+    target_link_libraries(test_ormap_pyramid_overlay PRIVATE openride_core)
+    add_test(NAME ormap_pyramid_overlay COMMAND test_ormap_pyramid_overlay)
 
     add_executable(test_ormap_pyramid_surface
         tests/test_ormap_pyramid_surface.c

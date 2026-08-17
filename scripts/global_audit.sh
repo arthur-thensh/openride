@@ -2,7 +2,7 @@
 #
 # OpenRide Global Audit V2.2
 # ------------------------
-# Full project audit orchestrator for macOS + a connected Android device.
+# Full project audit orchestrator for macOS + a selected Android target.
 #
 # It deliberately continues after individual failures so the final archive
 # contains as much diagnostic evidence as possible.
@@ -775,11 +775,14 @@ android_wait_first_frame() {
 }
 
 android_launch_clean() {
+    local component
+    component="$(resolve_activity)" || {
+        echo "Unable to resolve launcher activity for $PACKAGE"
+        return 1
+    }
+
     "${ADB[@]}" shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
-    "${ADB[@]}" shell monkey \
-        -p "$PACKAGE" \
-        -c android.intent.category.LAUNCHER \
-        1 >/dev/null 2>&1 || return 1
+    "${ADB[@]}" shell am start -n "$component" >/dev/null 2>&1 || return 1
 
     local pid=""
     local deadline=$((SECONDS + 8))
@@ -1047,6 +1050,30 @@ android_pan_gesture_test() {
     android_pid >/dev/null
 }
 
+android_ime_is_shown() {
+    "${ADB[@]}" shell dumpsys input_method 2>/dev/null \
+        | tr -d '\r' \
+        | grep 'mInputShown=true' >/dev/null
+}
+
+android_wait_ime_state() {
+    local expected="$1"
+    local timeout_s="${2:-5}"
+    local deadline=$((SECONDS + timeout_s))
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        local shown=0
+        android_ime_is_shown && shown=1
+        if [ "$shown" -eq "$expected" ]; then
+            return 0
+        fi
+        sleep 0.10
+    done
+
+    echo "ERROR: Android IME did not reach expected visibility state: $expected"
+    return 1
+}
+
 android_back_navigation_test() {
     [ "$ANDROID_READY" -eq 1 ] || return 1
     [ "$SCREEN_W" -gt 0 ] && [ "$SCREEN_H" -gt 0 ] || return 1
@@ -1078,12 +1105,14 @@ android_back_navigation_test() {
     android_capture "$dir/03_back_to_map.png" || return 1
 
     "${ADB[@]}" shell input tap "$search_x" "$toolbar_y" >/dev/null
-    sleep 0.65
+    android_wait_ime_state 1 5 || return 1
+    sleep 0.20
     android_capture "$dir/04_search_with_keyboard.png" || return 1
 
     # First Back is normally consumed by the Android IME.
     "${ADB[@]}" shell input keyevent KEYCODE_BACK >/dev/null
-    sleep 0.65
+    android_wait_ime_state 0 5 || return 1
+    sleep 0.20
     android_capture "$dir/05_search_keyboard_closed.png" || return 1
 
     # Second Back must now reach OpenRide and close Search itself.
@@ -1493,6 +1522,12 @@ android_map_style_gallery() {
 android_lifecycle_stress() {
     [ "$ANDROID_READY" -eq 1 ] || return 1
 
+    local component
+    component="$(resolve_activity)" || {
+        echo "Unable to resolve launcher activity for $PACKAGE"
+        return 1
+    }
+
     local i
     for i in 1 2 3 4 5; do
         echo "Cycle $i/5"
@@ -1501,10 +1536,7 @@ android_lifecycle_stress() {
         "${ADB[@]}" shell input keyevent KEYCODE_HOME >/dev/null
         sleep 0.25
 
-        "${ADB[@]}" shell monkey \
-            -p "$PACKAGE" \
-            -c android.intent.category.LAUNCHER \
-            1 >/dev/null 2>&1 || return 1
+        "${ADB[@]}" shell am start -n "$component" >/dev/null 2>&1 || return 1
 
         local pid=""
         local deadline=$((SECONDS + 6))
@@ -1815,14 +1847,14 @@ generate_report() {
         echo "| Routing/navigation | Unit/scenario tests + optional real graph benchmarks |"
         echo "| Tap/pan touch semantics | Native touch tests |"
         echo "| Pinch semantics | Native touch tests |"
-        echo "| Real Android pan | Physical ADB swipe + before/after screenshots |"
+        echo "| Android pan | ADB swipe on the selected target + before/after screenshots |"
         echo "| Real toolbar/menu taps | Android UI tour |"
-        echo "| Android Back | Physical key event + before/after screenshots |"
+        echo "| Android Back | ADB key event on the selected target + before/after screenshots |"
         echo "| Lifecycle | 5 stop/start + Home/resume cycles |"
         echo "| Crash/ANR | Fresh logcat window scanned after Android audit |"
         echo "| Android startup | Activity timing x3 + OpenRide first rendered frame marker x3 |"
         echo "| Android performance | CPU/memory/gfx + per-thread CPU + internal frame pacing at 2s, 10s and 30s |"
-        echo "| Map pan | Physical ADB swipe + before/after screenshots after first-frame readiness |"
+        echo "| Map pan | ADB swipe on the selected target + before/after screenshots after first-frame readiness |"
         echo "| Pinch application path | Android F11/F12 audit hooks call the same production pinch helper as SDL_EVENT_PINCH_UPDATE |"
         echo "| Map zoom gallery | Event + rendered-frame synchronized exact z6 -> z18 -> z17 sequence |"
         echo "| Map renderer sweep | z9 -> z17 -> z9 screenshots + per-frame CSV profiling around the current map center |"
@@ -2010,7 +2042,7 @@ if [ "$SKIP_ANDROID" -eq 1 ] || ! audit_any_android_enabled; then
     record_skip "android_startup" "Android Activity + first-frame benchmark" "Android steps disabled by --skip-android/profile selection"
     record_skip "android_idle_profile" "Android stabilized runtime profile" "Android steps disabled by --skip-android/profile selection"
     record_skip "android_map_stability" "Android time-to-stable-map measurement" "Android steps disabled by --skip-android/profile selection"
-    record_skip "android_pan" "Real Android map pan gesture" "Android steps disabled by --skip-android/profile selection"
+    record_skip "android_pan" "Android target map pan gesture" "Android steps disabled by --skip-android/profile selection"
     record_skip "android_back" "Android Back navigation semantics" "Android steps disabled by --skip-android/profile selection"
     record_skip "android_zoom_gallery" "Android pinch-path map zoom gallery" "Android steps disabled by --skip-android/profile selection"
     record_skip "android_zoom_sweep" "Android map renderer zoom sweep" "Android steps disabled by --skip-android/profile selection"
@@ -2044,7 +2076,7 @@ else
         run_step "android_startup" "Android Activity + first-frame benchmark x3" "required" android_startup_benchmark
         run_step "android_idle_profile" "Android stabilized runtime profile T+2/T+10/T+30" "required" android_idle_runtime_profile
         run_step "android_map_stability" "Android time-to-stable-map measurement" "required" android_map_stability_test
-        run_step "android_pan" "Real Android map pan gesture" "required" android_pan_gesture_test
+        run_step "android_pan" "Android target map pan gesture" "required" android_pan_gesture_test
         run_step "android_back" "Android Back navigation semantics" "required" android_back_navigation_test
         run_step "android_zoom_gallery" "Android pinch-path map zoom gallery" "required" android_zoom_gallery
         run_step "android_zoom_sweep" "Android z9->z17->z9 renderer sweep" "required" android_zoom_sweep

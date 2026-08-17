@@ -14,5 +14,13 @@ if ! command -v "$ADB" >/dev/null 2>&1; then
     exit 1
 fi
 
-"$ADB" get-state >/dev/null
-"$ADB" shell am start -n com.arthurthion.openride/.OpenRideActivity
+adb_run() {
+    if [ -n "${ANDROID_SERIAL:-}" ]; then
+        "$ADB" -s "$ANDROID_SERIAL" "$@"
+    else
+        "$ADB" "$@"
+    fi
+}
+
+adb_run get-state >/dev/null
+adb_run shell am start -n com.arthurthion.openride/.OpenRideActivity

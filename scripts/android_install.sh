@@ -15,14 +15,22 @@ if ! command -v "$ADB" >/dev/null 2>&1; then
     exit 1
 fi
 
+adb_run() {
+    if [ -n "${ANDROID_SERIAL:-}" ]; then
+        "$ADB" -s "$ANDROID_SERIAL" "$@"
+    else
+        "$ADB" "$@"
+    fi
+}
+
 APK=$(find "$ROOT_DIR/build/android/app/build/outputs/apk" -name '*debug*.apk' -type f 2>/dev/null | head -n 1 || true)
 if [ -z "$APK" ]; then
     echo "APK absent. Lance d'abord : ./scripts/android_build.sh" >&2
     exit 1
 fi
 
-"$ADB" get-state >/dev/null
-"$ADB" install -r "$APK"
+adb_run get-state >/dev/null
+adb_run install -r "$APK"
 echo
 echo "OpenRide est installé. Copie maintenant les données hors ligne avec :"
 echo "  ./scripts/android_push_data.sh"

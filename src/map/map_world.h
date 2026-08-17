@@ -31,6 +31,19 @@ typedef struct OpenRideMapWorldDebugStats {
     OpenRideORMapAreaDebugStats area;
 } OpenRideMapWorldDebugStats;
 
+typedef struct OpenRideMapWorldFollowupSources {
+    bool detail_v8;
+    bool pyramid_v11;
+    bool overlay_v11;
+    uint32_t detail_v8_deferred_loads;
+    uint32_t pyramid_v11_draw_loads;
+    uint32_t pyramid_v11_deferred_loads;
+    uint32_t overlay_v11_draw_loads;
+    uint32_t overlay_v11_deferred_loads;
+    uint32_t overlay_v11_cache_hits;
+    uint32_t overlay_v11_cache_misses;
+} OpenRideMapWorldFollowupSources;
+
 typedef struct OpenRideMapWorld OpenRideMapWorld;
 
 OpenRideMapWorld *openride_map_world_create(SDL_Renderer *renderer,
@@ -74,6 +87,9 @@ void openride_map_world_get_debug_stats(
 
 bool openride_map_world_needs_followup_frame(
     const OpenRideMapWorld *world);
+void openride_map_world_get_followup_sources(
+    const OpenRideMapWorld *world,
+    OpenRideMapWorldFollowupSources *sources);
 
 size_t openride_map_world_region_count(const OpenRideMapWorld *world);
 

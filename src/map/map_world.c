@@ -1,6 +1,7 @@
 #include "map/map_world.h"
 #include "map/ormap_renderer.h"
 #include "map/ormap_pyramid_renderer.h"
+#include "map/ormap_pyramid_overlay_renderer.h"
 
 #include "openride/ormap.h"
 #include "openride/place_search.h"
@@ -96,6 +97,7 @@ typedef struct OpenRideMapWorldRegion {
     OpenRideORMap *map;
     OpenRideORMapRenderer *detail_renderer;
     OpenRideORMapPyramidRenderer *pyramid_renderer;
+    OpenRideORMapPyramidOverlayRenderer *overlay_renderer;
     bool detail_visible;
 } OpenRideMapWorldRegion;
 
@@ -122,6 +124,8 @@ static void map_world_accumulate_road_debug(
     if (!dst || !src) return;
     dst->roads_ms += src->roads_ms;
     dst->load_ms += src->load_ms;
+    dst->geometry_ms += src->geometry_ms;
+    dst->compositor_ms += src->compositor_ms;
     dst->cache_hits += src->cache_hits;
     dst->cache_misses += src->cache_misses;
     dst->prewarm_loads += src->prewarm_loads;
@@ -144,6 +148,8 @@ static void map_world_accumulate_area_debug(
     dst->areas_ms += src->areas_ms;
     dst->load_ms += src->load_ms;
     dst->mask_compile_ms += src->mask_compile_ms;
+    dst->surface_plan_alpha += src->surface_plan_alpha;
+    dst->surface_draw_alpha += src->surface_draw_alpha;
     dst->tiles_visited += src->tiles_visited;
     dst->triangles_drawn += src->triangles_drawn;
     dst->batches += src->batches;
@@ -157,6 +163,17 @@ static void map_world_accumulate_area_debug(
     dst->mask_cache_hits += src->mask_cache_hits;
     dst->mask_cache_misses += src->mask_cache_misses;
     dst->mask_compile_failures += src->mask_compile_failures;
+    dst->surface_plan_tiles += src->surface_plan_tiles;
+    dst->surface_plan_requests += src->surface_plan_requests;
+    dst->surface_plan_pending += src->surface_plan_pending;
+    dst->surface_plan_blending += src->surface_plan_blending;
+    dst->surface_cache_entries += src->surface_cache_entries;
+    dst->surface_texture_entries += src->surface_texture_entries;
+    dst->surface_draw_tiles += src->surface_draw_tiles;
+    dst->surface_missing_data += src->surface_missing_data;
+    dst->surface_missing_textures += src->surface_missing_textures;
+    dst->surface_draw_failures += src->surface_draw_failures;
+    dst->surface_empty_plans += src->surface_empty_plans;
 }
 
 void openride_map_world_debug_begin_frame(OpenRideMapWorld *world)
@@ -524,6 +541,10 @@ static bool load_major_waterways(OpenRideORMap *map,
 static void world_region_destroy(OpenRideMapWorldRegion *region)
 {
     if (!region) return;
+    if (region->overlay_renderer) {
+        openride_ormap_pyramid_overlay_renderer_destroy(
+            region->overlay_renderer);
+    }
     if (region->pyramid_renderer) {
         openride_ormap_pyramid_renderer_destroy(
             region->pyramid_renderer);
@@ -888,6 +909,27 @@ static bool build_world_region(SDL_Renderer *renderer,
                 pyramid_error[0]
                     ? pyramid_error
                     : "unable to initialize");
+        }
+
+        if (out->pyramid_renderer) {
+            char overlay_error[256] = {0};
+            out->overlay_renderer =
+                openride_ormap_pyramid_overlay_renderer_create(
+                    renderer,
+                    pyramid_path,
+                    overlay_error,
+                    sizeof(overlay_error));
+            if (!out->overlay_renderer) {
+                SDL_Log(
+                    "OpenRide v11 overlay unavailable for %s; "
+                    "stable v8 waterways/roads/labels retained: %s",
+                    definition && definition->id
+                        ? definition->id
+                        : "region",
+                    overlay_error[0]
+                        ? overlay_error
+                        : "overlay payload absent");
+            }
         }
     }
 
@@ -2528,6 +2570,14 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
             openride_ormap_pyramid_renderer_begin_frame(
                 region->pyramid_renderer);
         }
+
+        if (region->overlay_renderer) {
+            openride_ormap_pyramid_overlay_renderer_set_style(
+                region->overlay_renderer,
+                style);
+            openride_ormap_pyramid_overlay_renderer_begin_frame(
+                region->overlay_renderer);
+        }
     }
 
     if (debug_enabled) world->debug.visible_detail_regions = (uint32_t)visible_count;
@@ -2572,6 +2622,36 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
                 continue;
             }
 
+            if (region->overlay_renderer
+                && layer == OPENRIDE_ORMAP_RENDER_LAYER_WATERWAYS
+                && openride_ormap_pyramid_overlay_renderer_draw_waterways(
+                    region->overlay_renderer,
+                    camera,
+                    viewport_width,
+                    viewport_height)) {
+                continue;
+            }
+
+            if (region->overlay_renderer
+                && layer == OPENRIDE_ORMAP_RENDER_LAYER_ROADS
+                && openride_ormap_pyramid_overlay_renderer_draw_roads(
+                    region->overlay_renderer,
+                    camera,
+                    viewport_width,
+                    viewport_height)) {
+                continue;
+            }
+
+            if (region->overlay_renderer
+                && layer == OPENRIDE_ORMAP_RENDER_LAYER_LABELS
+                && openride_ormap_pyramid_overlay_renderer_draw_labels(
+                    region->overlay_renderer,
+                    camera,
+                    viewport_width,
+                    viewport_height)) {
+                continue;
+            }
+
             openride_ormap_renderer_draw_layer(region->detail_renderer,
                                                camera,
                                                viewport_width,
@@ -2607,6 +2687,16 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
                     &world->debug.area,
                     &pyramid_area);
             }
+
+            if (region->overlay_renderer) {
+                OpenRideORMapRoadDebugStats overlay_road = {0};
+                openride_ormap_pyramid_overlay_renderer_get_road_debug_stats(
+                    region->overlay_renderer,
+                    &overlay_road);
+                map_world_accumulate_road_debug(
+                    &world->debug.road,
+                    &overlay_road);
+            }
         }
         world->debug.ormap_stats_valid = true;
         world->debug.detail_ms +=
@@ -2615,24 +2705,60 @@ void openride_map_world_draw_detail(OpenRideMapWorld *world,
 }
 
 
-bool openride_map_world_needs_followup_frame(
-    const OpenRideMapWorld *world)
+void openride_map_world_get_followup_sources(
+    const OpenRideMapWorld *world,
+    OpenRideMapWorldFollowupSources *sources)
 {
-    if (!world) return false;
+    if (!sources) return;
+    memset(sources, 0, sizeof(*sources));
+    if (!world) return;
+
     for (size_t i = 0U; i < world->region_count; ++i) {
         const OpenRideMapWorldRegion *region = &world->regions[i];
         if (!region->detail_visible || !region->detail_renderer) continue;
+
         if (openride_ormap_renderer_needs_followup_frame(
                 region->detail_renderer)) {
-            return true;
+            sources->detail_v8 = true;
+            sources->detail_v8_deferred_loads +=
+                region->detail_renderer->road_debug.deferred_loads
+                + region->detail_renderer->area_debug.deferred_loads;
         }
         if (region->pyramid_renderer
             && openride_ormap_pyramid_renderer_needs_followup_frame(
                 region->pyramid_renderer)) {
-            return true;
+            OpenRideORMapAreaDebugStats area = {0};
+            sources->pyramid_v11 = true;
+            openride_ormap_pyramid_renderer_get_area_debug_stats(
+                region->pyramid_renderer,
+                &area);
+            sources->pyramid_v11_draw_loads += area.draw_loads;
+            sources->pyramid_v11_deferred_loads += area.deferred_loads;
+        }
+        if (region->overlay_renderer
+            && openride_ormap_pyramid_overlay_renderer_needs_followup_frame(
+                region->overlay_renderer)) {
+            OpenRideORMapRoadDebugStats road = {0};
+            sources->overlay_v11 = true;
+            openride_ormap_pyramid_overlay_renderer_get_road_debug_stats(
+                region->overlay_renderer,
+                &road);
+            sources->overlay_v11_draw_loads += road.draw_loads;
+            sources->overlay_v11_deferred_loads += road.deferred_loads;
+            sources->overlay_v11_cache_hits += road.cache_hits;
+            sources->overlay_v11_cache_misses += road.cache_misses;
         }
     }
-    return false;
+}
+
+bool openride_map_world_needs_followup_frame(
+    const OpenRideMapWorld *world)
+{
+    OpenRideMapWorldFollowupSources sources = {0};
+    openride_map_world_get_followup_sources(world, &sources);
+    return sources.detail_v8
+        || sources.pyramid_v11
+        || sources.overlay_v11;
 }
 
 size_t openride_map_world_region_count(const OpenRideMapWorld *world)

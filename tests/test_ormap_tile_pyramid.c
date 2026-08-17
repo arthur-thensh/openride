@@ -83,6 +83,17 @@ static void test_request(void *userdata,
     }
 }
 
+static void test_synchronous_request(
+    void *userdata,
+    OpenRideORMapPyramidTileKey key)
+{
+    TestStore *store = userdata;
+    ++store->request_count;
+    TestTile *tile = store_find(store, key, true);
+    assert(tile);
+    tile->state = OPENRIDE_ORMAP_PYRAMID_TILE_READY;
+}
+
 static OpenRideORMapPyramidTileKey child(
     OpenRideORMapPyramidTileKey parent,
     int index)
@@ -157,6 +168,40 @@ static void test_parent_fallback_and_prefetch(void)
     assert(plan.pending_tiles == 4U);
     assert(plan.needs_followup_frame);
     assert(store.request_count == 4U);
+
+    openride_ormap_pyramid_plan_destroy(&plan);
+    openride_ormap_tile_pyramid_destroy(&pyramid);
+}
+
+static void test_synchronous_request_is_visible_same_frame(void)
+{
+    OpenRideORMapTilePyramid pyramid;
+    OpenRideORMapTilePyramidConfig config =
+        openride_ormap_tile_pyramid_default_config();
+    config.prefetch_start = 0.10;
+    assert(openride_ormap_tile_pyramid_init(&pyramid, &config));
+
+    TestStore store = {0};
+    const OpenRideORMapPyramidTileKey root = {9, 256, 176};
+
+    OpenRideORMapPyramidPlan plan = {0};
+    assert(openride_ormap_tile_pyramid_plan(
+        &pyramid,
+        9.0,
+        &root,
+        1U,
+        1000U,
+        test_state,
+        test_synchronous_request,
+        &store,
+        &plan));
+
+    assert(store.request_count == 1U);
+    assert(plan.requests_issued == 1U);
+    assert(plan.pending_tiles == 0U);
+    assert(!plan.needs_followup_frame);
+    assert(plan.count == 1U);
+    assert(fabs(alpha_for(&plan, root) - 1.0) < 1e-9);
 
     openride_ormap_pyramid_plan_destroy(&plan);
     openride_ormap_tile_pyramid_destroy(&pyramid);
@@ -505,6 +550,7 @@ int main(void)
 {
     test_defaults();
     test_parent_fallback_and_prefetch();
+    test_synchronous_request_is_visible_same_frame();
     test_continuous_blend();
     test_late_readiness_never_pops();
     test_zoom_out_is_symmetric();

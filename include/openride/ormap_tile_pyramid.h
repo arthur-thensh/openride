@@ -138,6 +138,10 @@ void openride_ormap_pyramid_plan_destroy(
  *
  * The planner does not know SQLite, SDL or map styling. It only decides which
  * tile geometry owns which quadtree footprint and at what alpha.
+ *
+ * request_fn may complete synchronously. The planner re-reads tile state after
+ * each request so geometry that became READY/EMPTY can be used in the current
+ * plan instead of disappearing for one frame.
  */
 bool openride_ormap_tile_pyramid_plan(
     OpenRideORMapTilePyramid *pyramid,

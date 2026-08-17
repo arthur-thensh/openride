@@ -20,6 +20,14 @@ if ! command -v "$ADB" >/dev/null 2>&1; then
     exit 1
 fi
 
+adb_run() {
+    if [ -n "${ANDROID_SERIAL:-}" ]; then
+        "$ADB" -s "$ANDROID_SERIAL" "$@"
+    else
+        "$ADB" "$@"
+    fi
+}
+
 MAP="$ROOT_DIR/data/maps/nord-pas-de-calais.ormap"
 MAP_V11="$ROOT_DIR/data/maps/nord-pas-de-calais.ormap11"
 GRAPH="$ROOT_DIR/data/routing/nord-pas-de-calais.orgraph"
@@ -32,13 +40,13 @@ for file in "$MAP" "$GRAPH" "$SEARCH"; do
     fi
 done
 
-"$ADB" get-state >/dev/null
-if ! "$ADB" shell pm path "$PACKAGE" >/dev/null 2>&1; then
+adb_run get-state >/dev/null
+if ! adb_run shell pm path "$PACKAGE" >/dev/null 2>&1; then
     echo "OpenRide n'est pas installé sur le téléphone. Lance d'abord : ./scripts/android_install.sh" >&2
     exit 1
 fi
 
-if ! "$ADB" shell run-as "$PACKAGE" true >/dev/null 2>&1; then
+if ! adb_run shell run-as "$PACKAGE" true >/dev/null 2>&1; then
     echo "Impossible d'utiliser run-as pour $PACKAGE." >&2
     echo "Vérifie que l'APK debug OpenRide est bien installé." >&2
     exit 1
@@ -46,9 +54,9 @@ fi
 
 # Ne jamais remplacer une base SQLite cartographique pendant qu'OpenRide
 # pourrait encore l'avoir ouverte.
-"$ADB" shell am force-stop "$PACKAGE"
+adb_run shell am force-stop "$PACKAGE"
 
-"$ADB" shell run-as "$PACKAGE" mkdir -p \
+adb_run shell run-as "$PACKAGE" mkdir -p \
     "$REMOTE/maps" \
     "$REMOTE/routing" \
     "$REMOTE/search" \
@@ -60,12 +68,12 @@ push_app_file() {
     remote_name=$(basename "$local_file")
     temporary="/data/local/tmp/openride-$remote_name"
 
-    "$ADB" push "$local_file" "$temporary"
+    adb_run push "$local_file" "$temporary"
 
     # Même méthode que le workflow Android NDK de débogage sans root :
     # dépôt temporaire par adb, puis copie par `run-as` dans l'espace privé.
-    "$ADB" shell run-as "$PACKAGE" cp "$temporary" "$remote_dir/$remote_name"
-    "$ADB" shell rm -f "$temporary"
+    adb_run shell run-as "$PACKAGE" cp "$temporary" "$remote_dir/$remote_name"
+    adb_run shell rm -f "$temporary"
 }
 
 echo "Copie de la carte stable .ormap..."
@@ -76,7 +84,7 @@ if [ -f "$MAP_V11" ]; then
     push_app_file "$MAP_V11" "$REMOTE/maps"
 else
     echo "Carte expérimentale .ormap11 absente : fallback v8 uniquement."
-    "$ADB" shell run-as "$PACKAGE" rm -f \
+    adb_run shell run-as "$PACKAGE" rm -f \
         "$REMOTE/maps/nord-pas-de-calais.ormap11"
 fi
 
@@ -87,17 +95,17 @@ push_app_file "$SEARCH" "$REMOTE/search"
 
 echo
 echo "Vérification des fichiers installés..."
-"$ADB" shell run-as "$PACKAGE" ls -lh \
+adb_run shell run-as "$PACKAGE" ls -lh \
     "$REMOTE/maps/nord-pas-de-calais.ormap" \
     "$REMOTE/routing/nord-pas-de-calais.orgraph" \
     "$REMOTE/search/nord-pas-de-calais.orplaces.sqlite"
 
 if [ -f "$MAP_V11" ]; then
-    "$ADB" shell run-as "$PACKAGE" ls -lh \
+    adb_run shell run-as "$PACKAGE" ls -lh \
         "$REMOTE/maps/nord-pas-de-calais.ormap11"
 fi
 
 echo
 echo "Données hors ligne installées dans le stockage interne OpenRide."
 echo "Lancement d'OpenRide..."
-"$ADB" shell am start -n "$PACKAGE/.OpenRideActivity"
+adb_run shell am start -n "$PACKAGE/.OpenRideActivity"

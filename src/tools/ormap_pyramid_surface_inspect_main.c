@@ -1,4 +1,5 @@
 #include "openride/ormap_pyramid_surface.h"
+#include "openride/ormap_pyramid_overlay.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -97,6 +98,52 @@ int main(int argc, char **argv)
     printf(
         "  malformed tiles  : %" PRIu64 "\n",
         stats.malformed_building_tiles);
+
+    OpenRideORMapPyramidOverlayInspectStats overlay = {0};
+    char overlay_error[256] = {0};
+    if (openride_ormap_pyramid_overlay_inspect(
+            argv[1],
+            &overlay,
+            overlay_error,
+            sizeof(overlay_error))) {
+        printf("\nV3.9 overlay roads\n");
+        for (int zoom = OPENRIDE_ORMAP_PYRAMID_ROAD_MIN_ZOOM;
+             zoom <= OPENRIDE_ORMAP_PYRAMID_ROAD_MAX_ZOOM;
+             ++zoom) {
+            const int i = zoom - OPENRIDE_ORMAP_PYRAMID_ROAD_MIN_ZOOM;
+            printf(
+                "  z%d: %" PRIu64 " records / %" PRIu64 " tiles\n",
+                zoom,
+                overlay.road_records_by_zoom[i],
+                overlay.road_tiles_by_zoom[i]);
+        }
+
+        printf("\nV3.9 overlay waterways\n");
+        for (int zoom = OPENRIDE_ORMAP_PYRAMID_WATER_MIN_ZOOM;
+             zoom <= OPENRIDE_ORMAP_PYRAMID_WATER_MAX_ZOOM;
+             ++zoom) {
+            const int i = zoom - OPENRIDE_ORMAP_PYRAMID_WATER_MIN_ZOOM;
+            printf(
+                "  z%d: %" PRIu64 " records / %" PRIu64 " tiles\n",
+                zoom,
+                overlay.water_records_by_zoom[i],
+                overlay.water_tiles_by_zoom[i]);
+        }
+        printf("  labels           : %" PRIu64 "\n", overlay.labels);
+        printf(
+            "  compressed       : %.2f MiB\n",
+            (double)overlay.compressed_bytes / (1024.0 * 1024.0));
+        printf(
+            "  malformed tiles  : %" PRIu64 "\n",
+            overlay.malformed_tiles);
+        printf(
+            "  invalid records  : %" PRIu64 "\n",
+            overlay.invalid_records);
+    } else {
+        printf(
+            "\nV3.9 overlay: not present (%s)\n",
+            overlay_error[0] ? overlay_error : "unknown");
+    }
 
     return 0;
 }
