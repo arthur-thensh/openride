@@ -31,13 +31,20 @@ static void openride_drive_audit_log_state(const OpenRideDriveModeState *state,
     }
     openride_drive_audit_last_log_ns = now_ns;
 
-    SDL_Log("AUDIT_DRIVE_STATE speed_kph=%.1f gps_heading=%.1f camera_heading=%.1f camera_zoom=%.3f camera_lat=%.7f camera_lon=%.7f gps_quality=%d auto_zoom=%d heading_up=%d",
+    SDL_Log("AUDIT_DRIVE_STATE speed_kph=%.1f filtered_speed_kph=%.1f gps_heading=%.1f filtered_heading=%.1f camera_heading=%.1f target_heading=%.1f camera_zoom=%.3f target_zoom=%.3f lookahead_m=%.1f camera_lat=%.7f camera_lon=%.7f target_lat=%.7f target_lon=%.7f gps_quality=%d auto_zoom=%d heading_up=%d",
             fmax(0.0, speed_mps) * 3.6,
+            state->smoothed_speed_mps * 3.6,
             heading_deg,
+            state->smoothed_heading_deg,
             state->camera_bearing_deg,
+            state->target_camera_bearing_deg,
             state->camera_zoom,
+            state->target_camera_zoom,
+            state->lookahead_distance_m,
             state->camera_lat,
             state->camera_lon,
+            state->target_camera_lat,
+            state->target_camera_lon,
             (int)state->gps_quality,
             state->auto_zoom ? 1 : 0,
             state->heading_up ? 1 : 0);
@@ -64,6 +71,12 @@ static double shortest_angle_delta(double from_deg, double to_deg)
     if (delta > 180.0) delta -= 360.0;
     if (delta < -180.0) delta += 360.0;
     return delta;
+}
+
+static double smoothing_alpha(double delta_seconds, double response_per_second)
+{
+    if (delta_seconds <= 0.0 || response_per_second <= 0.0) return 0.0;
+    return 1.0 - exp(-delta_seconds * response_per_second);
 }
 
 static void project_ahead(double lat_deg,
@@ -108,6 +121,7 @@ void openride_drive_mode_init(OpenRideDriveModeState *state)
     state->heading_up = true;
     state->auto_zoom = true;
     state->camera_zoom = 16.0;
+    state->target_camera_zoom = 16.0;
     state->gps_quality = OPENRIDE_GPS_UNAVAILABLE;
 }
 
@@ -131,7 +145,10 @@ void openride_drive_mode_set_heading_up(OpenRideDriveModeState *state, bool head
 {
     if (!state) return;
     state->heading_up = heading_up;
-    if (!heading_up) state->camera_bearing_deg = 0.0;
+    if (!heading_up) {
+        state->camera_bearing_deg = 0.0;
+        state->target_camera_bearing_deg = 0.0;
+    }
 }
 
 void openride_drive_mode_set_auto_zoom(OpenRideDriveModeState *state, bool auto_zoom)
@@ -246,23 +263,68 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
                                                           sample_age_s,
                                                           accuracy_m);
     if (!state->active || !has_sample || state->gps_quality == OPENRIDE_GPS_LOST) return;
+    if (!isfinite(lat) || !isfinite(lon)) return;
 
     if (delta_seconds < 0.0) delta_seconds = 0.0;
     if (delta_seconds > 0.25) delta_seconds = 0.25;
 
-    double target_bearing = state->heading_up ? normalize_bearing(heading_deg) : 0.0;
-    if (speed_mps < 1.5 && state->initialized) {
-        target_bearing = state->heading_up ? state->camera_bearing_deg : 0.0;
+    const double measured_speed = isfinite(speed_mps) ? fmax(0.0, speed_mps) : 0.0;
+    const double measured_heading = isfinite(heading_deg)
+        ? normalize_bearing(heading_deg)
+        : (state->initialized ? state->smoothed_heading_deg : 0.0);
+
+    if (!state->initialized) {
+        state->smoothed_speed_mps = measured_speed;
+        state->smoothed_heading_deg = measured_heading;
+    } else {
+        const double speed_input_alpha = smoothing_alpha(delta_seconds, 2.4);
+        state->smoothed_speed_mps +=
+            (measured_speed - state->smoothed_speed_mps) * speed_input_alpha;
+
+        /*
+         * GPS course can jump by several degrees from sample to sample. Filter
+         * the course before it becomes a camera target, but keep the response
+         * short enough for real motorcycle turns. At walking speed, preserve
+         * the last trustworthy direction instead of rotating on GPS noise.
+         */
+        if (measured_speed >= 1.5) {
+            const double heading_input_alpha = smoothing_alpha(delta_seconds, 6.0);
+            state->smoothed_heading_deg = normalize_bearing(
+                state->smoothed_heading_deg
+                + shortest_angle_delta(state->smoothed_heading_deg,
+                                       measured_heading) * heading_input_alpha);
+        }
     }
 
+    const double travel_bearing = state->smoothed_heading_deg;
+    const double target_bearing = state->heading_up ? travel_bearing : 0.0;
     const double lookahead =
-        openride_drive_mode_target_lookahead_m(speed_mps,
+        openride_drive_mode_target_lookahead_m(state->smoothed_speed_mps,
                                                maneuver_distance_m);
+
     double target_lat = lat;
     double target_lon = lon;
-    project_ahead(lat, lon, target_bearing, lookahead, &target_lat, &target_lon);
-    const double target_zoom = openride_drive_mode_target_zoom(speed_mps,
-                                                                maneuver_distance_m);
+    /*
+     * The forward camera target follows the direction of travel even when the
+     * map itself is north-up. Using target_bearing here would incorrectly move
+     * a north-up camera toward geographic north instead of ahead of the rider.
+     */
+    project_ahead(lat,
+                  lon,
+                  travel_bearing,
+                  lookahead,
+                  &target_lat,
+                  &target_lon);
+
+    const double target_zoom = openride_drive_mode_target_zoom(
+        state->smoothed_speed_mps,
+        maneuver_distance_m);
+
+    state->target_camera_lat = target_lat;
+    state->target_camera_lon = target_lon;
+    state->target_camera_zoom = target_zoom;
+    state->target_camera_bearing_deg = target_bearing;
+    state->lookahead_distance_m = lookahead;
 
     if (!state->initialized) {
         state->camera_lat = target_lat;
@@ -271,24 +333,28 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
         state->camera_bearing_deg = target_bearing;
         state->initialized = true;
 #ifdef __ANDROID__
-        openride_drive_audit_log_state(state, speed_mps, heading_deg);
+        openride_drive_audit_log_state(state, measured_speed, measured_heading);
 #endif
         return;
     }
 
-    const double position_alpha = 1.0 - exp(-delta_seconds * 4.5);
-    const double zoom_alpha = 1.0 - exp(-delta_seconds * 3.0);
-    const double bearing_alpha = 1.0 - exp(-delta_seconds * 5.0);
+    const double position_alpha = smoothing_alpha(delta_seconds, 4.5);
+    const double zoom_alpha = smoothing_alpha(delta_seconds, 3.0);
+    const double bearing_alpha = smoothing_alpha(delta_seconds, 5.0);
 
-    state->camera_lat += (target_lat - state->camera_lat) * position_alpha;
-    state->camera_lon += (target_lon - state->camera_lon) * position_alpha;
+    state->camera_lat +=
+        (state->target_camera_lat - state->camera_lat) * position_alpha;
+    state->camera_lon +=
+        (state->target_camera_lon - state->camera_lon) * position_alpha;
     if (state->auto_zoom) {
-        state->camera_zoom += (target_zoom - state->camera_zoom) * zoom_alpha;
+        state->camera_zoom +=
+            (state->target_camera_zoom - state->camera_zoom) * zoom_alpha;
     }
     state->camera_bearing_deg = normalize_bearing(
         state->camera_bearing_deg
-        + shortest_angle_delta(state->camera_bearing_deg, target_bearing) * bearing_alpha);
+        + shortest_angle_delta(state->camera_bearing_deg,
+                               state->target_camera_bearing_deg) * bearing_alpha);
 #ifdef __ANDROID__
-    openride_drive_audit_log_state(state, speed_mps, heading_deg);
+    openride_drive_audit_log_state(state, measured_speed, measured_heading);
 #endif
 }
