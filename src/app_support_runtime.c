@@ -795,6 +795,7 @@ void openride_app_render_navigation_position(SDL_Renderer *renderer,
                                                        gps->lon,
                                                        viewport_width,
                                                        viewport_height);
+    OpenRidePointD rider = raw;
 
     if (navigation && navigation->valid) {
         const OpenRidePointD matched = openride_geo_to_screen(camera,
@@ -802,7 +803,11 @@ void openride_app_render_navigation_position(SDL_Renderer *renderer,
                                                                navigation->matched_lon,
                                                                viewport_width,
                                                                viewport_height);
-        if (navigation->distance_from_route_m > 1.0) {
+        if (navigation->status == OPENRIDE_NAVIGATION_OFF_ROUTE) {
+            /*
+             * Off-route keeps the motorcycle at the real GPS position and
+             * shows where the matcher still projects onto the planned route.
+             */
             SDL_SetRenderDrawColor(renderer, 54, 65, 76, 180);
             draw_thick_line(renderer,
                             (float)raw.x,
@@ -810,17 +815,20 @@ void openride_app_render_navigation_position(SDL_Renderer *renderer,
                             (float)matched.x,
                             (float)matched.y,
                             2);
+            SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
+            draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 5.0f);
+            SDL_SetRenderDrawColor(renderer, 35, 112, 190, 245);
+            draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 3.0f);
+        } else {
+            /* Normal navigation exposes one unambiguous rider marker. */
+            rider = matched;
         }
-        SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
-        draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 5.0f);
-        SDL_SetRenderDrawColor(renderer, 35, 112, 190, 245);
-        draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 3.0f);
     }
 
     const double heading_rad = (gps->heading_deg - camera->bearing_deg)
         * 0.01745329251994329577;
     draw_navigation_motorcycle(renderer,
-                               (float)raw.x,
-                               (float)raw.y,
+                               (float)rider.x,
+                               (float)rider.y,
                                heading_rad);
 }
