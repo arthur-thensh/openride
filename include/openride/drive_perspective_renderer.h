@@ -8,7 +8,14 @@
 
 #include <stdbool.h>
 
-#define OPENRIDE_DRIVE_PERSPECTIVE_BANDS 20
+#define OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS 32
+#define OPENRIDE_DRIVE_PERSPECTIVE_ROWS 48
+#define OPENRIDE_DRIVE_PERSPECTIVE_VERTEX_COUNT \
+    ((OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS + 1) \
+     * (OPENRIDE_DRIVE_PERSPECTIVE_ROWS + 1))
+#define OPENRIDE_DRIVE_PERSPECTIVE_INDEX_COUNT \
+    (OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS \
+     * OPENRIDE_DRIVE_PERSPECTIVE_ROWS * 6)
 
 typedef struct OpenRideDrivePerspectiveRendererState {
     SDL_Renderer *renderer;
@@ -166,61 +173,82 @@ static inline void openride_drive_perspective_present(SDL_Renderer *renderer)
     SDL_SetRenderTarget(renderer, state->previous_target);
     state->capturing = false;
 
-    /* Neutral horizon/corners exposed by the trapezoidal far field. */
+    /* Neutral horizon/corners exposed by the projective far field. */
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
     SDL_SetRenderDrawColor(renderer, 236U, 240U, 242U, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
 
     const OpenRideDrivePerspectiveConfig config =
         openride_drive_perspective_default_config();
-    SDL_Vertex vertices[(OPENRIDE_DRIVE_PERSPECTIVE_BANDS + 1) * 2];
-    int indices[OPENRIDE_DRIVE_PERSPECTIVE_BANDS * 6];
 
-    for (int row = 0; row <= OPENRIDE_DRIVE_PERSPECTIVE_BANDS; ++row) {
+    /*
+     * SDL_RenderGeometry interpolates texture coordinates affinely inside each
+     * triangle. V2.5 used only two vertices per row, so a large part of the
+     * screen was approximated by wide triangles and visibly undulated while
+     * the map moved. A dense 2D grid samples one mathematically projective
+     * homography in both axes, keeping the residual affine approximation below
+     * the size at which road lines become visibly wavy on a phone display.
+     */
+    SDL_Vertex vertices[OPENRIDE_DRIVE_PERSPECTIVE_VERTEX_COUNT];
+    int indices[OPENRIDE_DRIVE_PERSPECTIVE_INDEX_COUNT];
+
+    for (int row = 0; row <= OPENRIDE_DRIVE_PERSPECTIVE_ROWS; ++row) {
         const double source_y =
-            (double)row / (double)OPENRIDE_DRIVE_PERSPECTIVE_BANDS;
+            (double)row / (double)OPENRIDE_DRIVE_PERSPECTIVE_ROWS;
         const double projected_y =
             openride_drive_perspective_y_ratio(&config, source_y);
-        const double width_scale =
-            openride_drive_perspective_width_scale(&config, source_y);
-        const float half_width =
-            (float)((double)width * 0.5 * width_scale);
-        const float center_x = (float)width * 0.5f;
-        const float y = (float)((double)height * projected_y);
-        const int base = row * 2;
 
-        openride_drive_perspective_set_mesh_vertex(
-            &vertices[base],
-            center_x - half_width,
-            y,
-            0.0f,
-            (float)source_y);
-        openride_drive_perspective_set_mesh_vertex(
-            &vertices[base + 1],
-            center_x + half_width,
-            y,
-            1.0f,
-            (float)source_y);
+        for (int column = 0;
+             column <= OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS;
+             ++column) {
+            const double source_x =
+                (double)column
+                / (double)OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS;
+            const double projected_x =
+                openride_drive_perspective_x_ratio(
+                    &config, source_x, source_y);
+            const int vertex =
+                row * (OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS + 1)
+                + column;
+
+            openride_drive_perspective_set_mesh_vertex(
+                &vertices[vertex],
+                (float)((double)width * projected_x),
+                (float)((double)height * projected_y),
+                (float)source_x,
+                (float)source_y);
+        }
     }
 
-    for (int band = 0; band < OPENRIDE_DRIVE_PERSPECTIVE_BANDS; ++band) {
-        const int vertex = band * 2;
-        const int index = band * 6;
-        indices[index + 0] = vertex;
-        indices[index + 1] = vertex + 1;
-        indices[index + 2] = vertex + 2;
-        indices[index + 3] = vertex + 1;
-        indices[index + 4] = vertex + 3;
-        indices[index + 5] = vertex + 2;
+    int index = 0;
+    for (int row = 0; row < OPENRIDE_DRIVE_PERSPECTIVE_ROWS; ++row) {
+        for (int column = 0;
+             column < OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS;
+             ++column) {
+            const int top_left =
+                row * (OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS + 1)
+                + column;
+            const int top_right = top_left + 1;
+            const int bottom_left =
+                top_left + OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS + 1;
+            const int bottom_right = bottom_left + 1;
+
+            indices[index++] = top_left;
+            indices[index++] = top_right;
+            indices[index++] = bottom_left;
+            indices[index++] = top_right;
+            indices[index++] = bottom_right;
+            indices[index++] = bottom_left;
+        }
     }
 
     bool rendered = SDL_RenderGeometry(
         renderer,
         state->texture,
         vertices,
-        (int)(sizeof(vertices) / sizeof(vertices[0])),
+        OPENRIDE_DRIVE_PERSPECTIVE_VERTEX_COUNT,
         indices,
-        (int)(sizeof(indices) / sizeof(indices[0])));
+        OPENRIDE_DRIVE_PERSPECTIVE_INDEX_COUNT);
 
     if (!rendered) {
         /* Backend fallback: navigation must never become blank because the
@@ -242,12 +270,17 @@ static inline void openride_drive_perspective_present(SDL_Renderer *renderer)
     }
 
     if (!state->active_logged) {
-        SDL_Log("AUDIT_DRIVE_PERSPECTIVE active=1 horizon_pct=%.3f rider_anchor_pct=%.3f top_width_scale=%.3f bottom_width_scale=%.3f bands=%d viewport=%dx%d",
+        const double top_width =
+            openride_drive_perspective_width_scale(&config, 0.0);
+        const double bottom_width =
+            openride_drive_perspective_width_scale(&config, 1.0);
+        SDL_Log("AUDIT_DRIVE_PERSPECTIVE active=1 projection=homography horizon_pct=%.3f rider_anchor_pct=%.3f top_width_scale=%.3f bottom_width_scale=%.3f grid=%dx%d viewport=%dx%d",
                 config.horizon_y_ratio,
                 config.rider_anchor_y_ratio,
-                config.top_width_scale,
-                config.bottom_width_scale,
-                OPENRIDE_DRIVE_PERSPECTIVE_BANDS,
+                top_width,
+                bottom_width,
+                OPENRIDE_DRIVE_PERSPECTIVE_COLUMNS,
+                OPENRIDE_DRIVE_PERSPECTIVE_ROWS,
                 width,
                 height);
         state->active_logged = true;
