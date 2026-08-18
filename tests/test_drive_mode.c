@@ -131,6 +131,31 @@ static void test_auto_zoom(void)
     assert(near_turn <= 19.0 + 1e-9);
 }
 
+static void test_render_zoom_calibration(void)
+{
+    assert(fabs(openride_drive_mode_render_zoom(16.8) - 18.0) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(17.2) - 18.2) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(17.6) - 18.5) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(18.0) - 18.8) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(18.3) - 19.0) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(18.6) - 19.2) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(18.9) - 19.3) < 1e-12);
+    assert(fabs(openride_drive_mode_render_zoom(19.0) - 19.3) < 1e-12);
+
+    const double cruise_60 =
+        openride_drive_mode_target_zoom(60.0 / 3.6, 1000.0);
+    assert(fabs(openride_drive_mode_render_zoom(cruise_60) - 18.8) < 1e-12);
+
+    double previous = openride_drive_mode_render_zoom(16.5);
+    for (int i = 1; i <= 250; ++i) {
+        const double camera_zoom = 16.5 + (double)i * 0.01;
+        const double rendered = openride_drive_mode_render_zoom(camera_zoom);
+        assert(rendered >= previous - 1e-12);
+        assert(rendered <= 19.3 + 1e-12);
+        previous = rendered;
+    }
+}
+
 static void test_maneuver_lookahead(void)
 {
     const double speed = 60.0 / 3.6;
@@ -433,6 +458,7 @@ int main(void)
     test_drive_perspective_projection();
     test_gps_quality();
     test_auto_zoom();
+    test_render_zoom_calibration();
     test_maneuver_lookahead();
     test_camera_lookahead();
     test_camera_maneuver_anticipation();
