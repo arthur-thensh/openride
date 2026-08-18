@@ -7,14 +7,61 @@
 #include <stdio.h>
 #include <string.h>
 
-#define OPENRIDE_UI_DRIVE_MARGIN 10.0f
+#define OPENRIDE_UI_DRIVE_MARGIN 8.0f
 #define OPENRIDE_UI_DRIVE_TOP_HEIGHT 78.0f
 #define OPENRIDE_UI_DRIVE_FOLLOWING_HEIGHT 26.0f
-#define OPENRIDE_UI_DRIVE_STATS_HEIGHT 52.0f
-#define OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT 64.0f
-#define OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT 14.0f
+#define OPENRIDE_UI_DRIVE_STATS_HEIGHT 40.0f
+#define OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT 52.0f
+#define OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT 12.0f
 #define OPENRIDE_UI_DRIVE_CONTROL_COUNT 4U
 #define OPENRIDE_UI_FONT_COMPAT_HEIGHT 10.5f
+#define OPENRIDE_UI_DRIVE_CONTROLS_TIMEOUT_NS UINT64_C(4000000000)
+#define OPENRIDE_UI_DRIVE_SESSION_GAP_NS UINT64_C(2000000000)
+
+static Uint64 drive_controls_visible_until_ns = 0U;
+static Uint64 drive_last_draw_ns = 0U;
+#ifdef __ANDROID__
+static bool drive_controls_log_initialized = false;
+static bool drive_controls_last_logged_visible = false;
+#endif
+
+static void drive_controls_show(Uint64 now_ns)
+{
+    drive_controls_visible_until_ns =
+        now_ns + OPENRIDE_UI_DRIVE_CONTROLS_TIMEOUT_NS;
+}
+
+static bool drive_controls_visible(Uint64 now_ns)
+{
+    return drive_controls_visible_until_ns != 0U
+        && now_ns < drive_controls_visible_until_ns;
+}
+
+static bool drive_controls_note_frame(Uint64 now_ns)
+{
+    if (drive_last_draw_ns == 0U
+        || now_ns < drive_last_draw_ns
+        || now_ns - drive_last_draw_ns > OPENRIDE_UI_DRIVE_SESSION_GAP_NS) {
+        /* New Drive session (or resume after a long pause): expose controls
+         * briefly so the four actions remain discoverable. */
+        drive_controls_show(now_ns);
+    }
+    drive_last_draw_ns = now_ns;
+
+    const bool visible = drive_controls_visible(now_ns);
+#ifdef __ANDROID__
+    if (!drive_controls_log_initialized
+        || visible != drive_controls_last_logged_visible) {
+        SDL_Log("AUDIT_DRIVE_HUD controls_visible=%d stats_height=%.0f controls_height=%.0f timeout_s=4",
+                visible ? 1 : 0,
+                OPENRIDE_UI_DRIVE_STATS_HEIGHT,
+                OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT);
+        drive_controls_log_initialized = true;
+        drive_controls_last_logged_visible = visible;
+    }
+#endif
+    return visible;
+}
 
 static void drive_draw_scaled_text(SDL_Renderer *renderer,
                                    float x,
@@ -258,16 +305,17 @@ static void drive_draw_maneuver_icon(SDL_Renderer *renderer,
     }
 }
 
-OpenRideUIDriveHUDLayout openride_ui_drive_hud_layout(
+static OpenRideUIDriveHUDLayout drive_hud_layout(
     const OpenRideUIContext *ui,
-    bool show_following)
+    bool show_following,
+    bool show_controls)
 {
     OpenRideUIDriveHUDLayout layout = {0};
     if (!ui) return layout;
 
     OpenRideUIRect safe = openride_ui_safe_rect(ui);
     safe = openride_ui_inset(safe, OPENRIDE_UI_DRIVE_MARGIN);
-    if (safe.w < 180.0f || safe.h < 230.0f) return layout;
+    if (safe.w < 180.0f || safe.h < 190.0f) return layout;
 
     layout.top = openride_ui_rect(safe.x,
                                   safe.y,
@@ -281,27 +329,48 @@ OpenRideUIDriveHUDLayout openride_ui_drive_hud_layout(
             OPENRIDE_UI_DRIVE_FOLLOWING_HEIGHT);
     }
 
-    layout.controls = openride_ui_rect(
-        safe.x,
-        safe.y + safe.h - OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT
-            - OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT,
-        safe.w,
-        OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT);
-    layout.stats = openride_ui_rect(
-        safe.x,
-        layout.controls.y - OPENRIDE_UI_DRIVE_MARGIN - OPENRIDE_UI_DRIVE_STATS_HEIGHT,
-        safe.w,
-        OPENRIDE_UI_DRIVE_STATS_HEIGHT);
+    const float bottom =
+        safe.y + safe.h - OPENRIDE_UI_DRIVE_ATTRIBUTION_HEIGHT;
+    if (show_controls) {
+        layout.controls = openride_ui_rect(
+            safe.x,
+            bottom - OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT,
+            safe.w,
+            OPENRIDE_UI_DRIVE_CONTROLS_HEIGHT);
+        layout.stats = openride_ui_rect(
+            safe.x,
+            layout.controls.y - OPENRIDE_UI_DRIVE_MARGIN
+                - OPENRIDE_UI_DRIVE_STATS_HEIGHT,
+            safe.w,
+            OPENRIDE_UI_DRIVE_STATS_HEIGHT);
 
-    const float item_width = layout.controls.w / (float)OPENRIDE_UI_DRIVE_CONTROL_COUNT;
-    for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {
-        layout.control_items[i] = openride_ui_rect(
-            layout.controls.x + item_width * (float)i,
-            layout.controls.y,
-            item_width,
-            layout.controls.h);
+        const float item_width =
+            layout.controls.w / (float)OPENRIDE_UI_DRIVE_CONTROL_COUNT;
+        for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {
+            layout.control_items[i] = openride_ui_rect(
+                layout.controls.x + item_width * (float)i,
+                layout.controls.y,
+                item_width,
+                layout.controls.h);
+        }
+    } else {
+        layout.stats = openride_ui_rect(
+            safe.x,
+            bottom - OPENRIDE_UI_DRIVE_STATS_HEIGHT,
+            safe.w,
+            OPENRIDE_UI_DRIVE_STATS_HEIGHT);
     }
     return layout;
+}
+
+OpenRideUIDriveHUDLayout openride_ui_drive_hud_layout(
+    const OpenRideUIContext *ui,
+    bool show_following)
+{
+    /* Public layout remains the fully expanded geometry used by layout tests
+     * and callers that need all four control hit boxes. Runtime draw/hit-test
+     * selects the compact variant from the inactivity timer below. */
+    return drive_hud_layout(ui, show_following, true);
 }
 
 OpenRideUIDriveHUDAction openride_ui_drive_hud_hit_test(
@@ -310,13 +379,26 @@ OpenRideUIDriveHUDAction openride_ui_drive_hud_hit_test(
     double y_px)
 {
     if (!ui) return OPENRIDE_UI_DRIVE_HUD_NONE;
+
+    const Uint64 now_ns = SDL_GetTicksNS();
+    if (!drive_controls_visible(now_ns)) {
+        /* First tap after inactivity only wakes the controls. Android Drive
+         * ignores ordinary map taps, so this is safe while remaining simple. */
+        drive_controls_show(now_ns);
+#ifdef __ANDROID__
+        SDL_Log("AUDIT_DRIVE_HUD_WAKE controls_visible=1");
+#endif
+        return OPENRIDE_UI_DRIVE_HUD_NONE;
+    }
+
     const double scale = ui->scale > 0.0f ? (double)ui->scale : 1.0;
     const double x = x_px / scale;
     const double y = y_px / scale;
     const OpenRideUIDriveHUDLayout layout =
-        openride_ui_drive_hud_layout(ui, false);
+        drive_hud_layout(ui, false, true);
     for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {
         if (openride_ui_point_in_rect(x, y, layout.control_items[i])) {
+            drive_controls_show(now_ns);
             return (OpenRideUIDriveHUDAction)(OPENRIDE_UI_DRIVE_HUD_EXIT + (int)i);
         }
     }
@@ -327,17 +409,19 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
                                 const OpenRideUIDriveHUDState *state)
 {
     if (!ui || !ui->renderer || !state) return;
+
+    const bool show_controls = drive_controls_note_frame(SDL_GetTicksNS());
     const OpenRideUIDriveHUDLayout layout =
-        openride_ui_drive_hud_layout(ui, state->show_following);
-    if (layout.top.w <= 0.0f || layout.controls.w <= 0.0f) return;
+        drive_hud_layout(ui, state->show_following, show_controls);
+    if (layout.top.w <= 0.0f || layout.stats.w <= 0.0f) return;
 
     SDL_Renderer *renderer = ui->renderer;
     const float ui_scale = ui->scale > 0.0f ? ui->scale : 1.0f;
     const float big_scale = ui_scale > 2.2f ? 3.0f : ui_scale * 1.35f;
     const float normal_scale = ui_scale > 2.2f ? 2.2f : ui_scale;
     const float small_scale = ui_scale > 1.8f ? 1.8f : ui_scale;
-    const float value_scale = ui_scale > 2.2f ? 2.35f : ui_scale * 1.05f;
-    const float label_scale = ui_scale > 1.65f ? 1.65f : ui_scale;
+    const float value_scale = ui_scale > 2.2f ? 2.15f : ui_scale;
+    const float label_scale = ui_scale > 1.55f ? 1.55f : ui_scale;
 
     const SDL_FRect top = openride_ui_rect_pixels(ui, layout.top);
     openride_ui_panel(ui, layout.top, true);
@@ -428,7 +512,8 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
         const float max_gps_width = top.w * 0.48f;
         gps_scale = drive_fit_scale(state->gps_text, gps_scale, max_gps_width);
         const float gps_width =
-            openride_ui_font_measure_width(state->gps_text, OPENRIDE_UI_FONT_COMPAT_HEIGHT * gps_scale);
+            openride_ui_font_measure_width(state->gps_text,
+                                           OPENRIDE_UI_FONT_COMPAT_HEIGHT * gps_scale);
         const float gps_y = state->status == OPENRIDE_UI_DRIVE_HUD_OFF_ROUTE
             ? top.y + 67.0f * ui_scale
             : top.y + 10.0f * ui_scale;
@@ -439,6 +524,8 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
                                state->gps_text);
     }
 
+    /* Persistent compact trip strip. Removing the second label row saves the
+     * near-field map while the value units remain self-explanatory. */
     const SDL_FRect stats = openride_ui_rect_pixels(ui, layout.stats);
     openride_ui_panel(ui, layout.stats, false);
 
@@ -448,46 +535,30 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
     snprintf(value, sizeof(value), "%.0f km/h", state->speed_kph);
     drive_draw_text_fit(renderer,
                         stats.x + 8.0f * ui_scale,
-                        stats.y + 8.0f * ui_scale,
+                        stats.y + 9.0f * ui_scale,
                         col_width - 16.0f * ui_scale,
                         value_scale,
                         value);
     snprintf(value, sizeof(value), "%.1f km", state->remaining_m / 1000.0);
     drive_draw_text_fit(renderer,
                         stats.x + col_width + 8.0f * ui_scale,
-                        stats.y + 8.0f * ui_scale,
+                        stats.y + 9.0f * ui_scale,
                         col_width - 16.0f * ui_scale,
                         value_scale,
                         value);
     drive_draw_text_fit(renderer,
                         stats.x + col_width * 2.0f + 8.0f * ui_scale,
-                        stats.y + 8.0f * ui_scale,
+                        stats.y + 9.0f * ui_scale,
                         col_width - 16.0f * ui_scale,
                         value_scale,
                         state->arrival_text ? state->arrival_text : "--:--");
-
-    SDL_SetRenderDrawColor(renderer, 160, 170, 179, 255);
-    drive_draw_scaled_text(renderer,
-                           stats.x + 8.0f * ui_scale,
-                           stats.y + 34.0f * ui_scale,
-                           label_scale,
-                           "VITESSE");
-    drive_draw_scaled_text(renderer,
-                           stats.x + col_width + 8.0f * ui_scale,
-                           stats.y + 34.0f * ui_scale,
-                           label_scale,
-                           "RESTANT");
-    drive_draw_scaled_text(renderer,
-                           stats.x + col_width * 2.0f + 8.0f * ui_scale,
-                           stats.y + 34.0f * ui_scale,
-                           label_scale,
-                           "ARRIVEE");
 
     if (state->reroute_count > 0U) {
         char reroutes[32];
         snprintf(reroutes, sizeof(reroutes), "recalcul %u", state->reroute_count);
         const float reroute_width =
-            openride_ui_font_measure_width(reroutes, OPENRIDE_UI_FONT_COMPAT_HEIGHT * label_scale);
+            openride_ui_font_measure_width(
+                reroutes, OPENRIDE_UI_FONT_COMPAT_HEIGHT * label_scale);
         SDL_SetRenderDrawColor(renderer, 170, 178, 185, 255);
         drive_draw_scaled_text(renderer,
                                stats.x + stats.w - reroute_width - 6.0f * ui_scale,
@@ -496,51 +567,58 @@ void openride_ui_drive_hud_draw(OpenRideUIContext *ui,
                                reroutes);
     }
 
-    const SDL_FRect controls = openride_ui_rect_pixels(ui, layout.controls);
-    openride_ui_panel(ui, layout.controls, true);
+    SDL_FRect attribution_anchor = stats;
+    if (show_controls && layout.controls.w > 0.0f) {
+        const SDL_FRect controls = openride_ui_rect_pixels(ui, layout.controls);
+        attribution_anchor = controls;
+        openride_ui_panel(ui, layout.controls, true);
+
+        const char *labels[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {
+            "CARTE",
+            "CENTRER",
+            state->heading_up ? "NORD" : "CAP",
+            "GPS"
+        };
+        static const OpenRideUIIcon control_icons[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {
+            OPENRIDE_UI_ICON_MAP,
+            OPENRIDE_UI_ICON_LOCATION,
+            OPENRIDE_UI_ICON_COMPASS,
+            OPENRIDE_UI_ICON_GPS
+        };
+        for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {
+            const OpenRideUIRect item = layout.control_items[i];
+            const OpenRideUIColor tint = i == 1U
+                ? ui->theme.primary
+                : ui->theme.text_secondary;
+            openride_ui_icon_draw(
+                ui,
+                control_icons[i],
+                openride_ui_rect(item.x + (item.w - 20.0f) * 0.5f,
+                                 item.y + 6.0f,
+                                 20.0f,
+                                 20.0f),
+                tint,
+                1.55f);
+            openride_ui_text_color(
+                ui,
+                openride_ui_rect(item.x + 2.0f,
+                                 item.y + item.h - 19.0f,
+                                 item.w - 4.0f,
+                                 14.0f),
+                labels[i],
+                OPENRIDE_UI_TEXT_CAPTION,
+                OPENRIDE_UI_TEXT_ALIGN_CENTER,
+                tint);
+        }
+    }
 
     if (state->show_attribution) {
         SDL_SetRenderDrawColor(renderer, 155, 163, 167, 70);
         drive_draw_scaled_text(renderer,
-                               controls.x + 4.0f * ui_scale,
-                               controls.y + controls.h + 2.0f * ui_scale,
-                               ui_scale > 1.15f ? 1.15f : ui_scale,
+                               attribution_anchor.x + 4.0f * ui_scale,
+                               attribution_anchor.y + attribution_anchor.h
+                                   + 1.0f * ui_scale,
+                               ui_scale > 1.10f ? 1.10f : ui_scale,
                                "(c) OpenStreetMap contributors | ODbL");
-    }
-
-    const char *labels[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {
-        "CARTE",
-        "CENTRER",
-        state->heading_up ? "NORD" : "CAP",
-        "GPS"
-    };
-    static const OpenRideUIIcon control_icons[OPENRIDE_UI_DRIVE_CONTROL_COUNT] = {
-        OPENRIDE_UI_ICON_MAP,
-        OPENRIDE_UI_ICON_LOCATION,
-        OPENRIDE_UI_ICON_COMPASS,
-        OPENRIDE_UI_ICON_GPS
-    };
-    for (uint32_t i = 0U; i < OPENRIDE_UI_DRIVE_CONTROL_COUNT; ++i) {
-        const OpenRideUIRect item = layout.control_items[i];
-        const OpenRideUIColor tint = i == 1U
-            ? ui->theme.primary
-            : ui->theme.text_secondary;
-        openride_ui_icon_draw(ui,
-                              control_icons[i],
-                              openride_ui_rect(item.x + (item.w - 22.0f) * 0.5f,
-                                               item.y + 8.0f,
-                                               22.0f,
-                                               22.0f),
-                              tint,
-                              1.65f);
-        openride_ui_text_color(ui,
-                               openride_ui_rect(item.x + 2.0f,
-                                                item.y + item.h - 22.0f,
-                                                item.w - 4.0f,
-                                                16.0f),
-                               labels[i],
-                               OPENRIDE_UI_TEXT_CAPTION,
-                               OPENRIDE_UI_TEXT_ALIGN_CENTER,
-                               tint);
     }
 }

@@ -41,6 +41,14 @@ OpenRideMapStyle openride_map_style_next(OpenRideMapStyle style);
 OpenRideMapPalette openride_map_palette(OpenRideMapStyle style);
 
 /*
+ * Drive Mode keeps the user's selected map style intact while applying a
+ * temporary navigation-first presentation. The flag is owned by the Drive
+ * controller and affects only cartographic paint/visibility decisions.
+ */
+void openride_map_style_set_drive_mode_active(bool active);
+bool openride_map_style_drive_mode_active(void);
+
+/*
  * Pure-C map styling policy. No SDL dependency.
  *
  * Keeping visibility and paint decisions here makes the cartographic rules

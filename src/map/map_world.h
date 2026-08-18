@@ -3,6 +3,14 @@
 
 #include <SDL3/SDL.h>
 
+#ifdef __ANDROID__
+#include "openride/drive_perspective_renderer.h"
+/* MapWorld owns the top-level installed-region clear. During Drive this starts
+ * an offscreen map scene; internal V11 compositor sources do not include this
+ * header and therefore keep clearing their own targets normally. */
+#define SDL_RenderClear openride_drive_perspective_clear
+#endif
+
 #include "map/ormap_renderer.h"
 #include "openride/map_camera.h"
 #include "openride/map_style.h"

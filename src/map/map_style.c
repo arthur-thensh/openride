@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+static bool g_drive_mode_active = false;
+
 static bool is_kind(const char *kind, const char *expected)
 {
     return kind && expected && strcmp(kind, expected) == 0;
@@ -59,6 +61,16 @@ static int population_bonus(int64_t population)
     return bonus;
 }
 
+void openride_map_style_set_drive_mode_active(bool active)
+{
+    g_drive_mode_active = active;
+}
+
+bool openride_map_style_drive_mode_active(void)
+{
+    return g_drive_mode_active;
+}
+
 const char *openride_map_style_name(OpenRideMapStyle style)
 {
     switch (style) {
@@ -82,6 +94,23 @@ OpenRideMapStyle openride_map_style_next(OpenRideMapStyle style)
 OpenRideMapPalette openride_map_palette(OpenRideMapStyle style)
 {
     OpenRideMapPalette palette;
+
+    if (g_drive_mode_active) {
+        /*
+         * Drive keeps a neutral, low-detail canvas, but the land tone is
+         * deliberately a little darker than road fills so the surrounding
+         * network remains readable at a glance on a motorcycle screen.
+         */
+        palette.background = color(242, 244, 240, 255);
+        palette.water = color(163, 196, 214, 220);
+        palette.water_line = color(125, 176, 202, 205);
+        palette.boundary = color(176, 179, 174, 75);
+        palette.building = color(238, 240, 236, 35);
+        palette.rail = color(132, 138, 134, 105);
+        palette.label = color(61, 66, 64, 225);
+        palette.label_halo = color(250, 251, 248, 245);
+        return palette;
+    }
 
     switch (style) {
         case OPENRIDE_MAP_STYLE_ROAD:
@@ -128,6 +157,17 @@ bool openride_map_place_label_visible(const char *kind,
                                       int64_t population,
                                       double zoom)
 {
+    if (g_drive_mode_active) {
+        /* Keep only orientation-scale place names while riding. */
+        if (!kind || kind[0] == '\0') return false;
+        if (is_kind(kind, "capital")) return zoom >= 4.0;
+        if (is_kind(kind, "city")) return zoom >= 7.0;
+        if (is_kind(kind, "town")) return zoom >= 9.5;
+        if (is_kind(kind, "village")) return zoom >= 12.5;
+        if (is_kind(kind, "suburb")) return zoom >= 16.5;
+        return false;
+    }
+
     if (!kind || kind[0] == '\0') return zoom >= 13.0;
 
     if (is_kind(kind, "capital")) return zoom >= 4.0;
@@ -183,6 +223,7 @@ int openride_map_place_label_priority(const char *kind,
 
 bool openride_map_buildings_visible(OpenRideMapStyle style, double zoom)
 {
+    if (g_drive_mode_active) return false;
     if (style == OPENRIDE_MAP_STYLE_TRAIL) return zoom >= 16.0;
     if (style == OPENRIDE_MAP_STYLE_TOPO) return zoom >= 15.0;
     return zoom >= 13.75;
@@ -194,6 +235,27 @@ bool openride_map_road_visible_for_style(OpenRideMapStyle style,
 {
     if (!kind || kind[0] == '\0') return zoom >= 12.0;
     if (!road_runtime_fade_started(kind, zoom)) return false;
+
+    if (g_drive_mode_active) {
+        if (is_kind(kind, "motorway") || is_kind(kind, "trunk")) return zoom >= 5.0;
+        if (is_kind(kind, "primary")) return zoom >= 8.0;
+        if (is_kind(kind, "secondary")) return zoom >= 11.75;
+        if (is_kind(kind, "tertiary")) return zoom >= 12.75;
+        if (is_kind(kind, "unclassified") ||
+            is_kind(kind, "residential") ||
+            is_kind(kind, "living_street")) {
+            return zoom >= 13.75;
+        }
+        if (is_kind(kind, "service")) return zoom >= 14.5;
+        if (is_kind(kind, "track")) return zoom >= 14.5;
+        if (is_kind(kind, "path") ||
+            is_kind(kind, "footway") ||
+            is_kind(kind, "cycleway") ||
+            is_kind(kind, "steps")) {
+            return zoom >= 14.75;
+        }
+        return zoom >= 14.0;
+    }
 
     if (is_kind(kind, "motorway") || is_kind(kind, "trunk")) return zoom >= 5.0;
     if (is_kind(kind, "primary")) return zoom >= 8.0;
@@ -274,6 +336,59 @@ bool openride_map_road_paint(OpenRideMapStyle style,
                       is_kind(kind, "footway") ||
                       is_kind(kind, "cycleway") ||
                       is_kind(kind, "steps");
+
+    if (g_drive_mode_active) {
+        /*
+         * Drive keeps the map sparse by hiding unrelated detail, not by
+         * hiding the road network. Every drivable class therefore gets a
+         * strong neutral casing and a light carriageway, while the active
+         * route remains dominant because its overlay is far wider and blue.
+         */
+        if (motorway) {
+            paint->line = color(246, 224, 183, 255);
+            paint->casing = color(132, 126, 113, 245);
+            paint->width = 4;
+            paint->casing_width = 6;
+        } else if (primary) {
+            paint->line = color(250, 235, 198, 255);
+            paint->casing = color(136, 132, 118, 245);
+            paint->width = 4;
+            paint->casing_width = 6;
+        } else if (secondary) {
+            paint->line = color(255, 247, 221, 255);
+            paint->casing = color(143, 146, 137, 245);
+            paint->width = 3;
+            paint->casing_width = 5;
+        } else if (tertiary) {
+            paint->line = color(255, 255, 251, 255);
+            paint->casing = color(145, 151, 145, 245);
+            paint->width = 3;
+            paint->casing_width = 4;
+        } else if (local) {
+            paint->line = color(255, 255, 252, 255);
+            paint->casing = color(150, 158, 150, 240);
+            paint->width = 2;
+            paint->casing_width = 4;
+        } else if (track) {
+            paint->line = color(126, 83, 38, 255);
+            paint->casing = color(226, 208, 178, 235);
+            paint->width = 2;
+            paint->casing_width = 4;
+            paint->dashed = true;
+        } else if (path) {
+            paint->line = color(55, 103, 52, 245);
+            paint->casing = color(224, 233, 219, 220);
+            paint->width = 2;
+            paint->casing_width = 3;
+            paint->dashed = true;
+        } else {
+            paint->line = color(252, 253, 249, 255);
+            paint->casing = color(164, 171, 165, 225);
+            paint->width = 1;
+            paint->casing_width = 3;
+        }
+        return true;
+    }
 
     if (style == OPENRIDE_MAP_STYLE_ROAD) {
         if (motorway) {

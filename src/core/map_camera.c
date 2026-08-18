@@ -1,4 +1,5 @@
 #include "openride/map_camera.h"
+#include "openride/drive_mode.h"
 
 #include <math.h>
 
@@ -155,6 +156,13 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
                                       int viewport_width,
                                       int viewport_height)
 {
+    /* Feed the actual rendered viewport/zoom back to Drive. The controller
+     * consumes it on the following update to adjust its geographic center;
+     * this projection itself stays completely renderer-neutral. */
+    openride_drive_mode_note_render_view(viewport_width,
+                                         viewport_height,
+                                         camera->zoom);
+
     const OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
     const OpenRidePointD point = openride_mercator_forward(lat_deg, lon_deg);
     const double world_size = openride_world_size_pixels(camera->zoom);

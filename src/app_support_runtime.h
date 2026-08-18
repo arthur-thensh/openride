@@ -82,6 +82,38 @@ bool SDLCALL openride_app_support_lifecycle_event_watch(void *userdata, SDL_Even
 
 double openride_app_support_clampd(double value, double min_value, double max_value);
 
+/*
+ * The historical app runtime caps scalable Drive maps at z18. V2.5.2 keeps
+ * that call site intact but translates the semantic Drive zoom to a closer
+ * visual scale before applying a z19.3 render ceiling. The override is active
+ * only while Drive styling is active and only for the legacy z18 ceiling, so
+ * ordinary map/UI clamps retain their original semantics.
+ */
+static inline double openride_app_support_drive_zoom_clampd(
+    double value,
+    double min_value,
+    double max_value)
+{
+    if (openride_map_style_drive_mode_active()
+        && max_value >= 17.999
+        && max_value <= 18.001) {
+        const double render_zoom = openride_drive_mode_render_zoom(value);
+        const double drive_render_max = 19.3;
+        if (render_zoom < min_value) return min_value;
+        if (render_zoom > drive_render_max) return drive_render_max;
+        return render_zoom;
+    }
+    return openride_app_support_clampd(value, min_value, max_value);
+}
+
+/* app_runtime.c includes app_runtime.h before this header. Restrict the small
+ * compatibility interception to that translation unit; app_support_runtime.c
+ * and every other caller continue to bind directly to the ordinary clamp. */
+#ifdef OPENRIDE_APP_RUNTIME_H
+#define openride_app_support_clampd(value, min_value, max_value) \
+    openride_app_support_drive_zoom_clampd((value), (min_value), (max_value))
+#endif
+
 bool openride_app_support_file_exists(const char *path);
 
 bool openride_app_support_is_vector_map(const OpenRideMBTilesMetadata *metadata);

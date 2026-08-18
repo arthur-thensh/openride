@@ -6,6 +6,9 @@
 
 int main(void)
 {
+    openride_map_style_set_drive_mode_active(false);
+    assert(!openride_map_style_drive_mode_active());
+
     assert(strcmp(openride_map_style_name(OPENRIDE_MAP_STYLE_TRAIL), "Trail") == 0);
     assert(openride_map_style_next(OPENRIDE_MAP_STYLE_ROAD) == OPENRIDE_MAP_STYLE_TRAIL);
     assert(openride_map_style_next(OPENRIDE_MAP_STYLE_TRAIL) == OPENRIDE_MAP_STYLE_TOPO);
@@ -79,6 +82,89 @@ int main(void)
                                    &paint));
     assert(!paint.dashed);
     assert(paint.casing_width > paint.width);
+
+    /* Drive temporarily overrides paint/visibility without changing the
+     * user's selected Road/Trail/Topo style value. */
+    openride_map_style_set_drive_mode_active(true);
+    assert(openride_map_style_drive_mode_active());
+
+    const OpenRideMapPalette drive =
+        openride_map_palette(OPENRIDE_MAP_STYLE_TRAIL);
+    assert(drive.background.r >= 240U);
+    assert(drive.background.g >= 240U);
+    assert(drive.background.b >= 235U);
+    assert(drive.building.r + 12U >= drive.background.r);
+    assert(drive.building.g + 12U >= drive.background.g);
+    assert(drive.building.b + 12U >= drive.background.b);
+    assert(!openride_map_buildings_visible(OPENRIDE_MAP_STYLE_TRAIL, 18.0));
+
+    assert(openride_map_place_label_visible("city", 0, 18.0));
+    assert(openride_map_place_label_visible("village", 0, 18.0));
+    assert(!openride_map_place_label_visible("hamlet", 0, 18.0));
+    assert(!openride_map_place_label_visible("quarter", 0, 18.0));
+    assert(!openride_map_place_label_visible("locality", 0, 18.0));
+
+    OpenRideMapRoadPaint drive_primary;
+    OpenRideMapRoadPaint drive_secondary;
+    OpenRideMapRoadPaint drive_tertiary;
+    OpenRideMapRoadPaint drive_local;
+    OpenRideMapRoadPaint drive_track;
+    OpenRideMapRoadPaint drive_path;
+
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "primary",
+                                   false,
+                                   18.0,
+                                   &drive_primary));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "secondary",
+                                   false,
+                                   18.0,
+                                   &drive_secondary));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "tertiary",
+                                   false,
+                                   18.0,
+                                   &drive_tertiary));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "residential",
+                                   false,
+                                   18.0,
+                                   &drive_local));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "track",
+                                   false,
+                                   18.0,
+                                   &drive_track));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "path",
+                                   false,
+                                   18.0,
+                                   &drive_path));
+
+    assert(drive_primary.width >= drive_secondary.width);
+    assert(drive_secondary.width >= drive_tertiary.width);
+    assert(drive_tertiary.width > drive_local.width);
+    assert(drive_local.width >= 2);
+    assert(drive_local.casing_width > drive_local.width);
+    assert(drive_local.casing.a >= 180U);
+    assert(drive_track.dashed);
+    assert(drive_track.width == 2);
+    assert(drive_track.casing_width > drive_track.width);
+    assert(drive_path.dashed);
+    assert(drive_path.width == 2);
+    assert(!openride_map_road_visible_for_style(OPENRIDE_MAP_STYLE_TRAIL,
+                                                "track",
+                                                14.25));
+    assert(openride_map_road_visible_for_style(OPENRIDE_MAP_STYLE_TRAIL,
+                                               "track",
+                                               14.50));
+
+    /* Normal cartography must be restored immediately after Drive. */
+    openride_map_style_set_drive_mode_active(false);
+    assert(!openride_map_style_drive_mode_active());
+    assert(openride_map_buildings_visible(OPENRIDE_MAP_STYLE_TRAIL, 16.0));
+    assert(openride_map_place_label_visible("hamlet", 300, 14.0));
 
     puts("Map style tests: OK");
     return 0;

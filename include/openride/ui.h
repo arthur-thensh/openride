@@ -3,6 +3,14 @@
 
 #include <SDL3/SDL.h>
 
+#ifdef __ANDROID__
+#include "openride/drive_perspective_renderer.h"
+/* The first UI blend setup in a Drive frame happens after map, route and rider
+ * rendering. Present the offscreen 2.5D scene at that exact boundary; later UI
+ * blend changes are ordinary pass-through calls because capture is then off. */
+#define SDL_SetRenderDrawBlendMode openride_drive_perspective_set_blend_mode
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
