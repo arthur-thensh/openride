@@ -77,6 +77,7 @@ static void test_camera_lookahead(void)
     assert(fabs(state.camera_zoom - state.target_camera_zoom) < 1e-12);
     assert(fabs(state.camera_bearing_deg - state.target_camera_bearing_deg) < 1e-12);
     assert(state.lookahead_distance_m > 0.0);
+    assert(!state.framing_active);
 }
 
 static void test_camera_maneuver_anticipation(void)
@@ -234,46 +235,18 @@ static void test_north_up_lookahead_follows_travel_direction(void)
     assert(fabs(state.target_camera_bearing_deg) < 1e-9);
     assert(state.camera_lon > lon);
     assert(fabs(state.camera_lat - lat) < 0.001);
+    assert(!state.framing_active);
 }
 
-static void test_screen_anchor_lifecycle(void)
+static void test_render_view_framing_lifecycle(void)
 {
     const double lat = 50.3708;
     const double lon = 3.0802;
+    const double speed = 60.0 / 3.6;
 
     OpenRideDriveModeState state;
     openride_drive_mode_init(&state);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
-
     openride_drive_mode_set_active(&state, true);
-    openride_drive_mode_update(&state,
-                               true,
-                               true,
-                               0.0,
-                               5.0,
-                               lat,
-                               lon,
-                               60.0 / 3.6,
-                               90.0,
-                               1000.0,
-                               0.016);
-
-    double rider_lat = 0.0;
-    double rider_lon = 0.0;
-    double x_ratio = 0.0;
-    double y_ratio = 0.0;
-    assert(openride_drive_mode_get_screen_anchor(&rider_lat,
-                                                  &rider_lon,
-                                                  &x_ratio,
-                                                  &y_ratio));
-    assert(fabs(rider_lat - lat) < 1e-12);
-    assert(fabs(rider_lon - lon) < 1e-12);
-    assert(fabs(x_ratio - 0.50) < 1e-12);
-    assert(fabs(y_ratio - 0.70) < 1e-12);
-
-    OpenRideDriveModeState reset_state;
-    openride_drive_mode_init(&reset_state);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
 
     openride_drive_mode_update(&state,
                                true,
@@ -282,14 +255,42 @@ static void test_screen_anchor_lifecycle(void)
                                5.0,
                                lat,
                                lon,
-                               60.0 / 3.6,
+                               speed,
                                90.0,
                                1000.0,
                                0.016);
-    assert(openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    assert(!state.framing_active);
+
+    openride_drive_mode_note_render_view(1000, 1000, 18.0);
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               lat,
+                               lon,
+                               speed,
+                               90.0,
+                               1000.0,
+                               0.016);
+    assert(state.framing_active);
+    assert(fabs(state.rider_screen_x_ratio - 0.50) < 1e-12);
+    assert(state.rider_screen_y_ratio >= 0.68 - 1e-12);
+    assert(state.rider_screen_y_ratio <= 0.72 + 1e-12);
 
     openride_drive_mode_set_heading_up(&state, false);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               lat,
+                               lon,
+                               speed,
+                               90.0,
+                               1000.0,
+                               0.016);
+    assert(!state.framing_active);
 
     openride_drive_mode_set_heading_up(&state, true);
     openride_drive_mode_update(&state,
@@ -299,11 +300,11 @@ static void test_screen_anchor_lifecycle(void)
                                5.0,
                                lat,
                                lon,
-                               60.0 / 3.6,
+                               speed,
                                90.0,
                                1000.0,
                                0.016);
-    assert(openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    assert(state.framing_active);
 
     openride_drive_mode_update(&state,
                                true,
@@ -312,14 +313,14 @@ static void test_screen_anchor_lifecycle(void)
                                5.0,
                                lat,
                                lon,
-                               60.0 / 3.6,
+                               speed,
                                90.0,
                                1000.0,
                                0.016);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    assert(!state.framing_active);
 
     openride_drive_mode_set_active(&state, false);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    assert(!state.framing_active);
 }
 
 int main(void)
@@ -332,7 +333,7 @@ int main(void)
     test_heading_input_smoothing();
     test_speed_input_smoothing();
     test_north_up_lookahead_follows_travel_direction();
-    test_screen_anchor_lifecycle();
+    test_render_view_framing_lifecycle();
     puts("OpenRide drive mode tests: OK");
     return 0;
 }
