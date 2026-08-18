@@ -31,6 +31,14 @@ typedef struct OpenRideDriveModeState {
     double smoothed_speed_mps;
     double smoothed_heading_deg;
 
+    bool framing_active;
+    double rider_raw_x_ratio;
+    double rider_raw_y_ratio;
+    double rider_screen_x_ratio;
+    double rider_screen_y_ratio;
+    double framing_correction_x_ratio;
+    double framing_correction_y_ratio;
+
     double gps_age_s;
     double gps_accuracy_m;
     OpenRideGPSQuality gps_quality;
@@ -41,6 +49,16 @@ void openride_drive_mode_set_active(OpenRideDriveModeState *state, bool active);
 void openride_drive_mode_set_heading_up(OpenRideDriveModeState *state, bool heading_up);
 void openride_drive_mode_set_auto_zoom(OpenRideDriveModeState *state, bool auto_zoom);
 
+/*
+ * Publish the viewport and actual map zoom observed during rendering. Drive
+ * uses this on the following update to keep the motorcycle in its lower-screen
+ * framing band by moving the real geographic camera center. The map renderer
+ * therefore remains the single source of truth for every layer.
+ */
+void openride_drive_mode_note_render_view(int viewport_width,
+                                          int viewport_height,
+                                          double render_zoom);
+
 double openride_drive_mode_target_zoom(double speed_mps, double maneuver_distance_m);
 double openride_drive_mode_lookahead_m(double speed_mps);
 double openride_drive_mode_target_lookahead_m(double speed_mps,
@@ -50,23 +68,6 @@ OpenRideGPSQuality openride_drive_mode_gps_quality(bool gps_active,
                                                    double sample_age_s,
                                                    double accuracy_m);
 const char *openride_drive_mode_gps_quality_name(OpenRideGPSQuality quality);
-
-/*
- * Drive V2.2 screen-space framing contract.
- *
- * While heading-up Drive is active with a usable GPS sample, the map transform
- * can keep the rider near a preferred lower-screen anchor without replacing
- * the geographic look-ahead. The returned y ratio is the preferred anchor;
- * map_camera keeps a small tolerance band around it so useful look-ahead
- * variation remains visible.
- *
- * Returns false when no Drive framing should be applied. Ratios are normalized
- * viewport coordinates (0..1).
- */
-bool openride_drive_mode_get_screen_anchor(double *out_rider_lat,
-                                           double *out_rider_lon,
-                                           double *out_x_ratio,
-                                           double *out_y_ratio);
 
 void openride_drive_mode_update(OpenRideDriveModeState *state,
                                 bool gps_active,
