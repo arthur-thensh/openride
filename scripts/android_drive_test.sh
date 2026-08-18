@@ -60,16 +60,24 @@ DEVICE_DIR="$OUTPUT_DIR/device"
 VIDEO_DIR="$OUTPUT_DIR/videos"
 mkdir -p "$LOG_DIR" "$SCREEN_DIR/drive-mode" "$METRIC_DIR" "$DEVICE_DIR" "$VIDEO_DIR"
 
-# Reuse the Android helpers maintained by global_audit.sh. Delimit the sourced
-# block with executable code rather than comments so formatting changes cannot
-# silently produce an empty helper set.
-source <(
+# Reuse the Android helpers maintained by global_audit.sh. Use exact string
+# comparisons here: BSD awk on macOS does not interpret escaped parentheses in
+# EREs the same way as GNU awk, which previously left the helper block empty.
+AUDIT_HELPERS="$(
     awk '
-        /^ADB=\(\)$/ {inside=1}
-        /^make_manifest\(\)/ {exit}
+        $0 == "ADB=()" {inside=1}
+        index($0, "make_manifest()") == 1 {exit}
         inside {print}
     ' "$SCRIPT_DIR/global_audit.sh"
-)
+)"
+
+if [ -z "$AUDIT_HELPERS" ]; then
+    echo "ERROR: impossible d'extraire les helpers Android de global_audit.sh." >&2
+    exit 1
+fi
+
+eval "$AUDIT_HELPERS"
+unset AUDIT_HELPERS
 
 for helper in \
     setup_adb android_device_info android_grant_test_permissions \
@@ -83,6 +91,8 @@ for helper in \
         exit 1
     fi
 done
+
+echo "Helpers Android chargés depuis global_audit.sh."
 
 EMULATOR_STARTED_BY_TEST=0
 VIDEO_ACTIVE=0
