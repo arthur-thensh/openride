@@ -72,6 +72,11 @@ static void test_camera_lookahead(void)
     assert(state.initialized);
     assert(state.camera_lon > 3.0802);
     assert(fabs(state.camera_bearing_deg - 90.0) < 0.01);
+    assert(fabs(state.camera_lat - state.target_camera_lat) < 1e-12);
+    assert(fabs(state.camera_lon - state.target_camera_lon) < 1e-12);
+    assert(fabs(state.camera_zoom - state.target_camera_zoom) < 1e-12);
+    assert(fabs(state.camera_bearing_deg - state.target_camera_bearing_deg) < 1e-12);
+    assert(state.lookahead_distance_m > 0.0);
 }
 
 static void test_camera_maneuver_anticipation(void)
@@ -127,6 +132,110 @@ static void test_camera_maneuver_anticipation(void)
     assert(fabs(near_state.camera_bearing_deg - 90.0) < 0.01);
 }
 
+static void test_heading_input_smoothing(void)
+{
+    OpenRideDriveModeState state;
+    openride_drive_mode_init(&state);
+    openride_drive_mode_set_active(&state, true);
+
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               50.0,
+                               3.0,
+                               60.0 / 3.6,
+                               0.0,
+                               1000.0,
+                               0.016);
+    assert(fabs(state.smoothed_heading_deg) < 1e-9);
+
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               50.0,
+                               3.0,
+                               60.0 / 3.6,
+                               90.0,
+                               1000.0,
+                               0.100);
+
+    assert(state.smoothed_heading_deg > 0.0);
+    assert(state.smoothed_heading_deg < 90.0);
+    assert(state.target_camera_bearing_deg > 0.0);
+    assert(state.target_camera_bearing_deg < 90.0);
+    assert(state.camera_bearing_deg > 0.0);
+    assert(state.camera_bearing_deg < state.target_camera_bearing_deg);
+}
+
+static void test_speed_input_smoothing(void)
+{
+    OpenRideDriveModeState state;
+    openride_drive_mode_init(&state);
+    openride_drive_mode_set_active(&state, true);
+
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               50.0,
+                               3.0,
+                               5.0,
+                               0.0,
+                               1000.0,
+                               0.016);
+    assert(fabs(state.smoothed_speed_mps - 5.0) < 1e-9);
+
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               50.0,
+                               3.0,
+                               30.0,
+                               0.0,
+                               1000.0,
+                               0.100);
+
+    assert(state.smoothed_speed_mps > 5.0);
+    assert(state.smoothed_speed_mps < 30.0);
+    assert(state.target_camera_zoom
+           > openride_drive_mode_target_zoom(30.0, 1000.0));
+}
+
+static void test_north_up_lookahead_follows_travel_direction(void)
+{
+    OpenRideDriveModeState state;
+    openride_drive_mode_init(&state);
+    openride_drive_mode_set_active(&state, true);
+    openride_drive_mode_set_heading_up(&state, false);
+
+    const double lat = 50.0;
+    const double lon = 3.0;
+    openride_drive_mode_update(&state,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               lat,
+                               lon,
+                               60.0 / 3.6,
+                               90.0,
+                               1000.0,
+                               0.016);
+
+    assert(state.initialized);
+    assert(fabs(state.camera_bearing_deg) < 1e-9);
+    assert(fabs(state.target_camera_bearing_deg) < 1e-9);
+    assert(state.camera_lon > lon);
+    assert(fabs(state.camera_lat - lat) < 0.001);
+}
+
 int main(void)
 {
     test_gps_quality();
@@ -134,6 +243,9 @@ int main(void)
     test_maneuver_lookahead();
     test_camera_lookahead();
     test_camera_maneuver_anticipation();
+    test_heading_input_smoothing();
+    test_speed_input_smoothing();
+    test_north_up_lookahead_follows_travel_direction();
     puts("OpenRide drive mode tests: OK");
     return 0;
 }
