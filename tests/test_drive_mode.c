@@ -1,8 +1,23 @@
 #include "openride/drive_mode.h"
+#include "openride/map_style.h"
 
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+
+static void test_drive_map_style_lifecycle(void)
+{
+    OpenRideDriveModeState state;
+    openride_map_style_set_drive_mode_active(false);
+    openride_drive_mode_init(&state);
+    assert(!openride_map_style_drive_mode_active());
+
+    openride_drive_mode_set_active(&state, true);
+    assert(openride_map_style_drive_mode_active());
+
+    openride_drive_mode_set_active(&state, false);
+    assert(!openride_map_style_drive_mode_active());
+}
 
 static void test_gps_quality(void)
 {
@@ -78,6 +93,7 @@ static void test_camera_lookahead(void)
     assert(fabs(state.camera_bearing_deg - state.target_camera_bearing_deg) < 1e-12);
     assert(state.lookahead_distance_m > 0.0);
     assert(!state.framing_active);
+    openride_drive_mode_set_active(&state, false);
 }
 
 static void test_camera_maneuver_anticipation(void)
@@ -131,6 +147,7 @@ static void test_camera_maneuver_anticipation(void)
     assert(near_state.camera_lon < far_state.camera_lon);
     assert(fabs(approach_state.camera_bearing_deg - 90.0) < 0.01);
     assert(fabs(near_state.camera_bearing_deg - 90.0) < 0.01);
+    openride_drive_mode_set_active(&near_state, false);
 }
 
 static void test_heading_input_smoothing(void)
@@ -170,6 +187,7 @@ static void test_heading_input_smoothing(void)
     assert(state.target_camera_bearing_deg < 90.0);
     assert(state.camera_bearing_deg > 0.0);
     assert(state.camera_bearing_deg < state.target_camera_bearing_deg);
+    openride_drive_mode_set_active(&state, false);
 }
 
 static void test_speed_input_smoothing(void)
@@ -207,6 +225,7 @@ static void test_speed_input_smoothing(void)
     assert(state.smoothed_speed_mps < 30.0);
     assert(state.target_camera_zoom
            > openride_drive_mode_target_zoom(30.0, 1000.0));
+    openride_drive_mode_set_active(&state, false);
 }
 
 static void test_north_up_lookahead_follows_travel_direction(void)
@@ -236,6 +255,7 @@ static void test_north_up_lookahead_follows_travel_direction(void)
     assert(state.camera_lon > lon);
     assert(fabs(state.camera_lat - lat) < 0.001);
     assert(!state.framing_active);
+    openride_drive_mode_set_active(&state, false);
 }
 
 static void test_render_view_framing_lifecycle(void)
@@ -321,10 +341,12 @@ static void test_render_view_framing_lifecycle(void)
 
     openride_drive_mode_set_active(&state, false);
     assert(!state.framing_active);
+    assert(!openride_map_style_drive_mode_active());
 }
 
 int main(void)
 {
+    test_drive_map_style_lifecycle();
     test_gps_quality();
     test_auto_zoom();
     test_maneuver_lookahead();
@@ -334,6 +356,7 @@ int main(void)
     test_speed_input_smoothing();
     test_north_up_lookahead_follows_travel_direction();
     test_render_view_framing_lifecycle();
+    assert(!openride_map_style_drive_mode_active());
     puts("OpenRide drive mode tests: OK");
     return 0;
 }
