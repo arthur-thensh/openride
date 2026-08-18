@@ -54,12 +54,13 @@ const char *openride_drive_mode_gps_quality_name(OpenRideGPSQuality quality);
 /*
  * Drive V2.2 screen-space framing contract.
  *
- * While heading-up Drive is active with a usable GPS sample, the map camera
- * transform anchors the rider at a stable screen position instead of letting
- * the geographic look-ahead move the rider vertically. The geographic camera
- * target remains independent and continues to provide maneuver anticipation.
+ * While heading-up Drive is active with a usable GPS sample, the map transform
+ * can keep the rider near a preferred lower-screen anchor without replacing
+ * the geographic look-ahead. The returned y ratio is the preferred anchor;
+ * map_camera keeps a small tolerance band around it so useful look-ahead
+ * variation remains visible.
  *
- * Returns false when no Drive anchor should be applied. Ratios are normalized
+ * Returns false when no Drive framing should be applied. Ratios are normalized
  * viewport coordinates (0..1).
  */
 bool openride_drive_mode_get_screen_anchor(double *out_rider_lat,
