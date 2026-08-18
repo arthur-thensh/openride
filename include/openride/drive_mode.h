@@ -16,10 +16,21 @@ typedef struct OpenRideDriveModeState {
     bool heading_up;
     bool auto_zoom;
     bool initialized;
+
     double camera_lat;
     double camera_lon;
     double camera_zoom;
     double camera_bearing_deg;
+
+    double target_camera_lat;
+    double target_camera_lon;
+    double target_camera_zoom;
+    double target_camera_bearing_deg;
+    double lookahead_distance_m;
+
+    double smoothed_speed_mps;
+    double smoothed_heading_deg;
+
     double gps_age_s;
     double gps_accuracy_m;
     OpenRideGPSQuality gps_quality;
