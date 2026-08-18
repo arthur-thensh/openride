@@ -13,6 +13,7 @@ START_PLACE="${OPENRIDE_DRIVE_START_PLACE:-Douai}"
 DESTINATION_PLACE="${OPENRIDE_DRIVE_DESTINATION_PLACE:-Arras}"
 GPS_SIM_Y_PCT="${OPENRIDE_DRIVE_GPS_SIM_Y_PCT:-0.540}"
 KEEP_EMULATOR="${OPENRIDE_DRIVE_KEEP_EMULATOR:-0}"
+REUSE_ANDROID="${OPENRIDE_DRIVE_REUSE_ANDROID:-0}"
 OUTPUT_DIR="${OPENRIDE_DRIVE_TEST_OUTPUT:-$HOME/Downloads/openride-drive-$(date +%Y%m%d-%H%M%S)}"
 
 case "$EMULATOR_PORT" in
@@ -31,6 +32,13 @@ if [ "$DRIVE_SECONDS" -lt 15 ] || [ "$DRIVE_SECONDS" -gt 75 ]; then
     echo "ERROR: OPENRIDE_DRIVE_TEST_SECONDS doit être compris entre 15 et 75 secondes." >&2
     exit 2
 fi
+case "$REUSE_ANDROID" in
+    0|1) ;;
+    *)
+        echo "ERROR: OPENRIDE_DRIVE_REUSE_ANDROID doit valoir 0 ou 1." >&2
+        exit 2
+        ;;
+esac
 case "$SERIAL" in
     emulator-*) ;;
     *)
@@ -100,6 +108,7 @@ VIDEO_PATH="$VIDEO_DIR/android_drive_mode.mp4"
 DRIVE_PID=""
 TEST_RC=0
 FAIL_REASON=""
+CURRENT_STAGE="initialisation"
 
 cleanup() {
     local rc=$?
@@ -112,10 +121,23 @@ cleanup() {
         "$SCRIPT_DIR/android_emulator_stop.sh" >/dev/null 2>&1 || true
     fi
     if [ "$rc" -ne 0 ]; then
-        echo "Drive test interrompu (rc=$rc). Résultats partiels: $OUTPUT_DIR" >&2
+        echo "Drive test interrompu (rc=$rc) pendant: $CURRENT_STAGE" >&2
+        echo "Résultats partiels: $OUTPUT_DIR" >&2
     fi
 }
 trap cleanup EXIT INT TERM
+
+run_required_stage() {
+    local label="$1"
+    shift
+    CURRENT_STAGE="$label"
+    echo
+    echo "[Drive] $label"
+    if ! "$@"; then
+        echo "ERROR: étape échouée: $label" >&2
+        return 1
+    fi
+}
 
 pct_px() {
     awk -v total="$1" -v pct="$2" 'BEGIN {printf "%d", total * pct + 0.5}'
@@ -260,6 +282,9 @@ echo "=============================================================="
 echo "Target : $SERIAL"
 echo "Route  : $START_PLACE -> $DESTINATION_PLACE"
 echo "Output : $OUTPUT_DIR"
+if [ "$REUSE_ANDROID" -eq 1 ]; then
+    echo "APK/data: réutilisation de l'installation existante"
+fi
 echo
 
 if adb -s "$SERIAL" get-state >/dev/null 2>&1; then
@@ -268,19 +293,44 @@ else
     EMULATOR_STARTED_BY_TEST=1
 fi
 
+CURRENT_STAGE="démarrage de l'émulateur"
 "$SCRIPT_DIR/android_emulator_start.sh"
 export ANDROID_SERIAL="$SERIAL"
 
-# Existing authoritative project pipeline.
-"$SCRIPT_DIR/android_build.sh"
-"$SCRIPT_DIR/android_install.sh"
-"$SCRIPT_DIR/android_push_data.sh"
+if [ "$REUSE_ANDROID" -eq 0 ]; then
+    CURRENT_STAGE="build Android"
+    "$SCRIPT_DIR/android_build.sh"
+    CURRENT_STAGE="installation APK"
+    "$SCRIPT_DIR/android_install.sh"
+    CURRENT_STAGE="copie des données hors ligne"
+    "$SCRIPT_DIR/android_push_data.sh"
+else
+    echo "[Drive] Build/install/data ignorés (OPENRIDE_DRIVE_REUSE_ANDROID=1)."
+fi
 
-setup_adb
-android_device_info
-android_grant_test_permissions
-android_logcat_clear
-android_launch_clean
+run_required_stage "détection ADB" setup_adb
+run_required_stage "inventaire Android" android_device_info
+run_required_stage "permissions Android" android_grant_test_permissions
+
+CURRENT_STAGE="nettoyage logcat"
+echo
+echo "[Drive] nettoyage logcat"
+if ! android_logcat_clear; then
+    echo "WARN: adb logcat -c a échoué; le test continue avec le log existant." >&2
+fi
+
+CURRENT_STAGE="lancement OpenRide et attente du premier frame"
+echo
+echo "[Drive] lancement OpenRide et attente du premier frame"
+if ! android_launch_clean; then
+    FAIL_REASON="OpenRide n'a pas atteint AUDIT_FIRST_FRAME_READY"
+    "${ADB[@]}" logcat -d -v threadtime > "$DEVICE_DIR/logcat_launch_failure.txt" 2>&1 || true
+    echo "ERROR: $FAIL_REASON" >&2
+    echo "Dernières lignes logcat:" >&2
+    tail -n 120 "$DEVICE_DIR/logcat_launch_failure.txt" >&2 || true
+    exit 1
+fi
+
 DRIVE_PID="$(android_pid)"
 [ -n "$DRIVE_PID" ] || {
     echo "ERROR: processus OpenRide introuvable." >&2
@@ -289,6 +339,7 @@ DRIVE_PID="$(android_pid)"
 
 echo "OpenRide pid=$DRIVE_PID screen=${SCREEN_W}x${SCREEN_H}"
 
+CURRENT_STAGE="création de la route $START_PLACE vers $DESTINATION_PLACE"
 # Real UI flow: Route -> search start -> search destination -> calculate.
 TOOLBAR_Y="$(pct_px "$SCREEN_H" 0.938)"
 ROUTE_X="$(pct_px "$SCREEN_W" 0.500)"
@@ -324,6 +375,7 @@ if ! wait_marker 'AUDIT_ROUTE_SIM_READY' "$ROUTE_READY_BEFORE" 20; then
 fi
 capture_drive "01_route_ready.png"
 
+CURRENT_STAGE="activation du GPS simulé et du Drive Mode"
 # Open Settings through the same toolbar/menu path used by the Android UI audit.
 "${ADB[@]}" shell input tap "$MENU_X" "$TOOLBAR_Y" >/dev/null
 sleep 0.45
@@ -357,6 +409,7 @@ fi
 capture_drive "03_drive_started.png"
 android_runtime_metric_sample "drive_t00"
 
+CURRENT_STAGE="observation Drive Mode"
 FIRST_SLEEP=$((DRIVE_SECONDS / 2))
 SECOND_SLEEP=$((DRIVE_SECONDS - FIRST_SLEEP))
 sleep "$FIRST_SLEEP"
@@ -366,9 +419,11 @@ sleep "$SECOND_SLEEP"
 capture_drive "05_drive_end.png"
 android_runtime_metric_sample "drive_end"
 
+CURRENT_STAGE="finalisation vidéo"
 android_zoom_sweep_video_stop "$VIDEO_PATH"
 VIDEO_ACTIVE=0
 
+CURRENT_STAGE="validation de la télémétrie"
 write_telemetry
 android_logcat_collect
 
@@ -396,8 +451,10 @@ echo "Logs   : $DEVICE_DIR/logcat_relevant.txt"
 echo
 
 if [ "$EMULATOR_STARTED_BY_TEST" -eq 1 ] && [ "$KEEP_EMULATOR" != "1" ]; then
+    CURRENT_STAGE="arrêt de l'émulateur"
     "$SCRIPT_DIR/android_emulator_stop.sh"
     EMULATOR_STARTED_BY_TEST=0
 fi
 
+CURRENT_STAGE="terminé"
 exit "$TEST_RC"
