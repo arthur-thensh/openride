@@ -151,6 +151,7 @@ void openride_drive_mode_init(OpenRideDriveModeState *state)
     state->camera_zoom = 16.0;
     state->target_camera_zoom = 16.0;
     state->gps_quality = OPENRIDE_GPS_UNAVAILABLE;
+    openride_drive_screen_anchor_active = false;
 }
 
 void openride_drive_mode_set_active(OpenRideDriveModeState *state, bool active)
@@ -369,9 +370,9 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
 
     /*
      * Keep the rider's actual filtered location independent from the forward
-     * camera target. map_camera.c uses this only as a render-space anchor, so
-     * maneuver look-ahead can vary without making the motorcycle icon climb or
-     * fall on screen.
+     * camera target. map_camera.c uses this only as a render-space framing
+     * reference; maneuver look-ahead is still allowed to move the raw rider
+     * position until the configured lower-screen band would be exceeded.
      */
     openride_drive_screen_anchor_lat = lat;
     openride_drive_screen_anchor_lon = lon;
