@@ -1,5 +1,6 @@
 #include "openride/ormap_pyramid_overlay.h"
 
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <sqlite3.h>
@@ -726,6 +727,158 @@ static bool metadata_value(sqlite3 *db,
     return ok;
 }
 
+static void manifest_hash_u32(uint64_t *hash, uint32_t value)
+{
+    if (!hash) return;
+    for (uint32_t shift = 0U; shift < 32U; shift += 8U) {
+        *hash ^= (uint8_t)(value >> shift);
+        *hash *= UINT64_C(1099511628211);
+    }
+}
+
+static bool overlay_tile_manifest(sqlite3 *db,
+                                  uint64_t *count,
+                                  uint64_t *hash,
+                                  char *error,
+                                  size_t error_size)
+{
+    if (!db || !count || !hash) return false;
+    *count = 0U;
+    *hash = UINT64_C(14695981039346656037);
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(
+            db,
+            "SELECT layer,zoom,tile_column,tile_row"
+            " FROM overlay_line_tiles"
+            " ORDER BY layer,zoom,tile_column,tile_row",
+            -1,
+            &stmt,
+            NULL) != SQLITE_OK) {
+        set_sql_error(error, error_size, db, "read overlay tile manifest");
+        return false;
+    }
+
+    bool ok = true;
+    for (;;) {
+        const int rc = sqlite3_step(stmt);
+        if (rc == SQLITE_DONE) break;
+        if (rc != SQLITE_ROW) {
+            set_sql_error(error, error_size, db, "iterate overlay tile manifest");
+            ok = false;
+            break;
+        }
+        const sqlite3_int64 layer = sqlite3_column_int64(stmt, 0);
+        const sqlite3_int64 zoom = sqlite3_column_int64(stmt, 1);
+        const sqlite3_int64 x = sqlite3_column_int64(stmt, 2);
+        const sqlite3_int64 y = sqlite3_column_int64(stmt, 3);
+        const bool road = layer == OPENRIDE_ORMAP_PYRAMID_OVERLAY_ROAD
+            && zoom >= OPENRIDE_ORMAP_PYRAMID_ROAD_MIN_ZOOM
+            && zoom <= OPENRIDE_ORMAP_PYRAMID_ROAD_MAX_ZOOM;
+        const bool water = layer == OPENRIDE_ORMAP_PYRAMID_OVERLAY_WATERWAY
+            && zoom >= OPENRIDE_ORMAP_PYRAMID_WATER_MIN_ZOOM
+            && zoom <= OPENRIDE_ORMAP_PYRAMID_WATER_MAX_ZOOM;
+        const sqlite3_int64 limit = zoom >= 0 && zoom < 31
+            ? (sqlite3_int64)1 << zoom
+            : 0;
+        if ((!road && !water)
+            || x < 0 || x >= limit
+            || y < 0 || y >= limit) {
+            set_error(error, error_size, "invalid overlay tile manifest row");
+            ok = false;
+            break;
+        }
+        manifest_hash_u32(hash, (uint32_t)layer);
+        manifest_hash_u32(hash, (uint32_t)zoom);
+        manifest_hash_u32(hash, (uint32_t)x);
+        manifest_hash_u32(hash, (uint32_t)y);
+        ++*count;
+    }
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+static bool parse_metadata_u64(const char *text, uint64_t *value)
+{
+    if (!text || !value || text[0] == '\0') return false;
+    errno = 0;
+    char *end = NULL;
+    const unsigned long long parsed = strtoull(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0') return false;
+    *value = (uint64_t)parsed;
+    return (unsigned long long)*value == parsed;
+}
+
+static bool validate_overlay_manifest(sqlite3 *db,
+                                      char *error,
+                                      size_t error_size)
+{
+    char count_text[32] = {0};
+    char hash_text[32] = {0};
+    const bool has_count = metadata_value(
+        db, "overlay_tile_manifest_count", count_text, sizeof(count_text));
+    const bool has_hash = metadata_value(
+        db, "overlay_tile_manifest_hash", hash_text, sizeof(hash_text));
+    if (!has_count && !has_hash) return true;
+    if (!has_count || !has_hash) {
+        set_error(error, error_size, "incomplete overlay tile manifest");
+        return false;
+    }
+
+    uint64_t expected_count = 0U;
+    uint64_t expected_hash = 0U;
+    if (!parse_metadata_u64(count_text, &expected_count)
+        || !parse_metadata_u64(hash_text, &expected_hash)) {
+        set_error(error, error_size, "invalid overlay tile manifest");
+        return false;
+    }
+
+    uint64_t actual_count = 0U;
+    uint64_t actual_hash = 0U;
+    if (!overlay_tile_manifest(db,
+                               &actual_count,
+                               &actual_hash,
+                               error,
+                               error_size)) {
+        return false;
+    }
+    if (actual_count != expected_count || actual_hash != expected_hash) {
+        set_error(error, error_size, "incomplete overlay tile coverage");
+        return false;
+    }
+
+    char label_text[32] = {0};
+    if (metadata_value(db,
+                       "overlay_label_count",
+                       label_text,
+                       sizeof(label_text))) {
+        uint64_t expected_labels = 0U;
+        if (!parse_metadata_u64(label_text, &expected_labels)) {
+            set_error(error, error_size, "invalid overlay label manifest");
+            return false;
+        }
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(db,
+                               "SELECT COUNT(*) FROM overlay_labels",
+                               -1,
+                               &stmt,
+                               NULL) != SQLITE_OK
+            || sqlite3_step(stmt) != SQLITE_ROW) {
+            if (stmt) sqlite3_finalize(stmt);
+            set_sql_error(error, error_size, db, "read overlay label manifest");
+            return false;
+        }
+        const uint64_t actual_labels =
+            (uint64_t)sqlite3_column_int64(stmt, 0);
+        sqlite3_finalize(stmt);
+        if (actual_labels != expected_labels) {
+            set_error(error, error_size, "incomplete overlay label coverage");
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool verify_v11(sqlite3 *db, char *error, size_t error_size)
 {
     char value[32] = {0};
@@ -833,6 +986,16 @@ bool openride_ormap_pyramid_overlay_append(
 
     if (ok) ok = copy_labels(source, db, stats, error, error_size);
 
+    uint64_t manifest_count = 0U;
+    uint64_t manifest_hash = 0U;
+    if (ok) {
+        ok = overlay_tile_manifest(db,
+                                   &manifest_count,
+                                   &manifest_hash,
+                                   error,
+                                   error_size);
+    }
+
     if (ok) {
         char sql[1024];
         snprintf(sql,
@@ -843,14 +1006,18 @@ bool openride_ormap_pyramid_overlay_append(
                  "('overlay_road_max_zoom','%d'),"
                  "('overlay_water_min_zoom','%d'),"
                  "('overlay_water_max_zoom','%d'),"
-                 "('overlay_label_count','%llu');"
+                 "('overlay_label_count','%llu'),"
+                 "('overlay_tile_manifest_count','%llu'),"
+                 "('overlay_tile_manifest_hash','%llu');"
                  "COMMIT;",
                  OPENRIDE_ORMAP_PYRAMID_OVERLAY_VERSION,
                  OPENRIDE_ORMAP_PYRAMID_ROAD_MIN_ZOOM,
                  OPENRIDE_ORMAP_PYRAMID_ROAD_MAX_ZOOM,
                  OPENRIDE_ORMAP_PYRAMID_WATER_MIN_ZOOM,
                  OPENRIDE_ORMAP_PYRAMID_WATER_MAX_ZOOM,
-                 (unsigned long long)stats->labels);
+                 (unsigned long long)stats->labels,
+                 (unsigned long long)manifest_count,
+                 (unsigned long long)manifest_hash);
         ok = exec_sql(db, sql, error, error_size);
     }
 
@@ -989,6 +1156,11 @@ openride_ormap_pyramid_overlay_open(
         || atoi(version) != (int)OPENRIDE_ORMAP_PYRAMID_OVERLAY_VERSION) {
         sqlite3_close(db);
         set_error(error, error_size, "ORMap v11 overlay payload not present");
+        return NULL;
+    }
+
+    if (!validate_overlay_manifest(db, error, error_size)) {
+        sqlite3_close(db);
         return NULL;
     }
 
@@ -1141,11 +1313,31 @@ bool openride_ormap_pyramid_overlay_load_tile(
         return false;
     }
 
-    return decode_blob(sqlite3_column_blob(map->load_stmt, 0),
-                       sqlite3_column_bytes(map->load_stmt, 0),
-                       tile,
-                       error,
-                       error_size);
+    if (!decode_blob(sqlite3_column_blob(map->load_stmt, 0),
+                     sqlite3_column_bytes(map->load_stmt, 0),
+                     tile,
+                     error,
+                     error_size)) {
+        return false;
+    }
+
+    for (uint32_t i = 0U; i < tile->count; ++i) {
+        const uint8_t kind = tile->records[i].kind;
+        const bool valid = layer == OPENRIDE_ORMAP_PYRAMID_OVERLAY_ROAD
+            ? kind <= OPENRIDE_ROAD_OTHER
+            : layer == OPENRIDE_ORMAP_PYRAMID_OVERLAY_WATERWAY
+                && kind >= OPENRIDE_ORMAP_WATERWAY_RIVER
+                && kind <= OPENRIDE_ORMAP_WATERWAY_DRAIN;
+        const bool ordered = layer != OPENRIDE_ORMAP_PYRAMID_OVERLAY_ROAD
+            || i == 0U
+            || tile->records[i - 1U].kind <= kind;
+        if (!valid || !ordered) {
+            openride_ormap_pyramid_overlay_tile_destroy(tile);
+            set_error(error, error_size, "invalid overlay tile records");
+            return false;
+        }
+    }
+    return true;
 }
 
 void openride_ormap_pyramid_overlay_tile_destroy(

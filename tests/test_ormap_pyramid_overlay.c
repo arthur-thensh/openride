@@ -2,6 +2,7 @@
 #include "openride/place_search.h"
 
 #include "map/dashed_line.h"
+#include "map/ormap_pyramid_overlay_renderer.h"
 
 #include <assert.h>
 #include <math.h>
@@ -192,6 +193,129 @@ static void test_decode_fixture(void)
     assert(stats.invalid_records == 0U);
 
     openride_ormap_pyramid_overlay_close(map);
+
+    assert(sqlite3_open(path, &db) == SQLITE_OK);
+    assert(sqlite3_exec(
+        db,
+        "UPDATE overlay_line_tiles SET tile_data=X'00000000'"
+        " WHERE layer=1 AND zoom=9 AND tile_column=1 AND tile_row=2",
+        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(db);
+
+    map = openride_ormap_pyramid_overlay_open(path, error, sizeof(error));
+    assert(map);
+    memset(&tile, 0, sizeof(tile));
+    assert(!openride_ormap_pyramid_overlay_load_tile(
+        map,
+        OPENRIDE_ORMAP_PYRAMID_OVERLAY_ROAD,
+        9, 1, 2,
+        &tile,
+        error,
+        sizeof(error)));
+    assert(strstr(error, "overlay tile") != NULL);
+    openride_ormap_pyramid_overlay_close(map);
+
+    memset(&stats, 0, sizeof(stats));
+    assert(openride_ormap_pyramid_overlay_inspect(
+        path, &stats, error, sizeof(error)));
+    assert(stats.malformed_tiles == 1U);
+
+    raw[20] = UINT8_MAX;
+    blob = compress_blob(raw, sizeof(raw), &blob_size);
+    assert(sqlite3_open(path, &db) == SQLITE_OK);
+    assert(sqlite3_prepare_v2(
+        db,
+        "UPDATE overlay_line_tiles SET tile_data=?"
+        " WHERE layer=1 AND zoom=9 AND tile_column=1 AND tile_row=2",
+        -1, &insert, NULL) == SQLITE_OK);
+    assert(sqlite3_bind_blob(insert, 1, blob,
+                             blob_size,
+                             SQLITE_STATIC) == SQLITE_OK);
+    assert(sqlite3_step(insert) == SQLITE_DONE);
+    sqlite3_finalize(insert);
+    free(blob);
+    sqlite3_close(db);
+
+    map = openride_ormap_pyramid_overlay_open(path, error, sizeof(error));
+    assert(map);
+    memset(&tile, 0, sizeof(tile));
+    assert(!openride_ormap_pyramid_overlay_load_tile(
+        map,
+        OPENRIDE_ORMAP_PYRAMID_OVERLAY_ROAD,
+        9, 1, 2,
+        &tile,
+        error,
+        sizeof(error)));
+    assert(strstr(error, "invalid overlay tile records") != NULL);
+    openride_ormap_pyramid_overlay_close(map);
+
+    memset(&stats, 0, sizeof(stats));
+    assert(openride_ormap_pyramid_overlay_inspect(
+        path, &stats, error, sizeof(error)));
+    assert(stats.malformed_tiles == 0U);
+    assert(stats.invalid_records == 1U);
+    remove(path);
+}
+
+static void test_renderer_failure_is_transactional(void)
+{
+    const char *path =
+        "/tmp/openride-ormap-pyramid-overlay-renderer-failure.ormap11";
+    remove(path);
+
+    sqlite3 *db = NULL;
+    assert(sqlite3_open(path, &db) == SQLITE_OK);
+    assert(sqlite3_exec(
+        db,
+        "CREATE TABLE metadata(name TEXT PRIMARY KEY,value TEXT NOT NULL);"
+        "INSERT INTO metadata VALUES('format_version','11');"
+        "INSERT INTO metadata VALUES('overlay_format_version','1');"
+        "CREATE TABLE overlay_line_tiles("
+        "layer INTEGER,zoom INTEGER,tile_column INTEGER,tile_row INTEGER,"
+        "tile_data BLOB,PRIMARY KEY(layer,zoom,tile_column,tile_row));"
+        "INSERT INTO overlay_line_tiles VALUES(1,14,8192,8192,X'00000000');"
+        "CREATE TABLE overlay_labels("
+        "ordinal INTEGER,lat_e7 INTEGER,lon_e7 INTEGER,kind INTEGER,rank INTEGER,lod INTEGER,"
+        "name TEXT);",
+        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(db);
+
+    SDL_Surface *surface = SDL_CreateSurface(
+        64, 64, SDL_PIXELFORMAT_RGBA8888);
+    assert(surface);
+    SDL_Renderer *sdl_renderer = SDL_CreateSoftwareRenderer(surface);
+    assert(sdl_renderer);
+
+    char error[256] = {0};
+    OpenRideORMapPyramidOverlayRenderer *renderer =
+        openride_ormap_pyramid_overlay_renderer_create(
+            sdl_renderer, path, error, sizeof(error));
+    assert(renderer);
+
+    const Uint32 sentinel = SDL_MapSurfaceRGBA(surface, 17U, 34U, 51U, 255U);
+    assert(SDL_FillSurfaceRect(surface, NULL, sentinel));
+    const size_t pixel_bytes = (size_t)surface->pitch * (size_t)surface->h;
+    unsigned char *before = malloc(pixel_bytes);
+    assert(before);
+    memcpy(before, surface->pixels, pixel_bytes);
+
+    const OpenRidePointD center = {
+        (8192.5 / 16384.0),
+        (8192.5 / 16384.0)
+    };
+    OpenRideMapCamera camera = {.zoom = 15.0};
+    openride_mercator_inverse(
+        center, &camera.center_lat, &camera.center_lon);
+
+    openride_ormap_pyramid_overlay_renderer_begin_frame(renderer);
+    assert(!openride_ormap_pyramid_overlay_renderer_draw_roads(
+        renderer, &camera, surface->w, surface->h));
+    assert(memcmp(before, surface->pixels, pixel_bytes) == 0);
+
+    free(before);
+    openride_ormap_pyramid_overlay_renderer_destroy(renderer);
+    SDL_DestroyRenderer(sdl_renderer);
+    SDL_DestroySurface(surface);
     remove(path);
 }
 
@@ -347,6 +471,14 @@ static void test_append_round_trip(void)
     assert(query_int64(
         db,
         "SELECT COUNT(*) FROM building_tiles WHERE hex(tile_data)='B2'") == 1);
+    assert(query_int64(
+        db,
+        "SELECT CAST(value AS INTEGER) FROM metadata"
+        " WHERE name='overlay_tile_manifest_count'") == 11);
+    assert(query_int64(
+        db,
+        "SELECT COUNT(*) FROM metadata"
+        " WHERE name='overlay_tile_manifest_hash'") == 1);
     sqlite3_close(db);
 
     OpenRideORMapPyramidOverlayMap *map =
@@ -429,6 +561,49 @@ static void test_append_round_trip(void)
     assert(inspected.malformed_tiles == 0U);
     assert(inspected.invalid_records == 0U);
 
+    assert(sqlite3_open(target_path, &db) == SQLITE_OK);
+    assert(sqlite3_exec(
+        db,
+        "DELETE FROM overlay_line_tiles"
+        " WHERE layer=1 AND zoom=14 AND tile_column=0 AND tile_row=0",
+        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(db);
+
+    OpenRideORMapPyramidOverlayMap *incomplete =
+        openride_ormap_pyramid_overlay_open(
+            target_path, error, sizeof(error));
+    assert(!incomplete);
+    assert(strstr(error, "incomplete overlay tile coverage") != NULL);
+
+    assert(openride_ormap_pyramid_overlay_append(
+        source_path, target_path, &build, error, sizeof(error)));
+    assert(sqlite3_open(target_path, &db) == SQLITE_OK);
+    assert(sqlite3_exec(
+        db,
+        "UPDATE overlay_line_tiles SET tile_column=1"
+        " WHERE layer=1 AND zoom=14 AND tile_column=0 AND tile_row=0",
+        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(db);
+
+    incomplete = openride_ormap_pyramid_overlay_open(
+        target_path, error, sizeof(error));
+    assert(!incomplete);
+    assert(strstr(error, "incomplete overlay tile coverage") != NULL);
+
+    assert(openride_ormap_pyramid_overlay_append(
+        source_path, target_path, &build, error, sizeof(error)));
+    assert(sqlite3_open(target_path, &db) == SQLITE_OK);
+    assert(sqlite3_exec(
+        db,
+        "DELETE FROM overlay_labels WHERE ordinal=1",
+        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(db);
+
+    incomplete = openride_ormap_pyramid_overlay_open(
+        target_path, error, sizeof(error));
+    assert(!incomplete);
+    assert(strstr(error, "incomplete overlay label coverage") != NULL);
+
     remove(source_path);
     remove(target_path);
 }
@@ -437,6 +612,7 @@ int main(void)
 {
     test_dashed_phase_continuity();
     test_decode_fixture();
+    test_renderer_failure_is_transactional();
     test_append_round_trip();
     printf("ormap_pyramid_overlay: OK\n");
     return 0;

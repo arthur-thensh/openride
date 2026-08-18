@@ -989,3 +989,36 @@ surface profiling reports zero missing data, zero missing textures, zero draw
 failures and zero empty plans. This closes the emulator spatial visual gate for
 z14..z17 on the current APK and dataset. It does not replace the optional final
 physical Pixel 9a confirmation, which was intentionally not run.
+
+## Post-V3.9.1 — Overlay completeness manifest and v8 fallback
+
+New overlay appends store `overlay_tile_manifest_count` and
+`overlay_tile_manifest_hash` metadata. The hash is computed over the ordered
+`layer, zoom, tile_column, tile_row` key set, so opening the overlay detects both
+a removed row and a key replacement that preserves the total row count. The
+existing `overlay_label_count` is validated at the same time. A mismatch rejects
+the optional overlay renderer during initialization; MapWorld therefore keeps
+the complete stable v8 WATERWAYS/ROADS/LABELS layers.
+
+The ORL1 payload and overlay format version remain unchanged. Older `.ormap11`
+files without the two tile-manifest keys remain readable for compatibility, but
+do not gain missing-row detection until the overlay append step is run again.
+Malformed compressed blobs and invalid or unsorted semantic records remain
+validated lazily when their tile is requested. Their load fails before the
+transactional layer target is presented, permanently disables that overlay
+renderer instance and returns control to the stable v8 layer.
+
+`test_ormap_pyramid_overlay` now covers deleted tile rows, same-count tile-key
+replacement, deleted labels, malformed compressed payloads and invalid load
+propagation. Its software-renderer check also verifies that a failed v11 road
+draw returns `false` without changing the destination framebuffer, which is the
+MapWorld contract for whole-layer v8 fallback.
+
+A real-data append was also validated on a temporary copy of the current
+Nord-Pas-de-Calais `.ormap11`. The manifest stores 9392 tile keys with hash
+`9071007320726410587`, matching the 9392 rows actually present, and 2583 labels
+matching the label table. SQLite integrity is `ok`; the complete surface,
+building and overlay inspector reports zero malformed tiles, zero invalid
+surface kinds/payloads and zero invalid overlay records. The original file was
+not modified and retained SHA-256
+`5339bfe52394ddafefc91b9f60738bc1b91b9dbe8ee8b24c75a9ff45bf9d47f0`.

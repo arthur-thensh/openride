@@ -411,12 +411,17 @@ if(OPENRIDE_BUILD_TESTS)
 
     add_executable(test_ormap_pyramid_overlay
         tests/test_ormap_pyramid_overlay.c
+        src/map/ormap_pyramid_overlay_renderer.c
     )
     target_include_directories(test_ormap_pyramid_overlay
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
-    target_link_libraries(test_ormap_pyramid_overlay PRIVATE openride_core)
+    target_link_libraries(test_ormap_pyramid_overlay
+        PRIVATE
+            openride_core
+            SDL3::SDL3
+    )
     add_test(NAME ormap_pyramid_overlay COMMAND test_ormap_pyramid_overlay)
 
     add_executable(test_ormap_pyramid_surface
