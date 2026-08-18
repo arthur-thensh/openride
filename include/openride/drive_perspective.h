@@ -11,8 +11,6 @@ extern "C" {
 typedef struct OpenRideDrivePerspectiveConfig {
     double horizon_y_ratio;
     double rider_anchor_y_ratio;
-    double top_width_scale;
-    double bottom_width_scale;
 } OpenRideDrivePerspectiveConfig;
 
 static inline double openride_drive_perspective_clamp01(double value)
@@ -25,28 +23,46 @@ static inline double openride_drive_perspective_clamp01(double value)
 static inline bool openride_drive_perspective_config_valid(
     const OpenRideDrivePerspectiveConfig *config)
 {
-    return config
-        && isfinite(config->horizon_y_ratio)
-        && isfinite(config->rider_anchor_y_ratio)
-        && isfinite(config->top_width_scale)
-        && isfinite(config->bottom_width_scale)
-        && config->horizon_y_ratio >= 0.0
-        && config->horizon_y_ratio < config->rider_anchor_y_ratio
-        && config->rider_anchor_y_ratio > 0.0
-        && config->rider_anchor_y_ratio < 1.0
-        && config->top_width_scale > 0.0
-        && config->bottom_width_scale > 0.0;
+    if (!config
+        || !isfinite(config->horizon_y_ratio)
+        || !isfinite(config->rider_anchor_y_ratio)) {
+        return false;
+    }
+
+    const double horizon = config->horizon_y_ratio;
+    const double anchor = config->rider_anchor_y_ratio;
+
+    /*
+     * The projective denominator is 1 - horizon*y/(anchor*anchor).
+     * Keep it positive across the whole source image so the view never
+     * crosses the projective horizon inside the rendered map.
+     */
+    return horizon >= 0.0
+        && anchor > 0.0
+        && anchor < 1.0
+        && horizon < anchor * anchor;
 }
 
 static inline OpenRideDrivePerspectiveConfig
 openride_drive_perspective_default_config(void)
 {
     return (OpenRideDrivePerspectiveConfig){
-        .horizon_y_ratio = 0.10,
-        .rider_anchor_y_ratio = 0.68,
-        .top_width_scale = 0.60,
-        .bottom_width_scale = 1.08
+        .horizon_y_ratio = 0.15,
+        .rider_anchor_y_ratio = 0.68
     };
+}
+
+static inline double openride_drive_perspective_denominator(
+    const OpenRideDrivePerspectiveConfig *config,
+    double source_y_ratio)
+{
+    if (!openride_drive_perspective_config_valid(config)) return 1.0;
+
+    const double source = openride_drive_perspective_clamp01(source_y_ratio);
+    const double anchor = config->rider_anchor_y_ratio;
+    const double projective_c =
+        -config->horizon_y_ratio / (anchor * anchor);
+    return 1.0 + projective_c * source;
 }
 
 static inline double openride_drive_perspective_y_ratio(
@@ -56,43 +72,46 @@ static inline double openride_drive_perspective_y_ratio(
     const double source = openride_drive_perspective_clamp01(source_y_ratio);
     if (!openride_drive_perspective_config_valid(config)) return source;
 
-    const double anchor = config->rider_anchor_y_ratio;
-    if (source >= anchor) {
-        /* Preserve rider scale and the near field exactly. */
-        return source;
-    }
-
     const double horizon = config->horizon_y_ratio;
-    const double output_span = anchor - horizon;
+    const double anchor = config->rider_anchor_y_ratio;
+    const double numerator_scale = 1.0 - 2.0 * horizon / anchor;
+    const double denominator =
+        openride_drive_perspective_denominator(config, source);
 
     /*
-     * The exponent makes the far-field curve meet the rider anchor with a
-     * derivative of 1.0. The map therefore gains depth without a visible kink
-     * or a sudden size change at the motorcycle.
+     * Möbius/projective Y transform. It maps source y=0 to the visual horizon,
+     * fixes the rider anchor exactly, and has derivative 1.0 at that anchor.
+     * Combined with width_scale() below it forms one homography, rather than
+     * the independent easing curves used by V2.5 that bent straight roads.
      */
-    const double exponent = anchor / output_span;
-    const double normalized = source / anchor;
-    return horizon + output_span * pow(normalized, exponent);
+    return (numerator_scale * source + horizon) / denominator;
 }
 
 static inline double openride_drive_perspective_width_scale(
     const OpenRideDrivePerspectiveConfig *config,
     double source_y_ratio)
 {
-    const double source = openride_drive_perspective_clamp01(source_y_ratio);
     if (!openride_drive_perspective_config_valid(config)) return 1.0;
 
     const double anchor = config->rider_anchor_y_ratio;
-    if (source <= anchor) {
-        const double normalized = source / anchor;
-        const double eased = pow(normalized, 0.90);
-        return config->top_width_scale
-            + (1.0 - config->top_width_scale) * eased;
-    }
+    const double horizon = config->horizon_y_ratio;
+    const double numerator = 1.0 - horizon / anchor;
+    const double denominator =
+        openride_drive_perspective_denominator(config, source_y_ratio);
+    return numerator / denominator;
+}
 
-    const double normalized = (source - anchor) / (1.0 - anchor);
-    return 1.0
-        + (config->bottom_width_scale - 1.0) * normalized;
+static inline double openride_drive_perspective_x_ratio(
+    const OpenRideDrivePerspectiveConfig *config,
+    double source_x_ratio,
+    double source_y_ratio)
+{
+    const double source_x = openride_drive_perspective_clamp01(source_x_ratio);
+    if (!openride_drive_perspective_config_valid(config)) return source_x;
+
+    const double scale =
+        openride_drive_perspective_width_scale(config, source_y_ratio);
+    return 0.5 + (source_x - 0.5) * scale;
 }
 
 #ifdef __cplusplus
