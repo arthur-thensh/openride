@@ -14,6 +14,20 @@ extern void SDL_Log(const char *fmt, ...);
 
 #define OPENRIDE_PI 3.14159265358979323846
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
+#define OPENRIDE_DRIVE_RIDER_ANCHOR_X 0.50
+#define OPENRIDE_DRIVE_RIDER_ANCHOR_Y 0.70
+
+/*
+ * The application currently owns one foreground map camera. Keep the Drive
+ * screen anchor as a tiny core-level bridge so the generic map transform can
+ * stabilize the rider without coupling app_runtime.c to viewport math.
+ *
+ * The values are only exposed while heading-up Drive has a usable location;
+ * all non-Drive map behavior therefore remains unchanged.
+ */
+static bool openride_drive_screen_anchor_active = false;
+static double openride_drive_screen_anchor_lat = 0.0;
+static double openride_drive_screen_anchor_lon = 0.0;
 
 #ifdef __ANDROID__
 static uint64_t openride_drive_audit_last_log_ns = 0U;
@@ -114,6 +128,20 @@ static void project_ahead(double lat_deg,
     while (*out_lon < -180.0) *out_lon += 360.0;
 }
 
+bool openride_drive_mode_get_screen_anchor(double *out_rider_lat,
+                                           double *out_rider_lon,
+                                           double *out_x_ratio,
+                                           double *out_y_ratio)
+{
+    if (!openride_drive_screen_anchor_active) return false;
+
+    if (out_rider_lat) *out_rider_lat = openride_drive_screen_anchor_lat;
+    if (out_rider_lon) *out_rider_lon = openride_drive_screen_anchor_lon;
+    if (out_x_ratio) *out_x_ratio = OPENRIDE_DRIVE_RIDER_ANCHOR_X;
+    if (out_y_ratio) *out_y_ratio = OPENRIDE_DRIVE_RIDER_ANCHOR_Y;
+    return true;
+}
+
 void openride_drive_mode_init(OpenRideDriveModeState *state)
 {
     if (!state) return;
@@ -138,7 +166,10 @@ void openride_drive_mode_set_active(OpenRideDriveModeState *state, bool active)
     if (!active) openride_drive_audit_last_log_ns = 0U;
 #endif
     state->active = active;
-    if (!active) state->initialized = false;
+    if (!active) {
+        state->initialized = false;
+        openride_drive_screen_anchor_active = false;
+    }
 }
 
 void openride_drive_mode_set_heading_up(OpenRideDriveModeState *state, bool heading_up)
@@ -148,6 +179,7 @@ void openride_drive_mode_set_heading_up(OpenRideDriveModeState *state, bool head
     if (!heading_up) {
         state->camera_bearing_deg = 0.0;
         state->target_camera_bearing_deg = 0.0;
+        openride_drive_screen_anchor_active = false;
     }
 }
 
@@ -262,8 +294,17 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
                                                           has_sample,
                                                           sample_age_s,
                                                           accuracy_m);
-    if (!state->active || !has_sample || state->gps_quality == OPENRIDE_GPS_LOST) return;
-    if (!isfinite(lat) || !isfinite(lon)) return;
+    if (!state->active
+        || !has_sample
+        || state->gps_quality == OPENRIDE_GPS_LOST
+        || state->gps_quality == OPENRIDE_GPS_UNAVAILABLE) {
+        openride_drive_screen_anchor_active = false;
+        return;
+    }
+    if (!isfinite(lat) || !isfinite(lon)) {
+        openride_drive_screen_anchor_active = false;
+        return;
+    }
 
     if (delta_seconds < 0.0) delta_seconds = 0.0;
     if (delta_seconds > 0.25) delta_seconds = 0.25;
@@ -325,6 +366,16 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
     state->target_camera_zoom = target_zoom;
     state->target_camera_bearing_deg = target_bearing;
     state->lookahead_distance_m = lookahead;
+
+    /*
+     * Keep the rider's actual filtered location independent from the forward
+     * camera target. map_camera.c uses this only as a render-space anchor, so
+     * maneuver look-ahead can vary without making the motorcycle icon climb or
+     * fall on screen.
+     */
+    openride_drive_screen_anchor_lat = lat;
+    openride_drive_screen_anchor_lon = lon;
+    openride_drive_screen_anchor_active = state->heading_up;
 
     if (!state->initialized) {
         state->camera_lat = target_lat;
