@@ -97,17 +97,16 @@ OpenRideMapPalette openride_map_palette(OpenRideMapStyle style)
 
     if (g_drive_mode_active) {
         /*
-         * Drive is intentionally close to a modern navigation canvas: large
-         * low-frequency context remains, while urban texture fades behind the
-         * active route. Building RGB is deliberately near the background so
-         * renderers that apply their own alpha still keep structures subtle.
+         * Drive keeps a neutral, low-detail canvas, but the land tone is
+         * deliberately a little darker than road fills so the surrounding
+         * network remains readable at a glance on a motorcycle screen.
          */
-        palette.background = color(246, 247, 244, 255);
+        palette.background = color(242, 244, 240, 255);
         palette.water = color(163, 196, 214, 220);
         palette.water_line = color(125, 176, 202, 205);
-        palette.boundary = color(183, 184, 180, 55);
+        palette.boundary = color(176, 179, 174, 75);
         palette.building = color(238, 240, 236, 35);
-        palette.rail = color(146, 150, 148, 75);
+        palette.rail = color(132, 138, 134, 105);
         palette.label = color(61, 66, 64, 225);
         palette.label_halo = color(250, 251, 248, 245);
         return palette;
@@ -340,51 +339,53 @@ bool openride_map_road_paint(OpenRideMapStyle style,
 
     if (g_drive_mode_active) {
         /*
-         * Keep the navigation canvas sparse, but preserve enough road context
-         * to read the next junction at a glance. Pale road fills plus neutral
-         * casings stay clearly below the saturated active-route overlay while
-         * remaining visible on the almost-white Drive background.
+         * Drive keeps the map sparse by hiding unrelated detail, not by
+         * hiding the road network. Every drivable class therefore gets a
+         * strong neutral casing and a light carriageway, while the active
+         * route remains dominant because its overlay is far wider and blue.
          */
         if (motorway) {
             paint->line = color(246, 224, 183, 255);
-            paint->casing = color(178, 164, 142, 220);
+            paint->casing = color(132, 126, 113, 245);
             paint->width = 4;
             paint->casing_width = 6;
         } else if (primary) {
             paint->line = color(250, 235, 198, 255);
-            paint->casing = color(179, 169, 147, 220);
+            paint->casing = color(136, 132, 118, 245);
             paint->width = 4;
             paint->casing_width = 6;
         } else if (secondary) {
-            paint->line = color(252, 246, 225, 255);
-            paint->casing = color(182, 183, 173, 210);
+            paint->line = color(255, 247, 221, 255);
+            paint->casing = color(143, 146, 137, 245);
             paint->width = 3;
             paint->casing_width = 5;
         } else if (tertiary) {
-            paint->line = color(253, 253, 249, 255);
-            paint->casing = color(184, 189, 184, 215);
+            paint->line = color(255, 255, 251, 255);
+            paint->casing = color(145, 151, 145, 245);
             paint->width = 3;
             paint->casing_width = 4;
         } else if (local) {
-            paint->line = color(253, 253, 250, 250);
-            paint->casing = color(202, 205, 201, 205);
+            paint->line = color(255, 255, 252, 255);
+            paint->casing = color(150, 158, 150, 240);
             paint->width = 2;
-            paint->casing_width = 3;
+            paint->casing_width = 4;
         } else if (track) {
-            paint->line = color(139, 103, 61, 225);
-            paint->casing = color(239, 228, 207, 205);
+            paint->line = color(126, 83, 38, 255);
+            paint->casing = color(226, 208, 178, 235);
             paint->width = 2;
-            paint->casing_width = 3;
+            paint->casing_width = 4;
             paint->dashed = true;
         } else if (path) {
-            paint->line = color(82, 119, 76, 210);
+            paint->line = color(55, 103, 52, 245);
+            paint->casing = color(224, 233, 219, 220);
             paint->width = 2;
+            paint->casing_width = 3;
             paint->dashed = true;
         } else {
-            paint->line = color(249, 250, 247, 235);
-            paint->casing = color(208, 211, 207, 190);
+            paint->line = color(252, 253, 249, 255);
+            paint->casing = color(164, 171, 165, 225);
             paint->width = 1;
-            paint->casing_width = 2;
+            paint->casing_width = 3;
         }
         return true;
     }
