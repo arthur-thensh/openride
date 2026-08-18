@@ -819,4 +819,173 @@ strict no-video audit
 19.690 ms mean, 26.886 ms p95, 30.467 ms p99 and 52.236 ms max, effectively
 unchanged from the earlier strict emulator result. Emulator timing remains
 diagnostic and does not replace the physical Pixel 9a baseline. Dashed line
-phase and unmatched ORL1 boundary endpoints remain separate overlay issues.
+phase and ORL1 boundary endpoint classification remain separate overlay work.
+
+## Post-V3.9.1 — Dashed road phase continuity
+
+ORL1 stores independent fixed-width line records without a road identifier or
+precomputed cumulative distance. Restarting the dash pattern at zero for every
+record made track/path strokes look broken, especially where one continuous
+line crossed a tile boundary.
+
+The runtime now reconstructs exact endpoint-connected chains for each visible
+dashed road class from the already loaded owner-level tiles. Dash phase advances
+through every degree-2 endpoint, including tile boundaries, and restarts only at
+an open endpoint or a junction where continuation is ambiguous. Reusable
+bounded-view buffers avoid recurring allocations after their capacity has grown.
+
+This is a runtime-only correction. ORL1, SQLite tables, offline builders, cache
+capacities and generated `.ormap11` data are unchanged. Exact continuation
+through an endpoint still requires a matching semantic endpoint in the adjacent
+populated tile; the apparent exceptions are classified below.
+
+The focused Android 16/API 36 emulator audit
+`/Users/arthur/Downloads/openride-audit-20260818-083708` completed with 17 PASS,
+0 FAIL and 2 expected WARN, with no crash/FATAL/ANR/OOM. The no-video sweep
+measured 50.633 FPS and 19.750 ms mean over 1619 samples with no dropped sample,
+effectively unchanged from the preceding 50.786 FPS / 19.690 ms emulator
+reference. Native z14..z17 captures and a separate z15 pan/return review showed
+coherent dashed tracks in overlapping areas; open ORL1 endpoints remain visible
+as legitimate or data-limited line ends. No physical-device test was run.
+
+A focused Festubert temporal follow-up is stored in
+`/Users/arthur/Downloads/openride-dash-audit-20260818-085300`. Because Android
+Emulator `screenrecord` emitted only 1..18 frames for the nominal 12-second
+captures, the authoritative evidence uses 20 native 1080x2424 PNG states per
+zoom at z15, z16 and z17. Each state follows a separate 20-pixel micro-pan, so
+the 19 transitions per zoom exercise viewport/tile-window changes without
+depending on the virtual video encoder.
+
+All 60 states are distinct. After translation-only phase-correlation alignment,
+a brown-stroke mask with one-pixel antialiasing tolerance reports maximum
+unmatched-pixel ratios of 0.0001 at z15, 0.0002 at z16 and 0.0007 at z17. The
+series contains no mismatch spike, disappearing dashed segment or visible phase
+restart. Logs confirm the exact z15/z16/z17 levels and contain no
+FATAL/ANR/OutOfMemory signature. This closes the emulator temporal gate for the
+runtime dash-phase correction. No physical-device test was run.
+
+## Post-V3.9.1 — ORL1 boundary endpoint classification
+
+A read-only comparison used the current Nord-Pas-de-Calais v8 and v11 files:
+
+- v8 SHA-256
+  `27d64a322e49578782d7c2378b05faad72532980249ffff1ed18d21a99b5acc9`;
+- v11 SHA-256
+  `5339bfe52394ddafefc91b9f60738bc1b91b9dbe8ee8b24c75a9ff45bf9d47f0`.
+
+The audit decoded every road record at z14 and every waterway record at z13.
+For each endpoint on a tile edge, it compared the exact world-quantized point
+and semantic kind with the corresponding edge of each populated neighbour. A
+single road point fails on two edge directions, so the previous 63 road edge
+checks represent 62 distinct global semantic keys. The four waterway checks are
+four distinct keys.
+
+The 63 road checks divide into:
+
+- 45 checks caused by 24 non-zero segments lying exactly along a tile boundary;
+  v8 stores each at coordinate 65535 in one tile, while v11 stores the identical
+  world geometry at coordinate 0 in the neighbouring tile;
+- 6 checks whose only v8 counterpart is a zero-length record removed by the v11
+  builder's existing degenerate-segment guard;
+- 12 checks already lacking an exact semantic counterpart in v8.
+
+The four waterway checks divide into one boundary-owner relocation, one removed
+zero-length counterpart and two checks already unmatched in v8. The two
+Festubert road warnings near longitude 2.7246094 and latitude 50.53275..50.53280
+belong to the boundary-owner relocation category, consistent with the visible
+overlapping geometry found during native-resolution review.
+
+At record level, v8 contains 145 zero-length road records and 10 zero-length
+waterway records; these exactly explain the v8/v11 record-count differences.
+Per-tile comparison also finds 24 moved non-zero road records and one moved
+non-zero waterway record. After expressing endpoints in global quantized
+coordinates, the non-zero v8 and v11 record multisets are identical: zero
+missing and zero extra records for both layers.
+
+Therefore the v11 retiling did not remove non-degenerate owner-level line
+geometry from this dataset. The former 63/4 counts combine tile-ownership
+changes, harmless degenerate-record removal and 12/2 warnings inherited from
+v8; they are not evidence of missing SQLite tiles or v11 clipping. The
+remaining 12 road and 2 waterway source-side warnings are classified below.
+
+## Post-V3.9.1 — OSM source classification
+
+The source audit used
+`data/osm/nord-pas-de-calais-latest.osm.pbf`, SHA-256
+`feb42249d25853f4c2c03c54b2fc031f3f0d4de9bac5ba8b0f4cb4852e04de92`.
+Provenance was verified deterministically rather than inferred from file dates:
+
+- rebuilding the routing graph from that PBF produced a byte-identical file,
+  SHA-256
+  `ab257e0b555a0e079b141728c47bfc10d302b403018b643778789d345128c382`;
+- rebuilding v8 from that PBF, graph and place index produced a byte-identical
+  `.ormap`, SHA-256
+  `27d64a322e49578782d7c2378b05faad72532980249ffff1ed18d21a99b5acc9`.
+
+Road geometry was traced through the exact routing segments used by the v8
+builder, then projected, clipped and quantized again with the builder's current
+rules. The 12 inherited road edge checks divide into:
+
+- five routing vertices lying just inside their owning tile but rounding onto
+  its quantized edge; their source continuations stay on that side or cross the
+  real boundary at a different point;
+- four crossings whose independently clipped neighbouring records differ by
+  only one or two quantized units along the edge;
+- two one-unit boundary slivers removed by the z14 road simplifier. Its 0.06
+  stored-pixel tolerance equals about 15.36 quantized units, so these fragments
+  are deliberately below the retained detail threshold;
+- one four-tile corner check where the source segment enters the diagonal path
+  through the two tiles it actually intersects, not the cardinal neighbour
+  assumed by the endpoint audit.
+
+The largest offset in the source-vertex group is 11 z14 quantized units, about
+0.26 m at this latitude; that segment is present and crosses the boundary at
+the offset point. None of the 12 checks identifies a missing routing segment or
+an open source geometry caused by import failure.
+
+Waterways were traced directly through the PBF map-feature visitor. One warning
+is an OSM vertex rounded onto the edge while the following segment crosses one
+z13 quantized unit away in the neighbour. At the other warning, both source
+segments remain on the owning side although their shared vertex rounds onto the
+edge. Both source polylines are continuous; neither requires a record at the
+exact key expected by the cardinal-neighbour set comparison.
+
+The former 12/2 source-side warnings are therefore limitations of exact
+quantized endpoint-set matching, plus two deliberate subpixel road
+simplifications. They do not justify changing the PBF importer, v8 builder,
+v11 retiler or runtime renderer. Together with the global v8/v11 record
+comparison above, this closes the ORL1 boundary-continuity investigation for
+the current Nord-Pas-de-Calais dataset.
+
+## Post-V3.9.1 — Final emulator z14..z17 visual review
+
+The focused native-resolution gallery is stored in
+`/Users/arthur/Downloads/openride-z14-z17-review-20260818-094000`. It contains
+52 valid 1080x2424 PNG captures: one base state plus immediate, settled and
+return states after east, west, north and south pans at each exact zoom z14,
+z15, z16 and z17. Android audit-hook logs confirm the complete deterministic
+zoom sequence; all PNG integrity checks pass and 38 image hashes are distinct.
+
+For each of the 16 directional pans, the immediate frame was compared with the
+settled frame at the same camera position. Thirteen pairs are byte-identical.
+At z17 west, the map pixels are identical and only the Android status-bar clock
+changes from 9:36 to 9:37. The two remaining differences occur at z14:
+
+- east changes 650 map pixels, 0.0276% of the reviewed map area, inside the
+  newly exposed upper-left strip;
+- south changes 12509 map pixels, 0.5318% of the reviewed map area, confined to
+  the newly exposed leftmost 150-pixel strip.
+
+Native inspection of both sides of those pairs shows complete surfaces and
+line geometry before and after settling; neither change contains a blank area,
+missing line family or rectangular tile dropout. Across all base and settled
+states, roads, waterways, buildings and surface fills remain spatially
+coherent. No tile-edge seam, clipped canal, disappearing road, repeated dash
+phase restart or unexplained dashed-line break is visible in the reviewed
+zones. Source-topology track ends remain distinct from rendering defects.
+
+The captured process log contains no FATAL/ANR/OutOfMemory signature. Initial
+surface profiling reports zero missing data, zero missing textures, zero draw
+failures and zero empty plans. This closes the emulator spatial visual gate for
+z14..z17 on the current APK and dataset. It does not replace the optional final
+physical Pixel 9a confirmation, which was intentionally not run.

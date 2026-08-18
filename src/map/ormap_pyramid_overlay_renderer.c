@@ -1,5 +1,7 @@
 #include "map/ormap_pyramid_overlay_renderer.h"
 
+#include "map/dashed_line.h"
+
 #include "openride/ormap_pyramid_overlay.h"
 #include "openride/place_search.h"
 
@@ -22,6 +24,26 @@ typedef struct OverlayBatch {
     uint32_t vertex_count;
     uint32_t index_count;
 } OverlayBatch;
+
+typedef struct OverlayDashSegment {
+    float x1;
+    float y1;
+    float x2;
+    float y2;
+    float length;
+    uint64_t endpoint_key[2];
+    uint32_t node_index[2];
+    int32_t next_endpoint[2];
+    bool visible;
+    bool drawn;
+} OverlayDashSegment;
+
+typedef struct OverlayDashNode {
+    uint64_t key;
+    int32_t first_endpoint;
+    uint32_t degree;
+    bool occupied;
+} OverlayDashNode;
 
 typedef struct OverlayVisibleRange {
     int first_x;
@@ -83,6 +105,12 @@ struct OpenRideORMapPyramidOverlayRenderer {
     int *indices;
     uint32_t vertex_capacity;
     uint32_t index_capacity;
+
+    OverlayDashSegment *dash_segments;
+    uint32_t dash_segment_count;
+    uint32_t dash_segment_capacity;
+    OverlayDashNode *dash_nodes;
+    uint32_t dash_node_capacity;
 
     SDL_Texture *layer_compositor;
     int layer_compositor_width;
@@ -508,7 +536,8 @@ static bool draw_dashed_line(
     float x2,
     float y2,
     int width,
-    OpenRideMapColor color)
+    OpenRideMapColor color,
+    float phase)
 {
     const float dx = x2 - x1;
     const float dy = y2 - y1;
@@ -516,9 +545,13 @@ static bool draw_dashed_line(
     if (length < 0.001f) return true;
     const float dash = 8.0f;
     const float gap = 5.0f;
-    for (float position = 0.0f; position < length; position += dash + gap) {
+    const float period = dash + gap;
+    phase = openride_dashed_line_normalize_phase(phase, period);
+    for (float position = -phase; position < length; position += period) {
+        const float start = fmaxf(position, 0.0f);
         const float end = fminf(position + dash, length);
-        const float t1 = position / length;
+        if (end <= start) continue;
+        const float t1 = start / length;
         const float t2 = end / length;
         if (!draw_line(renderer, batch,
                        x1 + dx * t1, y1 + dy * t1,
@@ -526,6 +559,80 @@ static bool draw_dashed_line(
                        width, color)) return false;
     }
     return true;
+}
+
+static bool ensure_dash_segment_capacity(
+    OpenRideORMapPyramidOverlayRenderer *renderer,
+    uint32_t needed)
+{
+    if (needed <= renderer->dash_segment_capacity) return true;
+    uint32_t capacity = renderer->dash_segment_capacity
+        ? renderer->dash_segment_capacity
+        : 1024U;
+    while (capacity < needed) {
+        if (capacity > UINT32_MAX / 2U) return false;
+        capacity *= 2U;
+    }
+    OverlayDashSegment *grown = realloc(
+        renderer->dash_segments,
+        (size_t)capacity * sizeof(*grown));
+    if (!grown) return false;
+    renderer->dash_segments = grown;
+    renderer->dash_segment_capacity = capacity;
+    return true;
+}
+
+static uint32_t dash_node_hash(uint64_t key)
+{
+    key ^= key >> 33U;
+    key *= UINT64_C(0xff51afd7ed558ccd);
+    key ^= key >> 33U;
+    return (uint32_t)key ^ (uint32_t)(key >> 32U);
+}
+
+static bool prepare_dash_nodes(
+    OpenRideORMapPyramidOverlayRenderer *renderer)
+{
+    if (renderer->dash_segment_count > (uint32_t)INT32_MAX / 2U) return false;
+    uint32_t needed = 1024U;
+    while ((uint64_t)needed
+           < (uint64_t)renderer->dash_segment_count * 4U) {
+        if (needed > UINT32_MAX / 2U) return false;
+        needed *= 2U;
+    }
+    if (needed > renderer->dash_node_capacity) {
+        OverlayDashNode *grown = realloc(
+            renderer->dash_nodes,
+            (size_t)needed * sizeof(*grown));
+        if (!grown) return false;
+        renderer->dash_nodes = grown;
+        renderer->dash_node_capacity = needed;
+    }
+    memset(renderer->dash_nodes,
+           0,
+           (size_t)renderer->dash_node_capacity * sizeof(*renderer->dash_nodes));
+    return true;
+}
+
+static uint32_t dash_node_get(
+    OpenRideORMapPyramidOverlayRenderer *renderer,
+    uint64_t key)
+{
+    const uint32_t mask = renderer->dash_node_capacity - 1U;
+    uint32_t index = dash_node_hash(key) & mask;
+    for (;;) {
+        OverlayDashNode *node = &renderer->dash_nodes[index];
+        if (!node->occupied) {
+            *node = (OverlayDashNode){
+                .key = key,
+                .first_endpoint = -1,
+                .occupied = true
+            };
+            return index;
+        }
+        if (node->key == key) return index;
+        index = (index + 1U) & mask;
+    }
 }
 
 static bool ensure_layer_compositor(
@@ -800,6 +907,207 @@ static int road_owner_zoom(uint8_t road_class)
     }
 }
 
+static bool collect_dashed_road_segments(
+    OpenRideORMapPyramidOverlayRenderer *renderer,
+    const OverlayLevelTransform *transform,
+    int width,
+    int height,
+    int zoom,
+    const OverlayVisibleRange *range,
+    uint8_t road_class,
+    int stroke_width)
+{
+    renderer->dash_segment_count = 0U;
+    for (int y = range->first_y; y <= range->last_y; ++y) {
+        for (int x = range->first_x; x <= range->last_x; ++x) {
+            OverlayCacheEntry *entry = cache_lookup(
+                renderer,
+                OPENRIDE_ORMAP_PYRAMID_OVERLAY_ROAD,
+                zoom,
+                x,
+                y,
+                false);
+            if (!entry) return false;
+
+            ++renderer->road_debug.tiles_visited;
+            const uint32_t first = entry->class_offsets[road_class];
+            const uint32_t end = entry->class_offsets[road_class + 1U];
+            for (uint32_t r = first; r < end; ++r) {
+                const OpenRideORMapPyramidOverlayLineRecord *record =
+                    &entry->tile.records[r];
+                float x1 = 0.0f, y1 = 0.0f, x2 = 0.0f, y2 = 0.0f;
+                record_to_screen(transform, x, y, record,
+                                 &x1, &y1, &x2, &y2);
+                const float dx = x2 - x1;
+                const float dy = y2 - y1;
+                const float length = sqrtf(dx * dx + dy * dy);
+                if (length < 0.001f) continue;
+
+                if (!ensure_dash_segment_capacity(
+                        renderer,
+                        renderer->dash_segment_count + 1U)) {
+                    return false;
+                }
+                const float margin = (float)stroke_width + 3.0f;
+                OverlayDashSegment *segment =
+                    &renderer->dash_segments[renderer->dash_segment_count++];
+                *segment = (OverlayDashSegment){
+                    .x1 = x1,
+                    .y1 = y1,
+                    .x2 = x2,
+                    .y2 = y2,
+                    .length = length,
+                    .endpoint_key = {
+                        openride_dashed_line_endpoint_key(
+                            x, y, record->x1, record->y1),
+                        openride_dashed_line_endpoint_key(
+                            x, y, record->x2, record->y2)
+                    },
+                    .next_endpoint = {-1, -1},
+                    .visible = !((x1 < -margin && x2 < -margin)
+                        || (x1 > width + margin && x2 > width + margin)
+                        || (y1 < -margin && y2 < -margin)
+                        || (y1 > height + margin && y2 > height + margin))
+                };
+            }
+        }
+    }
+    return true;
+}
+
+static bool build_dash_graph(OpenRideORMapPyramidOverlayRenderer *renderer)
+{
+    if (!prepare_dash_nodes(renderer)) return false;
+    for (uint32_t i = 0U; i < renderer->dash_segment_count; ++i) {
+        OverlayDashSegment *segment = &renderer->dash_segments[i];
+        segment->drawn = false;
+        for (uint32_t endpoint = 0U; endpoint < 2U; ++endpoint) {
+            const uint32_t node_index = dash_node_get(
+                renderer,
+                segment->endpoint_key[endpoint]);
+            OverlayDashNode *node = &renderer->dash_nodes[node_index];
+            segment->node_index[endpoint] = node_index;
+            segment->next_endpoint[endpoint] = node->first_endpoint;
+            node->first_endpoint = (int32_t)(i * 2U + endpoint);
+            ++node->degree;
+        }
+    }
+    return true;
+}
+
+static bool draw_dash_chain(
+    OpenRideORMapPyramidOverlayRenderer *renderer,
+    OverlayBatch *batch,
+    uint32_t segment_index,
+    uint32_t start_endpoint,
+    int width,
+    OpenRideMapColor color)
+{
+    const float period = 13.0f;
+    float phase = 0.0f;
+    for (;;) {
+        OverlayDashSegment *segment = &renderer->dash_segments[segment_index];
+        if (segment->drawn) return true;
+
+        const bool reverse = start_endpoint != 0U;
+        if (segment->visible) {
+            if (!draw_dashed_line(
+                    renderer,
+                    batch,
+                    reverse ? segment->x2 : segment->x1,
+                    reverse ? segment->y2 : segment->y1,
+                    reverse ? segment->x1 : segment->x2,
+                    reverse ? segment->y1 : segment->y2,
+                    width,
+                    color,
+                    phase)) {
+                return false;
+            }
+            ++renderer->road_debug.segments_drawn;
+        }
+        segment->drawn = true;
+        phase = openride_dashed_line_advance_phase(
+            phase,
+            segment->length,
+            period);
+
+        const uint32_t arrival_endpoint = 1U - start_endpoint;
+        const OverlayDashNode *node =
+            &renderer->dash_nodes[segment->node_index[arrival_endpoint]];
+        if (node->degree != 2U) return true;
+
+        int32_t encoded = node->first_endpoint;
+        int32_t next = -1;
+        while (encoded >= 0) {
+            const uint32_t candidate_segment = (uint32_t)encoded / 2U;
+            const uint32_t candidate_endpoint = (uint32_t)encoded & 1U;
+            if (!renderer->dash_segments[candidate_segment].drawn) {
+                next = encoded;
+                break;
+            }
+            encoded = renderer->dash_segments[candidate_segment]
+                .next_endpoint[candidate_endpoint];
+        }
+        if (next < 0) return true;
+        segment_index = (uint32_t)next / 2U;
+        start_endpoint = (uint32_t)next & 1U;
+    }
+}
+
+static bool draw_dashed_road_class(
+    OpenRideORMapPyramidOverlayRenderer *renderer,
+    const OverlayLevelTransform *transform,
+    int width,
+    int height,
+    int zoom,
+    const OverlayVisibleRange *range,
+    uint8_t road_class,
+    OpenRideMapRoadPaint paint)
+{
+    if (!collect_dashed_road_segments(renderer,
+                                      transform,
+                                      width,
+                                      height,
+                                      zoom,
+                                      range,
+                                      road_class,
+                                      paint.width)
+        || !build_dash_graph(renderer)) {
+        return false;
+    }
+
+    OverlayBatch batch = {0};
+    for (uint32_t i = 0U; i < renderer->dash_segment_count; ++i) {
+        OverlayDashSegment *segment = &renderer->dash_segments[i];
+        const uint32_t degree0 =
+            renderer->dash_nodes[segment->node_index[0]].degree;
+        const uint32_t degree1 =
+            renderer->dash_nodes[segment->node_index[1]].degree;
+        if (segment->drawn || (degree0 == 2U && degree1 == 2U)) continue;
+        const uint32_t start_endpoint = degree0 != 2U ? 0U : 1U;
+        if (!draw_dash_chain(renderer,
+                             &batch,
+                             i,
+                             start_endpoint,
+                             paint.width,
+                             paint.line)) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0U; i < renderer->dash_segment_count; ++i) {
+        if (!renderer->dash_segments[i].drawn
+            && !draw_dash_chain(renderer,
+                                &batch,
+                                i,
+                                0U,
+                                paint.width,
+                                paint.line)) {
+            return false;
+        }
+    }
+    return flush_geometry(renderer, &batch);
+}
+
 static bool draw_road_class(
     OpenRideORMapPyramidOverlayRenderer *renderer,
     const OpenRideMapCamera *camera,
@@ -815,6 +1123,16 @@ static bool draw_road_class(
 
     const OverlayLevelTransform transform = make_level_transform(
         camera, width, height, zoom);
+    if (!casing && paint.dashed) {
+        return draw_dashed_road_class(renderer,
+                                      &transform,
+                                      width,
+                                      height,
+                                      zoom,
+                                      range,
+                                      road_class,
+                                      paint);
+    }
     OverlayBatch batch = {0};
     bool ok = true;
     for (int y = range->first_y; y <= range->last_y && ok; ++y) {
@@ -857,11 +1175,6 @@ static bool draw_road_class(
                                    x1, y1, x2, y2,
                                    paint.casing_width,
                                    color);
-                } else if (paint.dashed) {
-                    ok = draw_dashed_line(renderer, &batch,
-                                          x1, y1, x2, y2,
-                                          paint.width,
-                                          color);
                 } else {
                     ok = draw_line(renderer, &batch,
                                    x1, y1, x2, y2,
@@ -1145,6 +1458,8 @@ void openride_ormap_pyramid_overlay_renderer_destroy(
     if (renderer->layer_compositor) SDL_DestroyTexture(renderer->layer_compositor);
     free(renderer->vertices);
     free(renderer->indices);
+    free(renderer->dash_segments);
+    free(renderer->dash_nodes);
     free(renderer->label_world_positions);
     openride_ormap_pyramid_overlay_close(renderer->map);
     free(renderer);

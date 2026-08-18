@@ -1,7 +1,10 @@
 #include "openride/ormap_pyramid_overlay.h"
 #include "openride/place_search.h"
 
+#include "map/dashed_line.h"
+
 #include <assert.h>
+#include <math.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,6 +71,35 @@ static sqlite3_int64 query_int64(sqlite3 *db, const char *sql)
     const sqlite3_int64 value = sqlite3_column_int64(stmt, 0);
     sqlite3_finalize(stmt);
     return value;
+}
+
+static void test_dashed_phase_continuity(void)
+{
+    const float period = 13.0f;
+    const float first_length = 21.25f;
+    const float second_length = 17.75f;
+    const float split_phase = openride_dashed_line_advance_phase(
+        0.0f,
+        first_length,
+        period);
+    const float split_result = openride_dashed_line_advance_phase(
+        split_phase,
+        second_length,
+        period);
+    const float whole_result = openride_dashed_line_advance_phase(
+        0.0f,
+        first_length + second_length,
+        period);
+
+    assert(fabsf(split_result - whole_result) < 0.0001f);
+    assert(fabsf(openride_dashed_line_normalize_phase(-2.0f, period)
+                 - 11.0f) < 0.0001f);
+
+    const uint64_t left_boundary = openride_dashed_line_endpoint_key(
+        10, 20, UINT16_MAX, 1234U);
+    const uint64_t right_boundary = openride_dashed_line_endpoint_key(
+        11, 20, 0U, 1234U);
+    assert(left_boundary == right_boundary);
 }
 
 static void test_decode_fixture(void)
@@ -403,6 +435,7 @@ static void test_append_round_trip(void)
 
 int main(void)
 {
+    test_dashed_phase_continuity();
     test_decode_fixture();
     test_append_round_trip();
     printf("ormap_pyramid_overlay: OK\n");
