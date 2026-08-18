@@ -347,7 +347,7 @@ static void app_render_route_styled(SDL_Renderer *renderer,
         } else {
             SDL_SetRenderDrawColor(renderer, route_r, route_g, route_b, 245);
         }
-        const int width = pass == 0 ? 8 : 4;
+        const int width = pass == 0 ? 10 : 5;
 
         if (route->geometry_count >= 2U && route->geometry) {
             for (uint32_t i = 1U; i < route->geometry_count; ++i) {
@@ -680,5 +680,28 @@ void openride_app_render_navigation_position(SDL_Renderer *renderer,
     draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 5);
     SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
     draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
+
+    /*
+     * Motorcycle navigation heading indicator.
+     * Keeps the existing GPS point and adds a small directional tip.
+     */
+    const float arrow_left_x = hx - 5.0f;
+    const float arrow_left_y = hy + 7.0f;
+    const float arrow_right_x = hx + 5.0f;
+    const float arrow_right_y = hy + 7.0f;
+
+    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
+    draw_thick_line(renderer,
+                    hx,
+                    hy,
+                    arrow_left_x,
+                    arrow_left_y,
+                    3);
+    draw_thick_line(renderer,
+                    hx,
+                    hy,
+                    arrow_right_x,
+                    arrow_right_y,
+                    3);
 }
 
