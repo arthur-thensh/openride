@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# OpenRide Global Audit V2.2
+# OpenRide Global Audit V2.3
 # ------------------------
 # Full project audit orchestrator for macOS + a selected Android target.
 #
@@ -42,6 +42,7 @@ Fast profiles:
   --profile map         Android map/ORMap visual + zoom checks
   --profile perf        Android startup/runtime/map performance checks
   --profile ui          Android Back/UI/lifecycle checks
+  --profile drive       Emulator Drive Mode E2E + simulated GPS evidence
   --profile host        Git + macOS build/CTest + routing benchmarks
   --profile smoke       Short repository + Android interaction sanity check
 
@@ -64,6 +65,7 @@ Execution:
 Examples:
   ./scripts/global_audit.sh --profile map --reuse-android
   ./scripts/global_audit.sh --profile perf --reuse-android --no-zip
+  ./scripts/global_audit.sh --profile drive --reuse-android --no-zip
   ./scripts/global_audit.sh --only android_zoom_sweep --no-zip
   ./scripts/global_audit.sh --only android_zoom_gallery,android_zoom_sweep
   ./scripts/global_audit.sh --profile map --skip android_map_styles
@@ -75,13 +77,15 @@ Environment:
   OPENRIDE_AUDIT_LON             Loop benchmark longitude
   OPENRIDE_AUDIT_LOOP_KM         Loop benchmark distance (default: 25)
   OPENRIDE_AUDIT_LOOP_PROFILE    Loop profile (default: trail)
+  OPENRIDE_EMULATOR_PORT         Drive-profile emulator port (default: 5554)
+  OPENRIDE_DRIVE_TEST_SECONDS    Drive observation duration (default: 45)
 
 Selection semantics:
-  --profile full preserves the complete V2.1 audit behavior.
-  --only overrides the profile and selects exact test IDs. For Android tests,
-  device detection/inventory and the cheap deterministic prerequisites are
-  enabled automatically. Screenshot integrity/logcat/crash evidence are also
-  collected when relevant.
+  --profile full preserves the complete audit behavior and includes Drive E2E.
+  --only overrides the profile and selects exact test IDs. For ordinary Android
+  tests, device detection/inventory and cheap deterministic prerequisites are
+  enabled automatically. android_drive_mode is self-contained and manages its
+  emulator/build/install/data lifecycle through android_drive_test.sh.
   --skip always wins over profile/--only selection.
 
 Important:
@@ -93,7 +97,7 @@ EOF
 
 list_steps() {
     cat <<'EOF'
-OpenRide Global Audit V2.2 step IDs
+OpenRide Global Audit V2.3 step IDs
 
 Host/repository:
   repo_info
@@ -132,6 +136,7 @@ Android runtime/map/UI:
   android_map_styles
   android_ui_tour
   android_lifecycle
+  android_drive_mode
   android_logcat
   android_crash_scan
 
@@ -143,7 +148,7 @@ Evidence/review:
 
 Profiles:
   full
-    Everything.
+    Everything, including the emulator Drive Mode E2E scenario.
 
   map
     Repository identity/diff + Android build/install + data inventory +
@@ -159,6 +164,10 @@ Profiles:
     Repository identity/diff + Android build/install + Back semantics +
     UI tour + lifecycle stress + logcat/crash/screenshot evidence.
 
+  drive
+    Repository identity/diff + emulator-only Douai -> Arras route + simulated
+    GPS + Drive Mode + camera/heading/zoom telemetry + video + crash scan.
+
   host
     Repository/toolchain + macOS configure/build + complete CTest +
     warning inventory + routing/loop benchmarks.
@@ -168,8 +177,8 @@ Profiles:
     map stability + pan + Back + logcat/crash/screenshot evidence.
 
 Tip:
-  Add --reuse-android to map/perf/ui/smoke when the currently installed APK
-  already matches the code you want to test.
+  Add --reuse-android to map/perf/ui/smoke/drive when the currently installed
+  APK already matches the code you want to test.
 EOF
 }
 
@@ -245,7 +254,7 @@ if [ "$LIST_STEPS" -eq 1 ]; then
 fi
 
 
-KNOWN_STEPS="repo_info,environment,git_diff_check,git_worktree,data_inventory,configure_macos,build_macos,ctest_inventory,ctest_all,build_warnings,benchmark_spatial,benchmark_segment,benchmark_loop,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_data,android_logcat_clear,android_startup,android_idle_profile,android_map_stability,android_pan,android_back,android_zoom_gallery,android_zoom_sweep,android_map_styles,android_ui_tour,android_lifecycle,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,android_physical_multitouch,visual_review"
+KNOWN_STEPS="repo_info,environment,git_diff_check,git_worktree,data_inventory,configure_macos,build_macos,ctest_inventory,ctest_all,build_warnings,benchmark_spatial,benchmark_segment,benchmark_loop,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_data,android_logcat_clear,android_startup,android_idle_profile,android_map_stability,android_pan,android_back,android_zoom_gallery,android_zoom_sweep,android_map_styles,android_ui_tour,android_lifecycle,android_drive_mode,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,android_physical_multitouch,visual_review"
 
 csv_has() {
     local list="$1"
@@ -288,6 +297,9 @@ case "$AUDIT_PROFILE" in
     ui)
         PROFILE_STEPS="repo_info,git_diff_check,git_worktree,android_setup,android_device,android_check,android_build,android_install,android_package,android_permissions,android_logcat_clear,android_back,android_ui_tour,android_lifecycle,android_logcat,android_crash_scan,screenshot_integrity,screenshot_duplicates,visual_review"
         ;;
+    drive)
+        PROFILE_STEPS="repo_info,git_diff_check,git_worktree,android_drive_mode,screenshot_integrity,screenshot_duplicates,visual_review"
+        ;;
     host)
         PROFILE_STEPS="repo_info,environment,git_diff_check,git_worktree,data_inventory,configure_macos,build_macos,ctest_inventory,ctest_all,build_warnings,benchmark_spatial,benchmark_segment,benchmark_loop"
         ;;
@@ -296,7 +308,7 @@ case "$AUDIT_PROFILE" in
         ;;
     *)
         echo "ERROR: unknown audit profile: $AUDIT_PROFILE" >&2
-        echo "Valid profiles: full, map, perf, ui, host, smoke" >&2
+        echo "Valid profiles: full, map, perf, ui, drive, host, smoke" >&2
         exit 2
         ;;
 esac
@@ -312,6 +324,8 @@ only_has_android_step() {
     IFS=','
     for item in $ONLY_STEPS; do
         case "$item" in
+            android_drive_mode)
+                ;;
             android_*)
                 IFS="$old_ifs"
                 return 0
@@ -1691,6 +1705,34 @@ android_crash_scan() {
     echo "No crash/FATAL/ANR/OOM signature detected."
 }
 
+android_drive_mode_audit() {
+    local drive_report="$OUTPUT_DIR/drive_mode_report.md"
+    local rc
+
+    rm -f "$drive_report"
+
+    OPENRIDE_ANDROID_PACKAGE="$PACKAGE" \
+    OPENRIDE_DRIVE_TEST_OUTPUT="$OUTPUT_DIR" \
+    OPENRIDE_DRIVE_REUSE_ANDROID="$REUSE_ANDROID" \
+        bash "$SCRIPT_DIR/android_drive_test.sh"
+    rc=$?
+
+    # android_drive_test.sh writes report.md in its output root. Preserve that
+    # detailed Drive report before the global report replaces report.md later.
+    if [ -f "$REPORT_FILE" ]; then
+        cp "$REPORT_FILE" "$drive_report" || true
+    fi
+
+    if [ -f "$METRIC_DIR/drive_validation.txt" ]; then
+        echo
+        echo "Drive validation:"
+        cat "$METRIC_DIR/drive_validation.txt"
+    fi
+    [ -f "$drive_report" ] && echo "Drive report: $drive_report"
+
+    return "$rc"
+}
+
 screenshot_integrity() {
     local list="$METRIC_DIR/screenshots.txt"
     : > "$list"
@@ -1796,7 +1838,7 @@ generate_report() {
     fi
 
     {
-        echo "# OpenRide Global Audit V2.2"
+        echo "# OpenRide Global Audit V2.3"
         echo
         echo "- Date: $(date '+%Y-%m-%d %H:%M:%S %z')"
         echo "- Branch: \`$branch\`"
@@ -1854,6 +1896,7 @@ generate_report() {
         echo "| Crash/ANR | Fresh logcat window scanned after Android audit |"
         echo "| Android startup | Activity timing x3 + OpenRide first rendered frame marker x3 |"
         echo "| Android performance | CPU/memory/gfx + per-thread CPU + internal frame pacing at 2s, 10s and 30s |"
+        echo "| Android Drive Mode | Emulator E2E route Douai -> Arras + simulated GPS + camera/heading/zoom telemetry + MP4 |"
         echo "| Map pan | ADB swipe on the selected target + before/after screenshots after first-frame readiness |"
         echo "| Pinch application path | Android F11/F12 audit hooks call the same production pinch helper as SDL_EVENT_PINCH_UPDATE |"
         echo "| Map zoom gallery | Event + rendered-frame synchronized exact z6 -> z18 -> z17 sequence |"
@@ -1862,7 +1905,7 @@ generate_report() {
         echo "| UI screens | Map, menu, search, route, loop, favorites, history, offline maps, settings; unchanged captures fail the step |"
         echo "| Visual quality/coherence | Evidence captured; human/vision review required |"
         echo "| Final physical two-finger OS->SDL link | Stock adb cannot reliably synthesize this on every retail device; the application pinch path is nevertheless exercised |"
-        echo "| Real-world GPS/riding behavior | Navigation scenarios are simulated; an actual ride remains a field test |"
+        echo "| Real-world GPS/riding behavior | Emulator navigation is covered by Drive E2E; an actual ride remains a field test |"
         echo
         echo "## Visual review checklist"
         echo
@@ -1871,6 +1914,7 @@ generate_report() {
         echo
         echo "- compare the z6..z18 gallery for LOD transitions, missing layers, seams and sudden style changes;"
         echo "- inspect videos/android_zoom_sweep.mp4 for LOD popping, delayed loading, seams and transient layer changes;"
+        echo "- inspect videos/android_drive_mode.mp4 for Drive camera tracking, heading-up behavior, route contrast and HUD stability;"
         echo "- compare the z9->z17->z9 sweep for transient loading artifacts and frame-time spikes;"
         echo "- inspect first-frame-ready versus +500ms captures for black/blank startup frames;"
         echo "- map hierarchy: roads, paths, buildings, water, landcover and route contrast;"
@@ -1904,14 +1948,18 @@ generate_report() {
         echo "- \`repository.txt\` — exact Git state"
         echo "- \`environment.txt\` — host/toolchain"
         echo "- \`data_inventory.txt\` — local offline data"
+        echo "- \`drive_mode_report.md\` — detailed Drive Mode E2E report when selected"
         echo "- \`logs/\` — build/test/audit logs"
         echo "- \`metrics/android_startup_summary.txt\` — Activity and OpenRide first-frame timings"
+        echo "- \`metrics/drive_telemetry.log\` — simulated GPS and Drive camera telemetry"
+        echo "- \`metrics/drive_validation.txt\` — Drive E2E validation counters/ranges"
         echo "- \`metrics/map_zoom_gallery.tsv\` — pinch-driven zoom levels and screenshot hashes"
         echo "- \`metrics/android_map_zoom_test.csv\` — z9->z17->z9 per-frame renderer profile"
         echo "- \`metrics/\` — warnings, startup, CPU/memory/gfx and screenshot hashes"
         echo "- \`device/\` — Android device/package/logcat evidence"
-        echo "- \`screenshots/\` — UI tour + real gesture captures"
+        echo "- \`screenshots/\` — UI tour + real gesture/Drive captures"
         echo "- \`videos/android_zoom_sweep.mp4\` — continuous LOD-loading video during renderer sweep"
+        echo "- \`videos/android_drive_mode.mp4\` — continuous Drive Mode E2E video"
         echo "- \`manifest.sha256\` — artifact integrity"
     } > "$REPORT_FILE"
 
@@ -2094,6 +2142,20 @@ else
             record_skip "$item" "$item" "device detection failed"
         done
     fi
+fi
+
+# Drive Mode is emulator-only and intentionally self-contained. It is kept out
+# of the generic Android target block above so --profile drive can start its AVD
+# itself and cannot accidentally target a connected physical phone.
+if audit_step_enabled "android_drive_mode"; then
+    if [ "$SKIP_ANDROID" -eq 1 ]; then
+        record_skip "android_drive_mode" "Android Drive Mode E2E" "--skip-android requested"
+    else
+        run_step "android_drive_mode" "Android Drive Mode E2E (emulator + simulated GPS)" "required" android_drive_mode_audit
+    fi
+else
+    record_skip "android_drive_mode" "Android Drive Mode E2E" \
+        "$(audit_filter_reason "android_drive_mode")"
 fi
 
 # ---------------------------------------------------------------------------
