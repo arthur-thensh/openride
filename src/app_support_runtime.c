@@ -190,6 +190,143 @@ static void draw_thick_line(SDL_Renderer *renderer,
     }
 }
 
+static void navigation_marker_point(float cx,
+                                    float cy,
+                                    float angle_rad,
+                                    float local_x,
+                                    float local_y,
+                                    float *out_x,
+                                    float *out_y)
+{
+    const float c = cosf(angle_rad);
+    const float s = sinf(angle_rad);
+    if (out_x) *out_x = cx + local_x * c - local_y * s;
+    if (out_y) *out_y = cy + local_x * s + local_y * c;
+}
+
+static void draw_filled_triangle(SDL_Renderer *renderer,
+                                 float x1,
+                                 float y1,
+                                 float x2,
+                                 float y2,
+                                 float x3,
+                                 float y3,
+                                 Uint8 r,
+                                 Uint8 g,
+                                 Uint8 b,
+                                 Uint8 a)
+{
+    SDL_Vertex vertices[3] = {
+        {{x1, y1}, {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f}, {0.0f, 0.0f}},
+        {{x2, y2}, {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f}, {0.0f, 0.0f}},
+        {{x3, y3}, {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f}, {0.0f, 0.0f}}
+    };
+    SDL_RenderGeometry(renderer, NULL, vertices, 3, NULL, 0);
+}
+
+static void draw_navigation_motorcycle(SDL_Renderer *renderer,
+                                       float cx,
+                                       float cy,
+                                       double heading_rad)
+{
+    if (!renderer) return;
+
+    /*
+     * Vector-only navigation marker. The geometry is expressed in logical
+     * pixels then scaled by the display density, so the motorcycle stays sharp
+     * and physically readable without any bitmap asset or platform SVG stack.
+     */
+    const float scale = openride_app_render_ui_scale(renderer);
+    const float angle = (float)heading_rad;
+    const int outer_width = (int)lroundf(5.4f * scale);
+    const int inner_width = (int)lroundf(3.1f * scale);
+    const int handle_outer_width = (int)lroundf(3.2f * scale);
+    const int handle_inner_width = (int)lroundf(1.7f * scale);
+
+    float front_x = 0.0f, front_y = 0.0f;
+    float rear_x = 0.0f, rear_y = 0.0f;
+    float bar_left_x = 0.0f, bar_left_y = 0.0f;
+    float bar_right_x = 0.0f, bar_right_y = 0.0f;
+    float nose_x = 0.0f, nose_y = 0.0f;
+    float nose_left_x = 0.0f, nose_left_y = 0.0f;
+    float nose_right_x = 0.0f, nose_right_y = 0.0f;
+
+    navigation_marker_point(cx, cy, angle,
+                            0.0f, -8.0f * scale,
+                            &front_x, &front_y);
+    navigation_marker_point(cx, cy, angle,
+                            0.0f, 8.5f * scale,
+                            &rear_x, &rear_y);
+    navigation_marker_point(cx, cy, angle,
+                            -5.7f * scale, -4.6f * scale,
+                            &bar_left_x, &bar_left_y);
+    navigation_marker_point(cx, cy, angle,
+                            5.7f * scale, -4.6f * scale,
+                            &bar_right_x, &bar_right_y);
+    navigation_marker_point(cx, cy, angle,
+                            0.0f, -14.5f * scale,
+                            &nose_x, &nose_y);
+    navigation_marker_point(cx, cy, angle,
+                            -4.8f * scale, -7.0f * scale,
+                            &nose_left_x, &nose_left_y);
+    navigation_marker_point(cx, cy, angle,
+                            4.8f * scale, -7.0f * scale,
+                            &nose_right_x, &nose_right_y);
+
+    /* Compact shadow separates the icon from dense ORMap line work. */
+    SDL_SetRenderDrawColor(renderer, 15, 26, 36, 145);
+    draw_filled_circle(renderer,
+                       cx + 1.3f * scale,
+                       cy + 1.8f * scale,
+                       7.2f * scale);
+
+    /* White casing, then OpenRide blue body/wheels. */
+    SDL_SetRenderDrawColor(renderer, 250, 252, 253, 255);
+    draw_thick_line(renderer,
+                    rear_x, rear_y, front_x, front_y,
+                    outer_width);
+    draw_filled_circle(renderer, front_x, front_y, 3.6f * scale);
+    draw_filled_circle(renderer, rear_x, rear_y, 3.6f * scale);
+    draw_thick_line(renderer,
+                    bar_left_x, bar_left_y,
+                    bar_right_x, bar_right_y,
+                    handle_outer_width);
+    draw_filled_triangle(renderer,
+                         nose_x, nose_y,
+                         nose_left_x, nose_left_y,
+                         nose_right_x, nose_right_y,
+                         250, 252, 253, 255);
+
+    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
+    draw_thick_line(renderer,
+                    rear_x, rear_y, front_x, front_y,
+                    inner_width);
+    draw_filled_circle(renderer, front_x, front_y, 2.2f * scale);
+    draw_filled_circle(renderer, rear_x, rear_y, 2.2f * scale);
+    draw_thick_line(renderer,
+                    bar_left_x, bar_left_y,
+                    bar_right_x, bar_right_y,
+                    handle_inner_width);
+
+    float inner_tip_x = 0.0f, inner_tip_y = 0.0f;
+    float inner_left_x = 0.0f, inner_left_y = 0.0f;
+    float inner_right_x = 0.0f, inner_right_y = 0.0f;
+    navigation_marker_point(cx, cy, angle,
+                            0.0f, -12.7f * scale,
+                            &inner_tip_x, &inner_tip_y);
+    navigation_marker_point(cx, cy, angle,
+                            -3.0f * scale, -7.5f * scale,
+                            &inner_left_x, &inner_left_y);
+    navigation_marker_point(cx, cy, angle,
+                            3.0f * scale, -7.5f * scale,
+                            &inner_right_x, &inner_right_y);
+    draw_filled_triangle(renderer,
+                         inner_tip_x, inner_tip_y,
+                         inner_left_x, inner_left_y,
+                         inner_right_x, inner_right_y,
+                         25, 118, 210, 255);
+}
+
 void openride_app_render_scaled_text(SDL_Renderer *renderer,
                              float x,
                              float y,
@@ -337,17 +474,30 @@ static void app_render_route_styled(SDL_Renderer *renderer,
                                     int viewport_height,
                                     Uint8 route_r,
                                     Uint8 route_g,
-                                    Uint8 route_b)
+                                    Uint8 route_b,
+                                    bool navigation_emphasis)
 {
     if (!renderer || !camera || !route) return;
 
+    const float ui_scale = navigation_emphasis
+        ? openride_app_render_ui_scale(renderer) : 1.0f;
+    int outer_width = navigation_emphasis
+        ? (int)lroundf(6.5f * ui_scale) : 10;
+    int inner_width = navigation_emphasis
+        ? (int)lroundf(3.5f * ui_scale) : 5;
+    if (outer_width < inner_width + 4) outer_width = inner_width + 4;
+
     for (int pass = 0; pass < 2; ++pass) {
         if (pass == 0) {
-            SDL_SetRenderDrawColor(renderer, 250, 250, 248, 225);
+            if (navigation_emphasis) {
+                SDL_SetRenderDrawColor(renderer, 16, 35, 52, 235);
+            } else {
+                SDL_SetRenderDrawColor(renderer, 250, 250, 248, 225);
+            }
         } else {
-            SDL_SetRenderDrawColor(renderer, route_r, route_g, route_b, 245);
+            SDL_SetRenderDrawColor(renderer, route_r, route_g, route_b, 250);
         }
-        const int width = pass == 0 ? 10 : 5;
+        const int width = pass == 0 ? outer_width : inner_width;
 
         if (route->geometry_count >= 2U && route->geometry) {
             for (uint32_t i = 1U; i < route->geometry_count; ++i) {
@@ -397,7 +547,7 @@ void openride_app_render_route(SDL_Renderer *renderer,
 {
     app_render_route_styled(renderer, camera, graph, route,
                             viewport_width, viewport_height,
-                            37, 101, 173);
+                            25, 118, 210, true);
 }
 
 void openride_app_render_route_preview(SDL_Renderer *renderer,
@@ -412,7 +562,7 @@ void openride_app_render_route_preview(SDL_Renderer *renderer,
      */
     app_render_route_styled(renderer, camera, NULL, route,
                             viewport_width, viewport_height,
-                            184, 32, 255);
+                            184, 32, 255, false);
 }
 
 
@@ -667,41 +817,10 @@ void openride_app_render_navigation_position(SDL_Renderer *renderer,
         draw_filled_circle(renderer, (float)matched.x, (float)matched.y, 3.0f);
     }
 
-    SDL_SetRenderDrawColor(renderer, 248, 248, 246, 245);
-    draw_filled_circle(renderer, (float)raw.x, (float)raw.y, 11.0f);
-    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
-    draw_filled_circle(renderer, (float)raw.x, (float)raw.y, 8.0f);
-
     const double heading_rad = (gps->heading_deg - camera->bearing_deg)
         * 0.01745329251994329577;
-    const float hx = (float)raw.x + (float)(sin(heading_rad) * 18.0);
-    const float hy = (float)raw.y - (float)(cos(heading_rad) * 18.0);
-    SDL_SetRenderDrawColor(renderer, 248, 248, 246, 255);
-    draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 5);
-    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
-    draw_thick_line(renderer, (float)raw.x, (float)raw.y, hx, hy, 3);
-
-    /*
-     * Motorcycle navigation heading indicator.
-     * Keeps the existing GPS point and adds a small directional tip.
-     */
-    const float arrow_left_x = hx - 5.0f;
-    const float arrow_left_y = hy + 7.0f;
-    const float arrow_right_x = hx + 5.0f;
-    const float arrow_right_y = hy + 7.0f;
-
-    SDL_SetRenderDrawColor(renderer, 25, 118, 210, 255);
-    draw_thick_line(renderer,
-                    hx,
-                    hy,
-                    arrow_left_x,
-                    arrow_left_y,
-                    3);
-    draw_thick_line(renderer,
-                    hx,
-                    hy,
-                    arrow_right_x,
-                    arrow_right_y,
-                    3);
+    draw_navigation_motorcycle(renderer,
+                               (float)raw.x,
+                               (float)raw.y,
+                               heading_rad);
 }
-
