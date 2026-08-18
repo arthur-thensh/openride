@@ -1,6 +1,8 @@
 #include "openride/map_camera.h"
+#include "openride/drive_mode.h"
 
 #include <math.h>
+#include <stdint.h>
 
 #define OPENRIDE_PI 3.14159265358979323846
 #define OPENRIDE_TILE_SIZE 256.0
@@ -8,6 +10,12 @@
 #define OPENRIDE_MAX_LAT (85.05112878)
 #define OPENRIDE_MIN_ZOOM 1.0
 #define OPENRIDE_MAX_ZOOM 20.0
+
+#ifdef __ANDROID__
+extern uint64_t SDL_GetTicksNS(void);
+extern void SDL_Log(const char *fmt, ...);
+static uint64_t openride_drive_view_audit_last_log_ns = 0U;
+#endif
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -92,6 +100,80 @@ void openride_mercator_inverse(OpenRidePointD p, double *lat_deg, double *lon_de
     }
 }
 
+static void camera_point_delta_pixels(const OpenRideMapCamera *camera,
+                                      double lat_deg,
+                                      double lon_deg,
+                                      double *out_dx,
+                                      double *out_dy)
+{
+    if (!camera || !out_dx || !out_dy) return;
+
+    const OpenRidePointD center =
+        openride_mercator_forward(camera->center_lat, camera->center_lon);
+    const OpenRidePointD point = openride_mercator_forward(lat_deg, lon_deg);
+    const double world_size = openride_world_size_pixels(camera->zoom);
+
+    double dx = point.x - center.x;
+    if (dx > 0.5) dx -= 1.0;
+    if (dx < -0.5) dx += 1.0;
+
+    double screen_dx = dx * world_size;
+    double screen_dy = (point.y - center.y) * world_size;
+    rotate_screen_forward(camera->bearing_deg, &screen_dx, &screen_dy);
+
+    *out_dx = screen_dx;
+    *out_dy = screen_dy;
+}
+
+static bool camera_screen_origin(const OpenRideMapCamera *camera,
+                                 int viewport_width,
+                                 int viewport_height,
+                                 double *out_origin_x,
+                                 double *out_origin_y,
+                                 double *out_rider_lat,
+                                 double *out_rider_lon,
+                                 double *out_anchor_x_ratio,
+                                 double *out_anchor_y_ratio)
+{
+    if (!camera || !out_origin_x || !out_origin_y) return false;
+
+    *out_origin_x = (double)viewport_width * 0.5;
+    *out_origin_y = (double)viewport_height * 0.5;
+
+    double rider_lat = 0.0;
+    double rider_lon = 0.0;
+    double anchor_x_ratio = 0.5;
+    double anchor_y_ratio = 0.5;
+    if (!openride_drive_mode_get_screen_anchor(&rider_lat,
+                                                &rider_lon,
+                                                &anchor_x_ratio,
+                                                &anchor_y_ratio)) {
+        return false;
+    }
+
+    double rider_dx = 0.0;
+    double rider_dy = 0.0;
+    camera_point_delta_pixels(camera,
+                              rider_lat,
+                              rider_lon,
+                              &rider_dx,
+                              &rider_dy);
+
+    /*
+     * Move the render origin, not the rider marker. Every map feature therefore
+     * keeps the same geographic relationship while the motorcycle stays at a
+     * stable glance-friendly position in the lower third of the display.
+     */
+    *out_origin_x = (double)viewport_width * anchor_x_ratio - rider_dx;
+    *out_origin_y = (double)viewport_height * anchor_y_ratio - rider_dy;
+
+    if (out_rider_lat) *out_rider_lat = rider_lat;
+    if (out_rider_lon) *out_rider_lon = rider_lon;
+    if (out_anchor_x_ratio) *out_anchor_x_ratio = anchor_x_ratio;
+    if (out_anchor_y_ratio) *out_anchor_y_ratio = anchor_y_ratio;
+    return true;
+}
+
 void openride_camera_pan(OpenRideMapCamera *camera, double drag_x, double drag_y)
 {
     if (!camera) return;
@@ -155,24 +237,64 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
                                       int viewport_width,
                                       int viewport_height)
 {
-    const OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
-    const OpenRidePointD point = openride_mercator_forward(lat_deg, lon_deg);
-    const double world_size = openride_world_size_pixels(camera->zoom);
+    double screen_dx = 0.0;
+    double screen_dy = 0.0;
+    camera_point_delta_pixels(camera,
+                              lat_deg,
+                              lon_deg,
+                              &screen_dx,
+                              &screen_dy);
 
-    double dx = point.x - center.x;
-
-    /* Choose the shortest horizontal path across the antimeridian. */
-    if (dx > 0.5) dx -= 1.0;
-    if (dx < -0.5) dx += 1.0;
-
-    double screen_dx = dx * world_size;
-    double screen_dy = (point.y - center.y) * world_size;
-    rotate_screen_forward(camera->bearing_deg, &screen_dx, &screen_dy);
+    double origin_x = (double)viewport_width * 0.5;
+    double origin_y = (double)viewport_height * 0.5;
+    double rider_lat = 0.0;
+    double rider_lon = 0.0;
+    double anchor_x_ratio = 0.5;
+    double anchor_y_ratio = 0.5;
+    const bool drive_anchor = camera_screen_origin(camera,
+                                                    viewport_width,
+                                                    viewport_height,
+                                                    &origin_x,
+                                                    &origin_y,
+                                                    &rider_lat,
+                                                    &rider_lon,
+                                                    &anchor_x_ratio,
+                                                    &anchor_y_ratio);
 
     OpenRidePointD result = {
-        (double)viewport_width * 0.5 + screen_dx,
-        (double)viewport_height * 0.5 + screen_dy
+        origin_x + screen_dx,
+        origin_y + screen_dy
     };
+
+#ifdef __ANDROID__
+    if (drive_anchor
+        && viewport_width > 0
+        && viewport_height > 0
+        && fabs(lat_deg - rider_lat) < 1e-10
+        && fabs(lon_deg - rider_lon) < 1e-10) {
+        const uint64_t now_ns = SDL_GetTicksNS();
+        if (openride_drive_view_audit_last_log_ns == 0U
+            || now_ns - openride_drive_view_audit_last_log_ns
+                >= UINT64_C(1000000000)) {
+            openride_drive_view_audit_last_log_ns = now_ns;
+            SDL_Log("AUDIT_DRIVE_VIEW rider_x_pct=%.4f rider_y_pct=%.4f anchor_x_pct=%.4f anchor_y_pct=%.4f origin_x_pct=%.4f origin_y_pct=%.4f viewport=%dx%d",
+                    result.x / (double)viewport_width,
+                    result.y / (double)viewport_height,
+                    anchor_x_ratio,
+                    anchor_y_ratio,
+                    origin_x / (double)viewport_width,
+                    origin_y / (double)viewport_height,
+                    viewport_width,
+                    viewport_height);
+        }
+    }
+#else
+    (void)drive_anchor;
+    (void)rider_lat;
+    (void)rider_lon;
+    (void)anchor_x_ratio;
+    (void)anchor_y_ratio;
+#endif
 
     return result;
 }
@@ -188,8 +310,20 @@ void openride_screen_to_geo(const OpenRideMapCamera *camera,
     OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
     const double world_size = openride_world_size_pixels(camera->zoom);
 
-    double dx = screen_x - (double)viewport_width * 0.5;
-    double dy = screen_y - (double)viewport_height * 0.5;
+    double origin_x = (double)viewport_width * 0.5;
+    double origin_y = (double)viewport_height * 0.5;
+    (void)camera_screen_origin(camera,
+                               viewport_width,
+                               viewport_height,
+                               &origin_x,
+                               &origin_y,
+                               NULL,
+                               NULL,
+                               NULL,
+                               NULL);
+
+    double dx = screen_x - origin_x;
+    double dy = screen_y - origin_y;
     rotate_screen_inverse(camera->bearing_deg, &dx, &dy);
 
     OpenRidePointD point = {
