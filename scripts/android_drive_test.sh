@@ -11,7 +11,7 @@ SERIAL="emulator-$EMULATOR_PORT"
 DRIVE_SECONDS="${OPENRIDE_DRIVE_TEST_SECONDS:-45}"
 START_PLACE="${OPENRIDE_DRIVE_START_PLACE:-Douai}"
 DESTINATION_PLACE="${OPENRIDE_DRIVE_DESTINATION_PLACE:-Arras}"
-GPS_SIM_Y_PCT="${OPENRIDE_DRIVE_GPS_SIM_Y_PCT:-0.540}"
+GPS_SIM_Y_PCT="${OPENRIDE_DRIVE_GPS_SIM_Y_PCT:-0.587}"
 KEEP_EMULATOR="${OPENRIDE_DRIVE_KEEP_EMULATOR:-0}"
 REUSE_ANDROID="${OPENRIDE_DRIVE_REUSE_ANDROID:-0}"
 OUTPUT_DIR="${OPENRIDE_DRIVE_TEST_OUTPUT:-$HOME/Downloads/openride-drive-$(date +%Y%m%d-%H%M%S)}"
@@ -120,7 +120,7 @@ cleanup() {
     if [ "$EMULATOR_STARTED_BY_TEST" -eq 1 ] && [ "$KEEP_EMULATOR" != "1" ]; then
         "$SCRIPT_DIR/android_emulator_stop.sh" >/dev/null 2>&1 || true
     fi
-    if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -ne 0 ] && [ "$CURRENT_STAGE" != "terminé" ]; then
         echo "Drive test interrompu (rc=$rc) pendant: $CURRENT_STAGE" >&2
         echo "Résultats partiels: $OUTPUT_DIR" >&2
     fi
@@ -229,17 +229,53 @@ validate_telemetry() {
     }
 
     local first_lat first_lon last_lat last_lon movement
-    first_lat="$(grep 'AUDIT_DRIVE_STATE' "$telemetry" | head -n 1 \
-        | sed -n 's/.*camera_lat=\([-0-9.][0-9.-]*\).*/\1/p')"
-    first_lon="$(grep 'AUDIT_DRIVE_STATE' "$telemetry" | head -n 1 \
-        | sed -n 's/.*camera_lon=\([-0-9.][0-9.-]*\).*/\1/p')"
-    last_lat="$(grep 'AUDIT_DRIVE_STATE' "$telemetry" | tail -n 1 \
-        | sed -n 's/.*camera_lat=\([-0-9.][0-9.-]*\).*/\1/p')"
-    last_lon="$(grep 'AUDIT_DRIVE_STATE' "$telemetry" | tail -n 1 \
-        | sed -n 's/.*camera_lon=\([-0-9.][0-9.-]*\).*/\1/p')"
-    movement="$(awk -v a="${first_lat:-0}" -v b="${last_lat:-0}" -v c="${first_lon:-0}" -v d="${last_lon:-0}" \
+    read -r first_lat first_lon last_lat last_lon < <(
+        awk '
+            /AUDIT_DRIVE_STATE/ {
+                lat = ""
+                lon = ""
+                for (i = 1; i <= NF; ++i) {
+                    if (index($i, "camera_lat=") == 1) {
+                        lat = substr($i, length("camera_lat=") + 1)
+                    } else if (index($i, "camera_lon=") == 1) {
+                        lon = substr($i, length("camera_lon=") + 1)
+                    }
+                }
+                if (lat != "" && lon != "") {
+                    if (!seen) {
+                        first_lat = lat
+                        first_lon = lon
+                        seen = 1
+                    }
+                    last_lat = lat
+                    last_lon = lon
+                }
+            }
+            END {
+                if (seen) {
+                    printf "%s %s %s %s\n", first_lat, first_lon, last_lat, last_lon
+                } else {
+                    print "nan nan nan nan"
+                }
+            }
+        ' "$telemetry"
+    )
+
+    if [ "$first_lat" = "nan" ] || [ "$first_lon" = "nan" ] \
+       || [ "$last_lat" = "nan" ] || [ "$last_lon" = "nan" ]; then
+        FAIL_REASON="coordonnées caméra Drive introuvables dans la télémétrie"
+        return 1
+    fi
+
+    movement="$(awk -v a="$first_lat" -v b="$last_lat" -v c="$first_lon" -v d="$last_lon" \
         'BEGIN {x=b-a; if (x<0) x=-x; y=d-c; if (y<0) y=-y; printf "%.8f", x+y}')"
-    echo "camera_coordinate_delta=$movement" >> "$METRIC_DIR/drive_validation.txt"
+    {
+        echo "camera_first_lat=$first_lat"
+        echo "camera_first_lon=$first_lon"
+        echo "camera_last_lat=$last_lat"
+        echo "camera_last_lon=$last_lon"
+        echo "camera_coordinate_delta=$movement"
+    } >> "$METRIC_DIR/drive_validation.txt"
     awk -v m="$movement" 'BEGIN {exit !(m > 0.00001)}' || {
         FAIL_REASON="la caméra Drive ne s'est pas déplacée"
         return 1
