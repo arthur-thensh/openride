@@ -105,6 +105,8 @@ int main(void)
     assert(!openride_map_place_label_visible("locality", 0, 18.0));
 
     OpenRideMapRoadPaint drive_primary;
+    OpenRideMapRoadPaint drive_secondary;
+    OpenRideMapRoadPaint drive_tertiary;
     OpenRideMapRoadPaint drive_local;
     OpenRideMapRoadPaint drive_track;
     OpenRideMapRoadPaint drive_path;
@@ -114,6 +116,16 @@ int main(void)
                                    false,
                                    18.0,
                                    &drive_primary));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "secondary",
+                                   false,
+                                   18.0,
+                                   &drive_secondary));
+    assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
+                                   "tertiary",
+                                   false,
+                                   18.0,
+                                   &drive_tertiary));
     assert(openride_map_road_paint(OPENRIDE_MAP_STYLE_TRAIL,
                                    "residential",
                                    false,
@@ -130,13 +142,17 @@ int main(void)
                                    18.0,
                                    &drive_path));
 
-    assert(drive_primary.width >= drive_local.width);
-    assert(drive_local.width == 1);
-    assert(drive_local.casing_width == 0);
+    assert(drive_primary.width >= drive_secondary.width);
+    assert(drive_secondary.width >= drive_tertiary.width);
+    assert(drive_tertiary.width > drive_local.width);
+    assert(drive_local.width >= 2);
+    assert(drive_local.casing_width > drive_local.width);
+    assert(drive_local.casing.a >= 180U);
     assert(drive_track.dashed);
     assert(drive_track.width == 2);
+    assert(drive_track.casing_width > drive_track.width);
     assert(drive_path.dashed);
-    assert(drive_path.width == 1);
+    assert(drive_path.width == 2);
     assert(!openride_map_road_visible_for_style(OPENRIDE_MAP_STYLE_TRAIL,
                                                 "track",
                                                 14.25));
