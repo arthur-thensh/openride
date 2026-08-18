@@ -1,6 +1,10 @@
 #include "openride/gps_simulator.h"
 #include "openride/map_selection.h"
 
+#ifdef __ANDROID__
+#include <SDL3/SDL.h>
+#endif
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,6 +137,13 @@ bool openride_gps_simulator_set_route(OpenRideGPSSimulator *simulator,
     simulator->geometry_count = route->geometry_count;
     simulator->geometry_distance_m = total;
     openride_gps_simulator_set_speed_kph(simulator, speed_kph);
+#ifdef __ANDROID__
+    SDL_Log("AUDIT_ROUTE_SIM_READY route_distance_m=%.1f geometry_distance_m=%.1f geometry_points=%u speed_kph=%.1f",
+            route->distance_m,
+            total,
+            route->geometry_count,
+            simulator->speed_mps * 3.6);
+#endif
     set_error(error, error_size, "");
     return true;
 }
