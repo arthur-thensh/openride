@@ -30,15 +30,25 @@ static void test_drive_perspective_projection(void)
                 - perspective.horizon_y_ratio) < 1e-12);
     assert(fabs(openride_drive_perspective_y_ratio(&perspective, anchor)
                 - anchor) < 1e-12);
-    assert(fabs(openride_drive_perspective_y_ratio(&perspective, 1.0)
-                - 1.0) < 1e-12);
 
-    assert(fabs(openride_drive_perspective_width_scale(&perspective, 0.0)
-                - perspective.top_width_scale) < 1e-12);
+    const double bottom_y =
+        openride_drive_perspective_y_ratio(&perspective, 1.0);
+    assert(bottom_y > 1.0);
+    assert(bottom_y < 1.10);
+
+    const double top_width =
+        openride_drive_perspective_width_scale(&perspective, 0.0);
+    const double bottom_width =
+        openride_drive_perspective_width_scale(&perspective, 1.0);
+    assert(top_width > 0.70 && top_width < 0.90);
     assert(fabs(openride_drive_perspective_width_scale(&perspective, anchor)
                 - 1.0) < 1e-12);
-    assert(fabs(openride_drive_perspective_width_scale(&perspective, 1.0)
-                - perspective.bottom_width_scale) < 1e-12);
+    assert(bottom_width > 1.0 && bottom_width < 1.30);
+
+    assert(fabs(openride_drive_perspective_x_ratio(
+                    &perspective, 0.25, anchor) - 0.25) < 1e-12);
+    assert(fabs(openride_drive_perspective_x_ratio(
+                    &perspective, 0.75, anchor) - 0.75) < 1e-12);
 
     double previous_y = -1.0;
     double previous_width = 0.0;
@@ -54,14 +64,42 @@ static void test_drive_perspective_projection(void)
         previous_width = width_scale;
     }
 
-    /* The rider anchor is both position-stable and locally 1:1 vertically. */
+    /* The rider anchor is position-stable and locally 1:1 in both axes. */
     const double epsilon = 1e-4;
     const double just_before =
         openride_drive_perspective_y_ratio(&perspective, anchor - epsilon);
     const double just_after =
         openride_drive_perspective_y_ratio(&perspective, anchor + epsilon);
     assert(fabs((anchor - just_before) - epsilon) < 5e-8);
-    assert(fabs((just_after - anchor) - epsilon) < 1e-12);
+    assert(fabs((just_after - anchor) - epsilon) < 5e-8);
+
+    /*
+     * A true homography preserves collinearity. This is the regression that
+     * guards against the V2.5 independent X/Y easing curves that visibly bent
+     * long roads into a moving wave.
+     */
+    const double y1 = 0.15;
+    const double y2 = 0.45;
+    const double y3 = 0.75;
+    const double x1 = 0.25 + 0.35 * y1;
+    const double x2 = 0.25 + 0.35 * y2;
+    const double x3 = 0.25 + 0.35 * y3;
+    const double px1 =
+        openride_drive_perspective_x_ratio(&perspective, x1, y1);
+    const double py1 =
+        openride_drive_perspective_y_ratio(&perspective, y1);
+    const double px2 =
+        openride_drive_perspective_x_ratio(&perspective, x2, y2);
+    const double py2 =
+        openride_drive_perspective_y_ratio(&perspective, y2);
+    const double px3 =
+        openride_drive_perspective_x_ratio(&perspective, x3, y3);
+    const double py3 =
+        openride_drive_perspective_y_ratio(&perspective, y3);
+    const double cross =
+        (px2 - px1) * (py3 - py1)
+        - (py2 - py1) * (px3 - px1);
+    assert(fabs(cross) < 1e-10);
 }
 
 static void test_gps_quality(void)
