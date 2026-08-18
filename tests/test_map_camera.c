@@ -169,6 +169,28 @@ static void test_drive_rider_screen_framing(void)
     assert(nearly_equal(roundtrip_lat, rider_lat, 1e-7));
     assert(nearly_equal(roundtrip_lon, rider_lon, 1e-7));
 
+    /* Manual Drive pinch changes scale without fighting the Drive-owned center. */
+    const double center_lat_before_zoom = camera.center_lat;
+    const double center_lon_before_zoom = camera.center_lon;
+    const double zoom_before = camera.zoom;
+    openride_camera_zoom_at(&camera,
+                            -0.5,
+                            rider.x,
+                            rider.y,
+                            1000,
+                            1000);
+    assert(nearly_equal(camera.center_lat, center_lat_before_zoom, 1e-12));
+    assert(nearly_equal(camera.center_lon, center_lon_before_zoom, 1e-12));
+    assert(nearly_equal(camera.zoom, zoom_before - 0.5, 1e-12));
+    const OpenRidePointD rider_after_zoom = openride_geo_to_screen(&camera,
+                                                                    rider_lat,
+                                                                    rider_lon,
+                                                                    1000,
+                                                                    1000);
+    assert(nearly_equal(rider_after_zoom.x, 500.0, 1e-6));
+    assert(rider_after_zoom.y >= 680.0 - 1e-6);
+    assert(rider_after_zoom.y <= 720.0 + 1e-6);
+
     /* North-up keeps the ordinary centered map transform. */
     openride_drive_mode_set_heading_up(&drive, false);
     assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
