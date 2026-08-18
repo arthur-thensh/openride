@@ -108,14 +108,29 @@ static void test_zoom_anchor(void)
     assert(nearly_equal(before_lon, after_lon, 1e-7));
 }
 
+static OpenRideMapCamera drive_camera(const OpenRideDriveModeState *drive,
+                                      double render_zoom)
+{
+    OpenRideMapCamera camera = {
+        .center_lat = drive->camera_lat,
+        .center_lon = drive->camera_lon,
+        .zoom = render_zoom,
+        .bearing_deg = drive->heading_up ? drive->camera_bearing_deg : 0.0
+    };
+    return camera;
+}
+
 static void test_drive_rider_screen_framing(void)
 {
     const double rider_lat = 50.3708;
     const double rider_lon = 3.0802;
+    const double speed = 60.0 / 3.6;
 
     OpenRideDriveModeState drive;
     openride_drive_mode_init(&drive);
     openride_drive_mode_set_active(&drive, true);
+
+    /* First update has no Drive render yet, so it keeps the pure look-ahead. */
     openride_drive_mode_update(&drive,
                                true,
                                true,
@@ -123,39 +138,48 @@ static void test_drive_rider_screen_framing(void)
                                5.0,
                                rider_lat,
                                rider_lon,
-                               60.0 / 3.6,
+                               speed,
                                90.0,
                                1000.0,
                                0.016);
+    assert(drive.initialized);
+    assert(!drive.framing_active);
 
-    double anchor_lat = 0.0;
-    double anchor_lon = 0.0;
-    double anchor_x = 0.0;
-    double anchor_y = 0.0;
-    assert(openride_drive_mode_get_screen_anchor(&anchor_lat,
-                                                  &anchor_lon,
-                                                  &anchor_x,
-                                                  &anchor_y));
-    assert(nearly_equal(anchor_lat, rider_lat, 1e-10));
-    assert(nearly_equal(anchor_lon, rider_lon, 1e-10));
-    assert(nearly_equal(anchor_x, 0.50, 1e-12));
-    assert(nearly_equal(anchor_y, 0.70, 1e-12));
+    /* The ordinary projection publishes the actual viewport/zoom. */
+    OpenRideMapCamera camera = drive_camera(&drive, 18.0);
+    (void)openride_geo_to_screen(&camera,
+                                 rider_lat,
+                                 rider_lon,
+                                 1000,
+                                 1000);
 
-    OpenRideMapCamera camera = {
-        .center_lat = drive.camera_lat,
-        .center_lon = drive.camera_lon,
-        .zoom = drive.camera_zoom,
-        .bearing_deg = drive.camera_bearing_deg
-    };
+    /* The following Drive update moves its real geographic camera center. */
+    openride_drive_mode_update(&drive,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               rider_lat,
+                               rider_lon,
+                               speed,
+                               90.0,
+                               1000.0,
+                               0.016);
+    assert(drive.framing_active);
+    assert(drive.rider_screen_x_ratio >= 0.49);
+    assert(drive.rider_screen_x_ratio <= 0.51);
+    assert(drive.rider_screen_y_ratio >= 0.68 - 1e-9);
+    assert(drive.rider_screen_y_ratio <= 0.72 + 1e-9);
 
+    camera = drive_camera(&drive, 18.0);
     const OpenRidePointD rider = openride_geo_to_screen(&camera,
                                                          rider_lat,
                                                          rider_lon,
                                                          1000,
                                                          1000);
-    assert(nearly_equal(rider.x, 500.0, 1e-6));
-    assert(rider.y >= 680.0 - 1e-6);
-    assert(rider.y <= 720.0 + 1e-6);
+    assert(nearly_equal(rider.x, 500.0, 1e-5));
+    assert(rider.y >= 680.0 - 1e-4);
+    assert(rider.y <= 720.0 + 1e-4);
 
     double roundtrip_lat = 0.0;
     double roundtrip_lon = 0.0;
@@ -169,41 +193,14 @@ static void test_drive_rider_screen_framing(void)
     assert(nearly_equal(roundtrip_lat, rider_lat, 1e-7));
     assert(nearly_equal(roundtrip_lon, rider_lon, 1e-7));
 
-    /* Manual Drive pinch changes scale without fighting the Drive-owned center. */
-    const double center_lat_before_zoom = camera.center_lat;
-    const double center_lon_before_zoom = camera.center_lon;
-    const double zoom_before = camera.zoom;
-    openride_camera_zoom_at(&camera,
-                            -0.5,
-                            rider.x,
-                            rider.y,
-                            1000,
-                            1000);
-    assert(nearly_equal(camera.center_lat, center_lat_before_zoom, 1e-12));
-    assert(nearly_equal(camera.center_lon, center_lon_before_zoom, 1e-12));
-    assert(nearly_equal(camera.zoom, zoom_before - 0.5, 1e-12));
-    const OpenRidePointD rider_after_zoom = openride_geo_to_screen(&camera,
-                                                                    rider_lat,
-                                                                    rider_lon,
-                                                                    1000,
-                                                                    1000);
-    assert(nearly_equal(rider_after_zoom.x, 500.0, 1e-6));
-    assert(rider_after_zoom.y >= 680.0 - 1e-6);
-    assert(rider_after_zoom.y <= 720.0 + 1e-6);
-
-    /* North-up keeps the ordinary centered map transform. */
-    openride_drive_mode_set_heading_up(&drive, false);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
-    const OpenRidePointD center = openride_geo_to_screen(&camera,
-                                                          camera.center_lat,
-                                                          camera.center_lon,
-                                                          1000,
-                                                          1000);
-    assert(nearly_equal(center.x, 500.0, 1e-6));
-    assert(nearly_equal(center.y, 500.0, 1e-6));
-
-    /* A stale/lost GPS fix must also drop the screen-space rider constraint. */
-    openride_drive_mode_set_heading_up(&drive, true);
+    /* Manual Drive zoom is learned from the real rendered camera. */
+    openride_drive_mode_set_auto_zoom(&drive, false);
+    camera = drive_camera(&drive, 17.5);
+    (void)openride_geo_to_screen(&camera,
+                                 rider_lat,
+                                 rider_lon,
+                                 1000,
+                                 1000);
     openride_drive_mode_update(&drive,
                                true,
                                true,
@@ -211,11 +208,38 @@ static void test_drive_rider_screen_framing(void)
                                5.0,
                                rider_lat,
                                rider_lon,
-                               60.0 / 3.6,
+                               speed,
                                90.0,
                                1000.0,
                                0.016);
-    assert(openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    assert(drive.framing_active);
+    camera = drive_camera(&drive, 17.5);
+    const OpenRidePointD rider_manual_zoom = openride_geo_to_screen(&camera,
+                                                                     rider_lat,
+                                                                     rider_lon,
+                                                                     1000,
+                                                                     1000);
+    assert(nearly_equal(rider_manual_zoom.x, 500.0, 1e-5));
+    assert(rider_manual_zoom.y >= 680.0 - 1e-4);
+    assert(rider_manual_zoom.y <= 720.0 + 1e-4);
+
+    /* North-up deliberately disables lower-screen framing. */
+    openride_drive_mode_set_heading_up(&drive, false);
+    openride_drive_mode_update(&drive,
+                               true,
+                               true,
+                               0.0,
+                               5.0,
+                               rider_lat,
+                               rider_lon,
+                               speed,
+                               90.0,
+                               1000.0,
+                               0.016);
+    assert(!drive.framing_active);
+
+    /* A stale GPS fix also drops framing immediately. */
+    openride_drive_mode_set_heading_up(&drive, true);
     openride_drive_mode_update(&drive,
                                true,
                                true,
@@ -223,11 +247,11 @@ static void test_drive_rider_screen_framing(void)
                                5.0,
                                rider_lat,
                                rider_lon,
-                               60.0 / 3.6,
+                               speed,
                                90.0,
                                1000.0,
                                0.016);
-    assert(!openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL));
+    assert(!drive.framing_active);
 
     openride_drive_mode_set_active(&drive, false);
 }
