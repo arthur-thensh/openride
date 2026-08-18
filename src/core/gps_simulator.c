@@ -1,14 +1,14 @@
 #include "openride/gps_simulator.h"
 #include "openride/map_selection.h"
 
-#ifdef __ANDROID__
-#include <SDL3/SDL.h>
-#endif
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __ANDROID__
+extern void SDL_Log(const char *fmt, ...);
+#endif
 
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
 #define OPENRIDE_PI 3.14159265358979323846
