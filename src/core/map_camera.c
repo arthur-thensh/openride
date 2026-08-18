@@ -10,6 +10,7 @@
 #define OPENRIDE_MAX_LAT (85.05112878)
 #define OPENRIDE_MIN_ZOOM 1.0
 #define OPENRIDE_MAX_ZOOM 20.0
+#define OPENRIDE_DRIVE_RIDER_Y_TOLERANCE 0.02
 
 #ifdef __ANDROID__
 extern uint64_t SDL_GetTicksNS(void);
@@ -133,12 +134,16 @@ static bool camera_screen_origin(const OpenRideMapCamera *camera,
                                  double *out_rider_lat,
                                  double *out_rider_lon,
                                  double *out_anchor_x_ratio,
-                                 double *out_anchor_y_ratio)
+                                 double *out_anchor_y_ratio,
+                                 double *out_raw_rider_x_ratio,
+                                 double *out_raw_rider_y_ratio)
 {
     if (!camera || !out_origin_x || !out_origin_y) return false;
 
-    *out_origin_x = (double)viewport_width * 0.5;
-    *out_origin_y = (double)viewport_height * 0.5;
+    const double default_origin_x = (double)viewport_width * 0.5;
+    const double default_origin_y = (double)viewport_height * 0.5;
+    *out_origin_x = default_origin_x;
+    *out_origin_y = default_origin_y;
 
     double rider_lat = 0.0;
     double rider_lon = 0.0;
@@ -159,18 +164,38 @@ static bool camera_screen_origin(const OpenRideMapCamera *camera,
                               &rider_dx,
                               &rider_dy);
 
+    const double raw_rider_x = default_origin_x + rider_dx;
+    const double raw_rider_y = default_origin_y + rider_dy;
+    const double min_y_ratio = anchor_y_ratio - OPENRIDE_DRIVE_RIDER_Y_TOLERANCE;
+    const double max_y_ratio = anchor_y_ratio + OPENRIDE_DRIVE_RIDER_Y_TOLERANCE;
+    const double min_y = (double)viewport_height * min_y_ratio;
+    const double max_y = (double)viewport_height * max_y_ratio;
+
     /*
-     * Move the render origin, not the rider marker. Every map feature therefore
-     * keeps the same geographic relationship while the motorcycle stays at a
-     * stable glance-friendly position in the lower third of the display.
+     * Horizontal stability is exact: heading-up navigation should keep the
+     * motorcycle on the screen centerline. Vertically, correct only when the
+     * geographic look-ahead would move the rider outside the 68..72% band.
+     * This preserves useful anticipation changes instead of cancelling them.
      */
-    *out_origin_x = (double)viewport_width * anchor_x_ratio - rider_dx;
-    *out_origin_y = (double)viewport_height * anchor_y_ratio - rider_dy;
+    *out_origin_x += (double)viewport_width * anchor_x_ratio - raw_rider_x;
+    if (raw_rider_y < min_y) {
+        *out_origin_y += min_y - raw_rider_y;
+    } else if (raw_rider_y > max_y) {
+        *out_origin_y += max_y - raw_rider_y;
+    }
 
     if (out_rider_lat) *out_rider_lat = rider_lat;
     if (out_rider_lon) *out_rider_lon = rider_lon;
     if (out_anchor_x_ratio) *out_anchor_x_ratio = anchor_x_ratio;
     if (out_anchor_y_ratio) *out_anchor_y_ratio = anchor_y_ratio;
+    if (out_raw_rider_x_ratio) {
+        *out_raw_rider_x_ratio = viewport_width > 0
+            ? raw_rider_x / (double)viewport_width : 0.5;
+    }
+    if (out_raw_rider_y_ratio) {
+        *out_raw_rider_y_ratio = viewport_height > 0
+            ? raw_rider_y / (double)viewport_height : 0.5;
+    }
     return true;
 }
 
@@ -251,6 +276,8 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
     double rider_lon = 0.0;
     double anchor_x_ratio = 0.5;
     double anchor_y_ratio = 0.5;
+    double raw_rider_x_ratio = 0.5;
+    double raw_rider_y_ratio = 0.5;
     const bool drive_anchor = camera_screen_origin(camera,
                                                     viewport_width,
                                                     viewport_height,
@@ -259,7 +286,9 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
                                                     &rider_lat,
                                                     &rider_lon,
                                                     &anchor_x_ratio,
-                                                    &anchor_y_ratio);
+                                                    &anchor_y_ratio,
+                                                    &raw_rider_x_ratio,
+                                                    &raw_rider_y_ratio);
 
     OpenRidePointD result = {
         origin_x + screen_dx,
@@ -277,13 +306,17 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
             || now_ns - openride_drive_view_audit_last_log_ns
                 >= UINT64_C(1000000000)) {
             openride_drive_view_audit_last_log_ns = now_ns;
-            SDL_Log("AUDIT_DRIVE_VIEW rider_x_pct=%.4f rider_y_pct=%.4f anchor_x_pct=%.4f anchor_y_pct=%.4f origin_x_pct=%.4f origin_y_pct=%.4f viewport=%dx%d",
+            SDL_Log("AUDIT_DRIVE_VIEW rider_x_pct=%.4f rider_y_pct=%.4f raw_rider_x_pct=%.4f raw_rider_y_pct=%.4f anchor_x_pct=%.4f anchor_y_pct=%.4f correction_x_pct=%.4f correction_y_pct=%.4f viewport=%dx%d",
                     result.x / (double)viewport_width,
                     result.y / (double)viewport_height,
+                    raw_rider_x_ratio,
+                    raw_rider_y_ratio,
                     anchor_x_ratio,
                     anchor_y_ratio,
-                    origin_x / (double)viewport_width,
-                    origin_y / (double)viewport_height,
+                    (origin_x - (double)viewport_width * 0.5)
+                        / (double)viewport_width,
+                    (origin_y - (double)viewport_height * 0.5)
+                        / (double)viewport_height,
                     viewport_width,
                     viewport_height);
         }
@@ -294,6 +327,8 @@ OpenRidePointD openride_geo_to_screen(const OpenRideMapCamera *camera,
     (void)rider_lon;
     (void)anchor_x_ratio;
     (void)anchor_y_ratio;
+    (void)raw_rider_x_ratio;
+    (void)raw_rider_y_ratio;
 #endif
 
     return result;
@@ -317,6 +352,8 @@ void openride_screen_to_geo(const OpenRideMapCamera *camera,
                                viewport_height,
                                &origin_x,
                                &origin_y,
+                               NULL,
+                               NULL,
                                NULL,
                                NULL,
                                NULL,
