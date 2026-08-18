@@ -37,7 +37,7 @@ if(ANDROID)
         SQLITE_THREADSAFE=1
         SQLITE_OMIT_LOAD_EXTENSION=1
     )
-    add_library(SQLite::SQLite3 ALIAS openride_sqlite)
+    add_library(SQLite3::SQLite3 ALIAS openride_sqlite)
 
     find_library(OPENRIDE_ANDROID_ZLIB z REQUIRED)
     add_library(openride_android_zlib INTERFACE)
@@ -139,7 +139,7 @@ set_target_properties(openride_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(openride_core
     PUBLIC
-        SQLite::SQLite3
+        SQLite3::SQLite3
         ZLIB::ZLIB
 )
 
