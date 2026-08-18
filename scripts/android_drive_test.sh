@@ -60,16 +60,29 @@ DEVICE_DIR="$OUTPUT_DIR/device"
 VIDEO_DIR="$OUTPUT_DIR/videos"
 mkdir -p "$LOG_DIR" "$SCREEN_DIR/drive-mode" "$METRIC_DIR" "$DEVICE_DIR" "$VIDEO_DIR"
 
-# Reuse the Android helpers maintained by global_audit.sh rather than
-# maintaining a second implementation of ADB launch, screenrecord, metrics,
-# screenshots and logcat/crash collection.
+# Reuse the Android helpers maintained by global_audit.sh. Delimit the sourced
+# block with executable code rather than comments so formatting changes cannot
+# silently produce an empty helper set.
 source <(
     awk '
-        /^# Android helpers$/ {inside=1; next}
+        /^ADB=\(\)$/ {inside=1}
         /^make_manifest\(\)/ {exit}
         inside {print}
     ' "$SCRIPT_DIR/global_audit.sh"
 )
+
+for helper in \
+    setup_adb android_device_info android_grant_test_permissions \
+    android_logcat_clear android_launch_clean android_pid android_log_count \
+    android_wait_log_count android_capture android_zoom_sweep_video_start \
+    android_zoom_sweep_video_stop android_runtime_metric_sample \
+    android_logcat_collect android_crash_scan; do
+    if ! declare -F "$helper" >/dev/null 2>&1; then
+        echo "ERROR: helper Android manquant après chargement: $helper" >&2
+        echo "Vérifie scripts/global_audit.sh avant de relancer le build." >&2
+        exit 1
+    fi
+done
 
 EMULATOR_STARTED_BY_TEST=0
 VIDEO_ACTIVE=0
