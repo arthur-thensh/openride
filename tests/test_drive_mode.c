@@ -1,4 +1,5 @@
 #include "openride/drive_mode.h"
+#include "openride/drive_perspective.h"
 #include "openride/map_style.h"
 
 #include <assert.h>
@@ -17,6 +18,50 @@ static void test_drive_map_style_lifecycle(void)
 
     openride_drive_mode_set_active(&state, false);
     assert(!openride_map_style_drive_mode_active());
+}
+
+static void test_drive_perspective_projection(void)
+{
+    const OpenRideDrivePerspectiveConfig perspective =
+        openride_drive_perspective_default_config();
+    const double anchor = perspective.rider_anchor_y_ratio;
+
+    assert(fabs(openride_drive_perspective_y_ratio(&perspective, 0.0)
+                - perspective.horizon_y_ratio) < 1e-12);
+    assert(fabs(openride_drive_perspective_y_ratio(&perspective, anchor)
+                - anchor) < 1e-12);
+    assert(fabs(openride_drive_perspective_y_ratio(&perspective, 1.0)
+                - 1.0) < 1e-12);
+
+    assert(fabs(openride_drive_perspective_width_scale(&perspective, 0.0)
+                - perspective.top_width_scale) < 1e-12);
+    assert(fabs(openride_drive_perspective_width_scale(&perspective, anchor)
+                - 1.0) < 1e-12);
+    assert(fabs(openride_drive_perspective_width_scale(&perspective, 1.0)
+                - perspective.bottom_width_scale) < 1e-12);
+
+    double previous_y = -1.0;
+    double previous_width = 0.0;
+    for (int i = 0; i <= 100; ++i) {
+        const double source_y = (double)i / 100.0;
+        const double projected_y =
+            openride_drive_perspective_y_ratio(&perspective, source_y);
+        const double width_scale =
+            openride_drive_perspective_width_scale(&perspective, source_y);
+        assert(projected_y >= previous_y - 1e-12);
+        assert(width_scale >= previous_width - 1e-12);
+        previous_y = projected_y;
+        previous_width = width_scale;
+    }
+
+    /* The rider anchor is both position-stable and locally 1:1 vertically. */
+    const double epsilon = 1e-4;
+    const double just_before =
+        openride_drive_perspective_y_ratio(&perspective, anchor - epsilon);
+    const double just_after =
+        openride_drive_perspective_y_ratio(&perspective, anchor + epsilon);
+    assert(fabs((anchor - just_before) - epsilon) < 5e-8);
+    assert(fabs((just_after - anchor) - epsilon) < 1e-12);
 }
 
 static void test_gps_quality(void)
@@ -347,6 +392,7 @@ static void test_render_view_framing_lifecycle(void)
 int main(void)
 {
     test_drive_map_style_lifecycle();
+    test_drive_perspective_projection();
     test_gps_quality();
     test_auto_zoom();
     test_maneuver_lookahead();
