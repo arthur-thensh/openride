@@ -340,42 +340,51 @@ bool openride_map_road_paint(OpenRideMapStyle style,
 
     if (g_drive_mode_active) {
         /*
-         * Navigation hierarchy: the active route overlay owns saturated blue.
-         * The base network becomes neutral and progressively thinner, while
-         * tracks/paths remain distinct for OpenRide's trail use case.
+         * Keep the navigation canvas sparse, but preserve enough road context
+         * to read the next junction at a glance. Pale road fills plus neutral
+         * casings stay clearly below the saturated active-route overlay while
+         * remaining visible on the almost-white Drive background.
          */
         if (motorway) {
-            paint->line = color(221, 224, 220, 205);
-            paint->casing = color(174, 180, 176, 105);
-            paint->width = 3;
-            paint->casing_width = 4;
+            paint->line = color(246, 224, 183, 255);
+            paint->casing = color(178, 164, 142, 220);
+            paint->width = 4;
+            paint->casing_width = 6;
         } else if (primary) {
-            paint->line = color(236, 237, 232, 230);
-            paint->casing = color(181, 186, 181, 120);
+            paint->line = color(250, 235, 198, 255);
+            paint->casing = color(179, 169, 147, 220);
+            paint->width = 4;
+            paint->casing_width = 6;
+        } else if (secondary) {
+            paint->line = color(252, 246, 225, 255);
+            paint->casing = color(182, 183, 173, 210);
+            paint->width = 3;
+            paint->casing_width = 5;
+        } else if (tertiary) {
+            paint->line = color(253, 253, 249, 255);
+            paint->casing = color(184, 189, 184, 215);
             paint->width = 3;
             paint->casing_width = 4;
-        } else if (secondary) {
-            paint->line = color(240, 241, 237, 220);
-            paint->casing = color(191, 196, 191, 90);
+        } else if (local) {
+            paint->line = color(253, 253, 250, 250);
+            paint->casing = color(202, 205, 201, 205);
             paint->width = 2;
             paint->casing_width = 3;
-        } else if (tertiary) {
-            paint->line = color(224, 228, 223, 190);
-            paint->width = 2;
-        } else if (local) {
-            paint->line = color(207, 212, 207, 135);
-            paint->width = 1;
         } else if (track) {
-            paint->line = color(143, 116, 78, 190);
+            paint->line = color(139, 103, 61, 225);
+            paint->casing = color(239, 228, 207, 205);
             paint->width = 2;
+            paint->casing_width = 3;
             paint->dashed = true;
         } else if (path) {
-            paint->line = color(95, 126, 88, 175);
-            paint->width = 1;
+            paint->line = color(82, 119, 76, 210);
+            paint->width = 2;
             paint->dashed = true;
         } else {
-            paint->line = color(198, 203, 198, 120);
+            paint->line = color(249, 250, 247, 235);
+            paint->casing = color(208, 211, 207, 190);
             paint->width = 1;
+            paint->casing_width = 2;
         }
         return true;
     }
