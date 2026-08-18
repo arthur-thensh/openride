@@ -1,14 +1,13 @@
 #include "openride/simulated_location_provider.h"
 
-#ifdef __ANDROID__
-#include <SDL3/SDL.h>
-#endif
-
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 #ifdef __ANDROID__
-static Uint64 openride_simulated_location_audit_last_log_ns = 0U;
+extern uint64_t SDL_GetTicksNS(void);
+extern void SDL_Log(const char *fmt, ...);
+static uint64_t openride_simulated_location_audit_last_log_ns = 0U;
 #endif
 
 static bool simulated_location_start(void *userdata)
@@ -81,9 +80,10 @@ static bool simulated_location_poll(void *userdata,
 
 #ifdef __ANDROID__
     if (gps.valid) {
-        const Uint64 now_ns = SDL_GetTicksNS();
+        const uint64_t now_ns = SDL_GetTicksNS();
         if (openride_simulated_location_audit_last_log_ns == 0U
-            || now_ns - openride_simulated_location_audit_last_log_ns >= 1000000000ULL) {
+            || now_ns - openride_simulated_location_audit_last_log_ns
+                >= UINT64_C(1000000000)) {
             openride_simulated_location_audit_last_log_ns = now_ns;
             SDL_Log("AUDIT_SIM_GPS_SAMPLE route_position_m=%.1f route_distance_m=%.1f speed_kph=%.1f heading=%.1f lat=%.7f lon=%.7f",
                     gps.route_position_m,
