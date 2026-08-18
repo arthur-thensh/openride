@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Telemetry uses dot decimals. Keep every awk comparison/printf deterministic
+# regardless of the macOS user locale (notably fr_FR decimal commas).
+export LC_ALL=C
+
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
@@ -162,7 +166,7 @@ capture_drive() {
 
 write_telemetry() {
     android_logcat_for_pid "$DRIVE_PID" \
-        | grep -E 'AUDIT_ROUTE_SIM_READY|AUDIT_SIM_GPS_|AUDIT_DRIVE_MODE_ACTIVE|AUDIT_DRIVE_STATE' \
+        | grep -E 'AUDIT_ROUTE_SIM_READY|AUDIT_SIM_GPS_|AUDIT_DRIVE_MODE_ACTIVE|AUDIT_DRIVE_STATE|AUDIT_DRIVE_VIEW' \
         > "$METRIC_DIR/drive_telemetry.log" || true
 }
 
@@ -173,23 +177,26 @@ validate_telemetry() {
         return 1
     }
 
-    local sim_started drive_active gps_samples drive_samples
+    local sim_started drive_active gps_samples drive_samples drive_view_samples
     sim_started="$(grep -c 'AUDIT_SIM_GPS_STARTED' "$telemetry" || true)"
     drive_active="$(grep -c 'AUDIT_DRIVE_MODE_ACTIVE active=1' "$telemetry" || true)"
     gps_samples="$(grep -c 'AUDIT_SIM_GPS_SAMPLE' "$telemetry" || true)"
     drive_samples="$(grep -c 'AUDIT_DRIVE_STATE' "$telemetry" || true)"
+    drive_view_samples="$(grep -c 'AUDIT_DRIVE_VIEW' "$telemetry" || true)"
 
     {
         echo "sim_started=$sim_started"
         echo "drive_active=$drive_active"
         echo "gps_samples=$gps_samples"
         echo "drive_samples=$drive_samples"
+        echo "drive_view_samples=$drive_view_samples"
     } > "$METRIC_DIR/drive_validation.txt"
 
     [ "$sim_started" -ge 1 ] || { FAIL_REASON="GPS simulé non démarré"; return 1; }
     [ "$drive_active" -ge 1 ] || { FAIL_REASON="Drive Mode non activé"; return 1; }
     [ "$gps_samples" -ge 3 ] || { FAIL_REASON="moins de 3 échantillons GPS"; return 1; }
     [ "$drive_samples" -ge 3 ] || { FAIL_REASON="moins de 3 états caméra Drive"; return 1; }
+    [ "$drive_view_samples" -ge 3 ] || { FAIL_REASON="moins de 3 états de cadrage conducteur Drive"; return 1; }
 
     local first_position last_position progress
     first_position="$(grep 'AUDIT_SIM_GPS_SAMPLE' "$telemetry" | head -n 1 \
@@ -257,6 +264,62 @@ validate_telemetry() {
         FAIL_REASON="la caméra Drive ne s'est pas déplacée"
         return 1
     fi
+
+    local rider_x_min rider_x_max rider_y_min rider_y_max
+    read -r rider_x_min rider_x_max rider_y_min rider_y_max < <(
+        awk '
+            /AUDIT_DRIVE_VIEW/ {
+                x = ""
+                y = ""
+                for (i = 1; i <= NF; ++i) {
+                    if (index($i, "rider_x_pct=") == 1) {
+                        x = substr($i, length("rider_x_pct=") + 1)
+                    } else if (index($i, "rider_y_pct=") == 1) {
+                        y = substr($i, length("rider_y_pct=") + 1)
+                    }
+                }
+                if (x != "" && y != "") {
+                    if (!seen) {
+                        xmin = xmax = x + 0.0
+                        ymin = ymax = y + 0.0
+                        seen = 1
+                    } else {
+                        if (x < xmin) xmin = x
+                        if (x > xmax) xmax = x
+                        if (y < ymin) ymin = y
+                        if (y > ymax) ymax = y
+                    }
+                }
+            }
+            END {
+                if (seen) printf "%.4f %.4f %.4f %.4f\n", xmin, xmax, ymin, ymax
+                else printf "0.0000 0.0000 0.0000 0.0000\n"
+            }
+        ' "$telemetry"
+    )
+    {
+        echo "rider_x_min=$rider_x_min"
+        echo "rider_x_max=$rider_x_max"
+        echo "rider_y_min=$rider_y_min"
+        echo "rider_y_max=$rider_y_max"
+    } >> "$METRIC_DIR/drive_validation.txt"
+
+    awk -v v="$rider_x_min" 'BEGIN {exit !(v >= 0.49)}' || {
+        FAIL_REASON="cadrage conducteur trop à gauche"
+        return 1
+    }
+    awk -v v="$rider_x_max" 'BEGIN {exit !(v <= 0.51)}' || {
+        FAIL_REASON="cadrage conducteur trop à droite"
+        return 1
+    }
+    awk -v v="$rider_y_min" 'BEGIN {exit !(v >= 0.679)}' || {
+        FAIL_REASON="cadrage conducteur trop haut"
+        return 1
+    }
+    awk -v v="$rider_y_max" 'BEGIN {exit !(v <= 0.721)}' || {
+        FAIL_REASON="cadrage conducteur trop bas"
+        return 1
+    }
 
     return 0
 }
@@ -399,6 +462,7 @@ capture_drive "02_settings_before_simulation.png"
 SIM_STARTED_BEFORE="$(android_log_count "$DRIVE_PID" 'AUDIT_SIM_GPS_STARTED')"
 DRIVE_ACTIVE_BEFORE="$(android_log_count "$DRIVE_PID" 'AUDIT_DRIVE_MODE_ACTIVE active=1')"
 DRIVE_STATE_BEFORE="$(android_log_count "$DRIVE_PID" 'AUDIT_DRIVE_STATE')"
+DRIVE_VIEW_BEFORE="$(android_log_count "$DRIVE_PID" 'AUDIT_DRIVE_VIEW')"
 
 android_zoom_sweep_video_start "$VIDEO_PATH"
 VIDEO_ACTIVE=1
@@ -407,10 +471,11 @@ sleep 0.30
 
 if ! wait_marker 'AUDIT_SIM_GPS_STARTED' "$SIM_STARTED_BEFORE" 10 \
    || ! wait_marker 'AUDIT_DRIVE_MODE_ACTIVE active=1' "$DRIVE_ACTIVE_BEFORE" 10 \
-   || ! wait_marker 'AUDIT_DRIVE_STATE' "$DRIVE_STATE_BEFORE" 10; then
+   || ! wait_marker 'AUDIT_DRIVE_STATE' "$DRIVE_STATE_BEFORE" 10 \
+   || ! wait_marker 'AUDIT_DRIVE_VIEW' "$DRIVE_VIEW_BEFORE" 10; then
     capture_drive "03_drive_activation_failed.png" || true
     write_telemetry
-    FAIL_REASON="le GPS simulé / Drive Mode ne s'est pas activé; vérifie OPENRIDE_DRIVE_GPS_SIM_Y_PCT si le layout AVD a changé"
+    FAIL_REASON="le GPS simulé / Drive Mode / cadrage conducteur ne s'est pas activé; vérifie OPENRIDE_DRIVE_GPS_SIM_Y_PCT si le layout AVD a changé"
     android_zoom_sweep_video_stop "$VIDEO_PATH" || true
     VIDEO_ACTIVE=0
     android_logcat_collect || true
