@@ -233,6 +233,18 @@ void openride_camera_zoom_at(OpenRideMapCamera *camera,
 
     if (fabs(new_zoom - old_zoom) < 1e-9) return;
 
+    /*
+     * In heading-up Drive, the geographic center is continuously owned by the
+     * Drive controller and the rider framing transform owns the screen origin.
+     * A pinch therefore changes scale only; repanning around the physical
+     * viewport center would create a one-frame jump before Drive restores its
+     * camera center on the next update.
+     */
+    if (openride_drive_mode_get_screen_anchor(NULL, NULL, NULL, NULL)) {
+        camera->zoom = new_zoom;
+        return;
+    }
+
     OpenRidePointD center = openride_mercator_forward(camera->center_lat, camera->center_lon);
     const double old_world = openride_world_size_pixels(old_zoom);
     const double new_world = openride_world_size_pixels(new_zoom);
