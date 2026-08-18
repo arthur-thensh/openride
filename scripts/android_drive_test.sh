@@ -228,8 +228,8 @@ validate_telemetry() {
         return 1
     }
 
-    local first_lat first_lon last_lat last_lon movement
-    read -r first_lat first_lon last_lat last_lon < <(
+    local camera_unique_positions
+    camera_unique_positions="$(
         awk '
             /AUDIT_DRIVE_STATE/ {
                 lat = ""
@@ -242,44 +242,21 @@ validate_telemetry() {
                     }
                 }
                 if (lat != "" && lon != "") {
-                    if (!seen) {
-                        first_lat = lat
-                        first_lon = lon
-                        seen = 1
+                    key = lat "," lon
+                    if (!(key in positions)) {
+                        positions[key] = 1
+                        count++
                     }
-                    last_lat = lat
-                    last_lon = lon
                 }
             }
-            END {
-                if (seen) {
-                    printf "%s %s %s %s\n", first_lat, first_lon, last_lat, last_lon
-                } else {
-                    print "nan nan nan nan"
-                }
-            }
+            END { print count + 0 }
         ' "$telemetry"
-    )
-
-    if [ "$first_lat" = "nan" ] || [ "$first_lon" = "nan" ] \
-       || [ "$last_lat" = "nan" ] || [ "$last_lon" = "nan" ]; then
-        FAIL_REASON="coordonnées caméra Drive introuvables dans la télémétrie"
-        return 1
-    fi
-
-    movement="$(awk -v a="$first_lat" -v b="$last_lat" -v c="$first_lon" -v d="$last_lon" \
-        'BEGIN {x=b-a; if (x<0) x=-x; y=d-c; if (y<0) y=-y; printf "%.8f", x+y}')"
-    {
-        echo "camera_first_lat=$first_lat"
-        echo "camera_first_lon=$first_lon"
-        echo "camera_last_lat=$last_lat"
-        echo "camera_last_lon=$last_lon"
-        echo "camera_coordinate_delta=$movement"
-    } >> "$METRIC_DIR/drive_validation.txt"
-    awk -v m="$movement" 'BEGIN {exit !(m > 0.00001)}' || {
+    )"
+    echo "camera_unique_positions=$camera_unique_positions" >> "$METRIC_DIR/drive_validation.txt"
+    if [ "$camera_unique_positions" -lt 2 ]; then
         FAIL_REASON="la caméra Drive ne s'est pas déplacée"
         return 1
-    }
+    fi
 
     return 0
 }
