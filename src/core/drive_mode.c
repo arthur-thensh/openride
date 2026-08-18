@@ -1,10 +1,43 @@
 #include "openride/drive_mode.h"
 
+#ifdef __ANDROID__
+#include <SDL3/SDL.h>
+#endif
+
 #include <math.h>
 #include <string.h>
 
 #define OPENRIDE_PI 3.14159265358979323846
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
+
+#ifdef __ANDROID__
+static Uint64 openride_drive_audit_last_log_ns = 0U;
+
+static void openride_drive_audit_log_state(const OpenRideDriveModeState *state,
+                                           double speed_mps,
+                                           double heading_deg)
+{
+    if (!state || !state->active || !state->initialized) return;
+
+    const Uint64 now_ns = SDL_GetTicksNS();
+    if (openride_drive_audit_last_log_ns != 0U
+        && now_ns - openride_drive_audit_last_log_ns < 1000000000ULL) {
+        return;
+    }
+    openride_drive_audit_last_log_ns = now_ns;
+
+    SDL_Log("AUDIT_DRIVE_STATE speed_kph=%.1f gps_heading=%.1f camera_heading=%.1f camera_zoom=%.3f camera_lat=%.7f camera_lon=%.7f gps_quality=%d auto_zoom=%d heading_up=%d",
+            fmax(0.0, speed_mps) * 3.6,
+            heading_deg,
+            state->camera_bearing_deg,
+            state->camera_zoom,
+            state->camera_lat,
+            state->camera_lon,
+            (int)state->gps_quality,
+            state->auto_zoom ? 1 : 0,
+            state->heading_up ? 1 : 0);
+}
+#endif
 
 static double clampd(double value, double min_value, double max_value)
 {
@@ -76,6 +109,15 @@ void openride_drive_mode_init(OpenRideDriveModeState *state)
 void openride_drive_mode_set_active(OpenRideDriveModeState *state, bool active)
 {
     if (!state) return;
+#ifdef __ANDROID__
+    if (state->active != active) {
+        SDL_Log("AUDIT_DRIVE_MODE_ACTIVE active=%d heading_up=%d auto_zoom=%d",
+                active ? 1 : 0,
+                state->heading_up ? 1 : 0,
+                state->auto_zoom ? 1 : 0);
+    }
+    if (!active) openride_drive_audit_last_log_ns = 0U;
+#endif
     state->active = active;
     if (!active) state->initialized = false;
 }
@@ -223,6 +265,9 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
         state->camera_zoom = target_zoom;
         state->camera_bearing_deg = target_bearing;
         state->initialized = true;
+#ifdef __ANDROID__
+        openride_drive_audit_log_state(state, speed_mps, heading_deg);
+#endif
         return;
     }
 
@@ -238,4 +283,7 @@ void openride_drive_mode_update(OpenRideDriveModeState *state,
     state->camera_bearing_deg = normalize_bearing(
         state->camera_bearing_deg
         + shortest_angle_delta(state->camera_bearing_deg, target_bearing) * bearing_alpha);
+#ifdef __ANDROID__
+    openride_drive_audit_log_state(state, speed_mps, heading_deg);
+#endif
 }
