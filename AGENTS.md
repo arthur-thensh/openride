@@ -499,19 +499,16 @@ road and water target zooms, semantic fields, label ordering/LOD and preservatio
 of pre-existing surface/building tables. The focused target and CTest passed
 after this addition.
 
-Known V3.9 follow-up risks, not yet fixed:
+V3.9 follow-up findings:
 
-- a missing overlay tile is treated as known `EMPTY`, so an incomplete payload
-  cannot currently be distinguished from legitimate empty coverage;
-- overlay tests do not yet cover malformed payloads, incomplete coverage,
-  MapWorld fallback or renderer transitions;
-- dashed track/path phase restarts for every encoded line record, including
-  tile-split records, which produces visibly irregular/broken-looking strokes;
-- the current ORL1 data has unmatched exact boundary endpoint keys (63 road z14,
-  4 waterway z13); overlapping records can hide some of them, and their source
-  versus retiling origin is not yet classified;
-- normal region installation does not currently distribute the optional
-  `.ormap11` sibling; development deployment uses `scripts/android_push_data.sh`.
+- overlay completeness is protected by the manifest added in `e8aef52`; focused
+  tests cover missing/replaced tile rows, deleted labels, malformed payloads and
+  invalid semantic records, with stable v8 fallback when v11 is rejected;
+- the previously reported ORL1 boundary endpoint mismatches were investigated
+  in global quantized coordinates. Non-zero v8/v11 record multisets match; the
+  apparent differences come from tile ownership relocation, zero-length record
+  removal and inherited v8 quantization/simplification behavior. Do not treat
+  those historical counters as evidence of a missing importer/runtime segment.
 
 The reported surface flashing during pan has a runtime correction in the
 current worktree. Review of `ormap_pyramid_renderer.c` verified that the former
@@ -615,13 +612,33 @@ Final emulator validation with the existing data and no data push:
   effectively unchanged from the earlier 50.779 FPS / 19.693 ms emulator
   reference.
 
-The surface flashing gate is now validated on the emulator, but a final
-physical Pixel 9a confirmation remains useful before a Git checkpoint.
-Emulator timing is not the physical-device performance baseline. Current next
-step: review/fix the independent track/path dashed-phase discontinuity, then
-perform the remaining z14..z17 visual review. The unmatched ORL1 boundary
-endpoints and optional `.ormap11` region distribution also remain open. Do not
-commit or push without the user's explicit instruction.
+The surface flashing gate and subsequent v11 stabilization work are validated
+on the emulator. Emulator timing is not a physical-device performance baseline;
+physical-device and motorcycle validation are intentionally deferred until a
+later product-validation phase.
+
+Commit `bc1b625` fixes track/path dashed-phase continuity, and `e8aef52` adds
+the overlay completeness manifest. The current worktree extends normal region
+preparation to generate the `.ormap11` sibling transactionally and retry only
+that stage after a v11 failure. The focused synthetic test completes a v11-only
+retry without rewriting routing, search or stable `.ormap`.
+
+Focused validation confirmed the `v8` / `v8 + v11` region states and corrected
+the active-region badge so it does not hide the detailed-map completion action.
+Preparation now rejects a zero-byte PBF before modifying generated data. Failure
+during v11 generation preserves the PBF for retry, and stable
+v8/routing/search data remain untouched when only v11 needs regeneration.
+
+The desktop `prepare_region.sh` workflow now follows the same four-stage region
+pipeline through `prepare_ormap11.sh`: surfaces and buildings are produced by
+`openride_ormap_pyramid_surface_import`, then stable-v8 overlays are appended
+before the transactional `.ormap11.part` rename.
+
+Current macOS validation passes the complete build, all 39 CTest tests and
+`git diff --check`. The next repository task is to checkpoint this coherent
+v11-region-integration work when explicitly requested, then perform the separate
+0.32 documentation/repository-hygiene consolidation. Do not commit or push
+without the user's explicit instruction.
 
 ## Geometry and rendering
 

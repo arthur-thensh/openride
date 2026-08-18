@@ -61,9 +61,10 @@ SDL_Thread *openride_app_region_start_prepare_thread(
 const char *openride_app_region_prepare_stage_text(int stage)
 {
     switch ((OpenRideRegionPrepareStage)stage) {
-        case OPENRIDE_REGION_PREPARE_ROUTING: return "Preparation 1/3: routage";
-        case OPENRIDE_REGION_PREPARE_SEARCH: return "Preparation 2/3: recherche";
-        case OPENRIDE_REGION_PREPARE_MAP: return "Preparation 3/3: carte .ormap";
+        case OPENRIDE_REGION_PREPARE_ROUTING: return "Preparation 1/4: routage";
+        case OPENRIDE_REGION_PREPARE_SEARCH: return "Preparation 2/4: recherche";
+        case OPENRIDE_REGION_PREPARE_MAP: return "Preparation 3/4: carte .ormap";
+        case OPENRIDE_REGION_PREPARE_PYRAMID: return "Preparation 4/4: carte .ormap11";
         case OPENRIDE_REGION_PREPARE_FINALIZING: return "Finalisation de la region";
         case OPENRIDE_REGION_PREPARE_COMPLETE: return "Region prete";
         case OPENRIDE_REGION_PREPARE_ERROR: return "Erreur de preparation";
@@ -76,7 +77,8 @@ double openride_app_region_prepare_stage_progress(int stage)
     switch ((OpenRideRegionPrepareStage)stage) {
         case OPENRIDE_REGION_PREPARE_ROUTING: return 0.18;
         case OPENRIDE_REGION_PREPARE_SEARCH: return 0.50;
-        case OPENRIDE_REGION_PREPARE_MAP: return 0.72;
+        case OPENRIDE_REGION_PREPARE_MAP: return 0.68;
+        case OPENRIDE_REGION_PREPARE_PYRAMID: return 0.82;
         case OPENRIDE_REGION_PREPARE_FINALIZING: return 0.96;
         case OPENRIDE_REGION_PREPARE_COMPLETE: return 1.0;
         default: return -1.0;
@@ -159,9 +161,17 @@ bool openride_app_region_begin_android_install(
             snprintf(work_status, work_status_size, "Impossible de lancer la preparation");
             return false;
         }
+        const OpenRideRegionPrepareStage initial_stage =
+            openride_region_status_ready(status)
+                ? OPENRIDE_REGION_PREPARE_PYRAMID
+                : OPENRIDE_REGION_PREPARE_ROUTING;
         *region_busy = true;
-        *region_progress = openride_app_region_prepare_stage_progress(OPENRIDE_REGION_PREPARE_ROUTING);
-        snprintf(work_status, work_status_size, "Preparation 1/3: routage");
+        *region_progress =
+            openride_app_region_prepare_stage_progress(initial_stage);
+        snprintf(work_status,
+                 work_status_size,
+                 "%s",
+                 openride_app_region_prepare_stage_text(initial_stage));
         return true;
     }
     return openride_app_region_start_android_file_download(region,
@@ -401,4 +411,3 @@ void openride_app_region_refresh_map_world_overview(OpenRideMapWorld *map_world,
                 world_error[0] ? world_error : "unknown error");
     }
 }
-

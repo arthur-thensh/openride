@@ -426,7 +426,8 @@ bool openride_app_events_poll(OpenRideAppEventContext *context,
                                 } else if (event.key.key == SDLK_D
                                            || event.key.key == SDLK_RETURN
                                            || event.key.key == SDLK_KP_ENTER) {
-                                    if (openride_region_status_ready(&(*context->region_status))
+                                    if (openride_region_status_ready_for_activation(
+                                            &(*context->region_status))
     #ifdef __ANDROID__
                                         && (*context->region_status).poly_present
     #endif
@@ -1760,7 +1761,8 @@ bool openride_app_events_poll(OpenRideAppEventContext *context,
                                 }
                             } else if (mobile_hit.action == OPENRIDE_APP_UI_REGION_INSTALL) {
                                 if (!(*context->region_busy)) {
-                                    if (openride_region_status_ready(&(*context->region_status))
+                                    if (openride_region_status_ready_for_activation(
+                                            &(*context->region_status))
     #ifdef __ANDROID__
                                         && (*context->region_status).poly_present
     #endif
@@ -2243,7 +2245,8 @@ bool openride_app_events_poll(OpenRideAppEventContext *context,
                         if ((*context->app_panel) == OPENRIDE_APP_PANEL_REGIONS) {
                             const int region_action = openride_app_ui_panel_region_action_at(context->renderer, x, y, width, height);
                             if (region_action == 1 && !(*context->region_busy)) {
-                                if (openride_region_status_ready(&(*context->region_status))
+                                if (openride_region_status_ready_for_activation(
+                                        &(*context->region_status))
     #ifdef __ANDROID__
                                         && (*context->region_status).poly_present
     #endif

@@ -10,6 +10,7 @@ typedef struct OpenRideRegionDefinition {
     const char *id;
     const char *name;
     const char *ormap_filename;
+    const char *ormap11_filename;
     const char *legacy_map_filename;
     const char *routing_filename;
     const char *search_filename;
@@ -23,12 +24,14 @@ typedef struct OpenRideRegionStatus {
     bool map_installed;
     bool ormap_installed;
     bool ormap_current;
+    bool ormap11_installed;
     bool legacy_map_installed;
     bool routing_installed;
     bool search_installed;
     bool poly_present;
     bool source_pbf_present;
     double map_size_mb;
+    double ormap11_size_mb;
     double routing_size_mb;
     double search_size_mb;
     double poly_size_mb;
@@ -36,6 +39,7 @@ typedef struct OpenRideRegionStatus {
     double total_size_mb;
     char map_path[512];
     char ormap_path[512];
+    char ormap11_path[512];
     char legacy_map_path[512];
     char routing_path[512];
     char search_path[512];
@@ -49,6 +53,8 @@ const OpenRideRegionDefinition *openride_region_find(const char *id);
 const OpenRideRegionDefinition *openride_region_default(void);
 
 bool openride_region_status_ready(const OpenRideRegionStatus *status);
+bool openride_region_status_ready_for_activation(
+    const OpenRideRegionStatus *status);
 
 bool openride_region_get_status(const OpenRidePlatformPaths *paths,
                                 const OpenRideRegionDefinition *region,

@@ -283,11 +283,18 @@ nord-pas-de-calais-latest.osm.pbf
         ├──> nord-pas-de-calais.orplaces.sqlite
         │       recherche hors ligne
         │
-        └──> nord-pas-de-calais.ormap
-                carte OpenRide
+        ├──> nord-pas-de-calais.ormap
+        │       carte OpenRide stable
+        │
+        └──> nord-pas-de-calais.ormap11
+                surfaces, bâtiments et overlays détaillés
 ```
 
 Le format Shortbread/MBTiles n'est plus nécessaire pour une nouvelle installation. Le lecteur Shortbread reste temporairement présent uniquement pour permettre la migration des installations plus anciennes.
+
+`./scripts/prepare_region.sh` génère les deux cartes. Le sibling `.ormap11`
+reste optionnel à l'exécution : une installation plus ancienne qui ne possède
+que `.ormap` continue d'utiliser automatiquement le rendu stable.
 
 ## Pourquoi `.ormap` ?
 

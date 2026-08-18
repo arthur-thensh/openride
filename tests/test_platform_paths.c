@@ -26,6 +26,7 @@ int main(void)
     const OpenRideRegionDefinition *picardie = openride_region_find("picardie");
     assert(picardie != NULL);
     assert(strcmp(picardie->name, "Picardie") == 0);
+    assert(strcmp(picardie->ormap11_filename, "picardie.ormap11") == 0);
     assert(strstr(picardie->pbf_url, "picardie-latest.osm.pbf") != NULL);
     assert(strstr(picardie->poly_url, "picardie.poly") != NULL);
     assert(openride_region_at(openride_region_count()) == NULL);
@@ -37,6 +38,7 @@ int main(void)
                                       error,
                                       sizeof(error)));
     assert(strstr(status.ormap_path, "nord-pas-de-calais.ormap") != NULL);
+    assert(strstr(status.ormap11_path, "nord-pas-de-calais.ormap11") != NULL);
     assert(strstr(status.legacy_map_path, "nord-pas-de-calais-shortbread.mbtiles") != NULL);
 
     if (status.ormap_installed) {
@@ -51,6 +53,21 @@ int main(void)
     assert(strstr(status.poly_path, "nord-pas-de-calais.poly") != NULL);
     assert(openride_region_status_ready(&status)
            == (status.ormap_installed && status.routing_installed && status.search_installed));
+
+    OpenRideRegionStatus activation = {
+        .ormap_installed = true,
+        .ormap_current = true,
+        .routing_installed = true,
+        .search_installed = true,
+        .source_pbf_present = true
+    };
+    assert(openride_region_status_ready(&activation));
+    assert(!openride_region_status_ready_for_activation(&activation));
+    activation.ormap11_installed = true;
+    assert(openride_region_status_ready_for_activation(&activation));
+    activation.ormap11_installed = false;
+    activation.source_pbf_present = false;
+    assert(openride_region_status_ready_for_activation(&activation));
 
     puts("Platform paths tests: OK");
     return 0;

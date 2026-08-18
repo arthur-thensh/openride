@@ -9,6 +9,7 @@
     .id = slug, \
     .name = display_name, \
     .ormap_filename = slug ".ormap", \
+    .ormap11_filename = slug ".ormap11", \
     .legacy_map_filename = slug "-shortbread.mbtiles", \
     .routing_filename = slug ".orgraph", \
     .search_filename = slug ".orplaces.sqlite", \
@@ -91,6 +92,13 @@ bool openride_region_status_ready(const OpenRideRegionStatus *status)
         && status->search_installed;
 }
 
+bool openride_region_status_ready_for_activation(
+    const OpenRideRegionStatus *status)
+{
+    if (!openride_region_status_ready(status)) return false;
+    return status->ormap11_installed || !status->source_pbf_present;
+}
+
 static bool current_ormap_installed(const char *path)
 {
     if (!path || path[0] == '\0' || !openride_platform_file_exists(path)) {
@@ -121,10 +129,30 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
         return false;
     }
     memset(status, 0, sizeof(*status));
+    char derived_ormap11_filename[256] = {0};
+    const char *ormap11_filename = region->ormap11_filename;
+    if (!ormap11_filename || ormap11_filename[0] == '\0') {
+        const int written = snprintf(derived_ormap11_filename,
+                                     sizeof(derived_ormap11_filename),
+                                     "%s11",
+                                     region->ormap_filename
+                                         ? region->ormap_filename
+                                         : "");
+        if (written < 0 || (size_t)written >= sizeof(derived_ormap11_filename)) {
+            set_error(error, error_size, "region v11 filename is too long");
+            return false;
+        }
+        ormap11_filename = derived_ormap11_filename;
+    }
+
     if (!openride_platform_path_join(status->ormap_path,
                                      sizeof(status->ormap_path),
                                      paths->maps_dir,
                                      region->ormap_filename)
+        || !openride_platform_path_join(status->ormap11_path,
+                                        sizeof(status->ormap11_path),
+                                        paths->maps_dir,
+                                        ormap11_filename)
         || !openride_platform_path_join(status->legacy_map_path,
                                         sizeof(status->legacy_map_path),
                                         paths->maps_dir,
@@ -160,6 +188,8 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
     }
 
     const double ormap_size = openride_platform_file_size_mb(status->ormap_path);
+    const double ormap11_size =
+        openride_platform_file_size_mb(status->ormap11_path);
     const double legacy_size = openride_platform_file_size_mb(status->legacy_map_path);
 
     /*
@@ -171,6 +201,8 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
     status->ormap_installed = ormap_size >= 0.0;
     status->ormap_current = status->ormap_installed
         && current_ormap_installed(status->ormap_path);
+    status->ormap11_installed = ormap11_size >= 0.0;
+    status->ormap11_size_mb = ormap11_size;
     status->legacy_map_installed = legacy_size >= 0.0;
     status->map_installed = status->ormap_installed || status->legacy_map_installed;
     if (status->ormap_installed) {
@@ -192,6 +224,7 @@ bool openride_region_get_status(const OpenRidePlatformPaths *paths,
     status->poly_present = status->poly_size_mb >= 0.0;
     status->source_pbf_present = status->source_pbf_size_mb >= 0.0;
     status->total_size_mb = (status->map_installed ? status->map_size_mb : 0.0)
+        + (status->ormap11_installed ? status->ormap11_size_mb : 0.0)
         + (status->routing_installed ? status->routing_size_mb : 0.0)
         + (status->search_installed ? status->search_size_mb : 0.0)
         + (status->poly_present ? status->poly_size_mb : 0.0)
@@ -257,6 +290,7 @@ bool openride_region_remove_generated(const OpenRidePlatformPaths *paths,
     if (!openride_region_get_status(paths, region, &status, error, error_size)) return false;
     const char *files[] = {
         status.ormap_path,
+        status.ormap11_path,
         status.routing_path,
         status.search_path,
         status.poly_path,

@@ -1022,3 +1022,36 @@ building and overlay inspector reports zero malformed tiles, zero invalid
 surface kinds/payloads and zero invalid overlay records. The original file was
 not modified and retained SHA-256
 `5339bfe52394ddafefc91b9f60738bc1b91b9dbe8ee8b24c75a9ff45bf9d47f0`.
+
+## Post-V3.9.1 — Normal region installation
+
+Fresh region preparation now generates the `.ormap11` sibling locally from the
+same downloaded PBF after routing, search and stable `.ormap` are complete. The
+new fourth stage is transactional at sibling-file scope:
+
+```text
+PBF
+  -> surface pyramid -> .ormap11.part
+  -> building append
+stable .ormap -> overlay append + coverage manifest
+  -> rename .ormap11.part -> .ormap11
+```
+
+The PBF is removed only after all four stages succeed. A failed v11 stage keeps
+the stable v8 region usable, removes a stale sibling if the stable data was just
+rebuilt, retains the PBF and reports preparation failure. Retrying then detects
+that routing/search/v8 are already current and executes only the v11 stage.
+An empty PBF is rejected before any generated file is modified.
+
+Compatibility remains intentional: `openride_region_status_ready()` does not
+require `.ormap11`, so older installed regions still activate with stable v8.
+When both a ready v8 region and its source PBF are present but v11 is absent,
+`openride_region_status_ready_for_activation()` keeps the installation in its
+completion flow; the region panel offers to complete the detailed map instead
+of activating prematurely. Status accounting and region removal now include
+the sibling, and the panel distinguishes `v8` from `v8 + v11`.
+
+The desktop `prepare_region.sh` workflow follows the same order through the new
+`prepare_ormap11.sh` helper. The focused region-install test builds a synthetic
+surface/building/overlay sibling, opens and inspects it, removes it, then proves
+that a retry regenerates only v11 before deleting the retained source PBF.

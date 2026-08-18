@@ -154,13 +154,17 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
         OpenRideUIColor tint = installed[i]
             ? ui->theme.success
             : ui->theme.text_secondary;
+        const char *status_text = installed[i] ? "Prête" : "Absente";
+        if (i == 0U && state->ormap_installed) {
+            status_text = state->ormap11_installed ? "v8 + v11" : "v8";
+        }
         openride_ui_text_color(ui,
                                openride_ui_rect(layout.status[i].x
                                                    + layout.status[i].w * 0.56f,
                                                 layout.status[i].y,
                                                 layout.status[i].w * 0.40f - 10.0f,
                                                 layout.status[i].h),
-                               installed[i] ? "Prête" : "Absente",
+                               status_text,
                                OPENRIDE_UI_TEXT_CAPTION,
                                OPENRIDE_UI_TEXT_ALIGN_RIGHT,
                                tint);
@@ -175,6 +179,10 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
         } else {
             snprintf(primary_label, sizeof(primary_label), "Préparation en cours…");
         }
+    } else if (state->ready
+               && !state->ormap11_installed
+               && state->source_pbf_present) {
+        snprintf(primary_label, sizeof(primary_label), "Compléter la carte détaillée");
     } else if (state->ready && !state->poly_present) {
         snprintf(primary_label, sizeof(primary_label), "Ajouter l’aperçu de région");
     } else if (state->ready) {
@@ -194,6 +202,7 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
     const bool show_active_badge = state->region_is_active
         && state->ready
         && state->poly_present
+        && (state->ormap11_installed || !state->source_pbf_present)
         && !state->busy;
     if (show_active_badge) {
         const float badge_w = layout.install.w < 150.0f ? layout.install.w : 150.0f;
@@ -242,4 +251,3 @@ OpenRideUIRegionsPanelAction openride_ui_regions_panel_draw(
     }
     return clicked;
 }
-

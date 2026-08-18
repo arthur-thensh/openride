@@ -18,6 +18,7 @@ typedef struct OpenRideUIRegionsPanelState {
     const char *region_name;
     bool region_is_active;
     bool ormap_installed;
+    bool ormap11_installed;
     bool routing_installed;
     bool search_installed;
     bool source_pbf_present;

@@ -603,6 +603,7 @@ static void draw_ui_app_panel(SDL_Renderer *renderer,
                 .region_name = region ? region->name : "Region",
                 .region_is_active = region_is_active,
                 .ormap_installed = region_status && region_status->ormap_installed,
+                .ormap11_installed = region_status && region_status->ormap11_installed,
                 .routing_installed = region_status && region_status->routing_installed,
                 .search_installed = region_status && region_status->search_installed,
                 .source_pbf_present = region_status && region_status->source_pbf_present,
@@ -1201,4 +1202,3 @@ void openride_app_ui_draw_drive_mode(SDL_Renderer *renderer,
     openride_ui_drive_hud_draw(&ui, &state);
     openride_ui_end(&ui);
 }
-

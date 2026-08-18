@@ -48,7 +48,8 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                                                &(*context->events->region_status), context->events->error, context->events->error_size);
                     if (completed_poly) {
                         openride_app_region_refresh_map_world_overview(context->events->map_world, &(*context->events->platform_paths));
-                        if (openride_region_status_ready(&(*context->events->region_status))) {
+                        if (openride_region_status_ready_for_activation(
+                                &(*context->events->region_status))) {
                             (*context->events->region_busy) = false;
                             (*context->events->region_progress) = 1.0;
                                 if ((*context->events->route_download_plan).downloading) {
@@ -133,11 +134,19 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                                                                                  &(*context->events->platform_paths),
                                                                                  (*context->events->region));
                             if ((*context->events->region_prepare_thread)) {
+                                const OpenRideRegionPrepareStage initial_stage =
+                                    openride_region_status_ready(
+                                        &(*context->events->region_status))
+                                        ? OPENRIDE_REGION_PREPARE_PYRAMID
+                                        : OPENRIDE_REGION_PREPARE_ROUTING;
                                 (*context->events->region_busy) = true;
-                                (*context->events->region_progress) = openride_app_region_prepare_stage_progress(
-                                    OPENRIDE_REGION_PREPARE_ROUTING);
+                                (*context->events->region_progress) =
+                                    openride_app_region_prepare_stage_progress(
+                                        initial_stage);
                                 snprintf(context->events->region_work_status, context->events->region_work_status_size,
-                                         "Contour pret - preparation 1/3: routage");
+                                         "Contour pret - %s",
+                                         openride_app_region_prepare_stage_text(
+                                             initial_stage));
                             } else {
                                 (*context->events->region_busy) = false;
                                 (*context->events->region_progress) = -1.0;
@@ -160,11 +169,19 @@ void openride_app_async_update(OpenRideAppAsyncContext *context)
                                                                              &(*context->events->platform_paths),
                                                                              (*context->events->region));
                         if ((*context->events->region_prepare_thread)) {
+                            const OpenRideRegionPrepareStage initial_stage =
+                                openride_region_status_ready(
+                                    &(*context->events->region_status))
+                                    ? OPENRIDE_REGION_PREPARE_PYRAMID
+                                    : OPENRIDE_REGION_PREPARE_ROUTING;
                             (*context->events->region_busy) = true;
-                            (*context->events->region_progress) = openride_app_region_prepare_stage_progress(
-                                OPENRIDE_REGION_PREPARE_ROUTING);
+                            (*context->events->region_progress) =
+                                openride_app_region_prepare_stage_progress(
+                                    initial_stage);
                             snprintf(context->events->region_work_status, context->events->region_work_status_size,
-                                     "Telechargement termine - preparation 1/3: routage");
+                                     "Telechargement termine - %s",
+                                     openride_app_region_prepare_stage_text(
+                                         initial_stage));
                         } else {
                             (*context->events->region_busy) = false;
                             (*context->events->region_progress) = -1.0;

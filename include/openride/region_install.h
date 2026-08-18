@@ -2,6 +2,8 @@
 #define OPENRIDE_REGION_INSTALL_H
 
 #include "openride/ormap.h"
+#include "openride/ormap_pyramid_overlay.h"
+#include "openride/ormap_pyramid_surface.h"
 #include "openride/osm_import.h"
 #include "openride/platform_paths.h"
 #include "openride/region_manager.h"
@@ -14,6 +16,7 @@ typedef enum OpenRideRegionPrepareStage {
     OPENRIDE_REGION_PREPARE_ROUTING,
     OPENRIDE_REGION_PREPARE_SEARCH,
     OPENRIDE_REGION_PREPARE_MAP,
+    OPENRIDE_REGION_PREPARE_PYRAMID,
     OPENRIDE_REGION_PREPARE_FINALIZING,
     OPENRIDE_REGION_PREPARE_COMPLETE,
     OPENRIDE_REGION_PREPARE_ERROR
@@ -23,6 +26,9 @@ typedef struct OpenRideRegionPrepareStats {
     OpenRideOSMImportStats routing;
     OpenRideOSMPlaceImportStats places;
     OpenRideORMapBuildStats map;
+    OpenRideORMapPyramidSurfaceBuildStats pyramid_surface;
+    OpenRideORMapPyramidBuildingBuildStats pyramid_buildings;
+    OpenRideORMapPyramidOverlayBuildStats pyramid_overlay;
 } OpenRideRegionPrepareStats;
 
 typedef void (*OpenRideRegionPrepareProgress)(OpenRideRegionPrepareStage stage,
