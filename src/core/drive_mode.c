@@ -1,4 +1,5 @@
 #include "openride/drive_mode.h"
+#include "openride/map_style.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -330,6 +331,7 @@ void openride_drive_mode_init(OpenRideDriveModeState *state)
     openride_drive_viewport_width = 0;
     openride_drive_viewport_height = 0;
     openride_drive_render_zoom = 0.0;
+    openride_map_style_set_drive_mode_active(false);
 }
 
 void openride_drive_mode_set_active(OpenRideDriveModeState *state, bool active)
@@ -353,6 +355,7 @@ void openride_drive_mode_set_active(OpenRideDriveModeState *state, bool active)
         }
     }
     state->active = active;
+    openride_map_style_set_drive_mode_active(active);
     if (!active) {
         state->initialized = false;
         state->framing_active = false;
