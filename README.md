@@ -4,7 +4,7 @@ OpenRide est une application de navigation moto hors ligne écrite principalemen
 
 Le projet vise Android et iOS, avec un développement quotidien réalisé sur macOS. Le cœur de l'application reste indépendant des plateformes autant que possible : carte, routage, navigation, recherche, GPX, génération de boucles et logique GPS sont implémentés en C. Les couches Android/iOS doivent rester fines et limitées aux services fournis par le système, comme le GPS ou le cycle de vie de l'application.
 
-Version actuelle : **v0.22.1**.
+Version actuelle : **v0.32.0**.
 
 ## Objectifs
 
@@ -21,7 +21,7 @@ OpenRide doit permettre à terme de :
 - conserver favoris, historique et préférences ;
 - fonctionner sur Android puis iOS avec le même cœur C.
 
-Pendant une randonnée, **aucun accès Internet n'est requis**. Depuis la v0.22, Android peut télécharger directement un extrait `.osm.pbf` puis fabriquer localement toutes les données de la région : carte `.ormap`, routage `.orgraph` et recherche `.orplaces.sqlite`. Depuis la v0.22.1, la carte `.ormap` v3 utilise des surfaces vectorielles, des multipolygones OSM `outer` et un renderer SDL3 batché, validés sur macOS et Android. L'ordinateur n'est plus nécessaire pour installer une région sur le téléphone.
+Pendant une randonnée, **aucun accès Internet n'est requis**. Android peut télécharger directement un extrait `.osm.pbf` puis fabriquer localement les données nécessaires à la région : graphe `.orgraph`, recherche `.orplaces.sqlite`, carte stable `.ormap` v8 et carte détaillée `.ormap11` v11. Toutes les transformations sont réalisées localement ; l'ordinateur n'est pas nécessaire pour préparer une région sur le téléphone.
 
 ---
 
@@ -29,7 +29,8 @@ Pendant une randonnée, **aucun accès Internet n'est requis**. Depuis la v0.22,
 
 Les briques suivantes sont déjà fonctionnelles :
 
-- carte OpenRide `.ormap` v3 générée directement depuis les données OSM ;
+- carte OpenRide stable `.ormap` v8 générée directement depuis les données OSM ;
+- carte détaillée `.ormap11` v11 avec TilePyramid, surfaces, bâtiments et overlays ;
 - eau surfacique et cours d'eau vectoriels ;
 - multipolygones OSM `outer` pour les surfaces cartographiques ;
 - zones bâties généralisées et polygonisées sans stocker les bâtiments individuels ;
@@ -57,12 +58,12 @@ Les briques suivantes sont déjà fonctionnelles :
 - favoris et historique ;
 - import/export GPX ;
 - enregistrement d'une trace GPX ;
-- générateur expérimental de boucles moto ;
+- générateur de boucles moto avec propositions et profils de routage ;
 - interface tactile Android ;
 - gestion des safe areas Android ;
 - reprise du GPS et de la navigation après passage en arrière-plan.
 
-Le générateur de boucles existe déjà mais n'est pas la priorité actuelle. Il sera amélioré plus tard.
+Le générateur de boucles et le Ride Planner sont déjà fonctionnels. Les travaux actuels se concentrent notamment sur l'expérience de navigation en conduite et sur la lisibilité de l'interface.
 
 ---
 
@@ -218,14 +219,14 @@ La méthode SSH est recommandée.
 ```sh
 mkdir -p ~/Projects
 cd ~/Projects
-git clone git@gitlab.com:arthurthion/openride.git
+git clone git@github.com:arthur-thensh/openride.git
 cd openride
 ```
 
 Si SSH n'est pas encore configuré, utiliser temporairement HTTPS :
 
 ```sh
-git clone https://gitlab.com/arthurthion/openride.git
+git clone https://github.com/arthur-thensh/openride.git
 ```
 
 ## 5. Télécharger SDL3
@@ -272,7 +273,7 @@ Puis lancer OpenRide :
 
 Le prototype utilise le **Nord-Pas-de-Calais** comme première région de référence.
 
-Depuis la v0.22, OpenRide considère le fichier `.osm.pbf` comme **source unique** :
+OpenRide considère le fichier `.osm.pbf` comme **source de préparation de la région** :
 
 ```text
 nord-pas-de-calais-latest.osm.pbf
@@ -300,7 +301,7 @@ que `.ormap` continue d'utiliser automatiquement le rendu stable.
 
 `.ormap` est un conteneur SQLite versionné conçu spécifiquement pour OpenRide. Il ne cherche pas à conserver toute la complexité cartographique d'OSM : il stocke ce qui est utile à une navigation moto.
 
-Le format courant est **`.ormap` v3**. Il contient notamment :
+Le format cartographique stable courant est **`.ormap` v8**. Il contient notamment :
 
 - routes principales, secondaires et locales avec niveaux de visibilité par zoom ;
 - `track` et `path` routables à moto ;
@@ -334,15 +335,17 @@ L'application :
 1. télécharge le `.osm.pbf` directement dans son stockage privé ;
 2. construit le graphe `.orgraph` ;
 3. construit l'index `.orplaces.sqlite` ;
-4. construit la carte `.ormap` ;
-5. vérifie/finalise les fichiers ;
-6. supprime le PBF source une fois la région prête afin d'économiser de l'espace.
+4. construit la carte stable `.ormap` v8 ;
+5. construit transactionnellement `.ormap11` v11 ;
+6. finalise la région et supprime le PBF source uniquement après succès complet.
+
+Si la génération v11 échoue alors que routage, recherche et `.ormap` sont déjà prêts, le PBF est conservé. Une nouvelle tentative peut alors reprendre uniquement la quatrième étape.
 
 Le téléchargement demande Internet. **Toutes les étapes de transformation et toute l'utilisation de la région sont locales au téléphone.** Aucun serveur OpenRide n'effectue de routage, de recherche ou de génération de carte.
 
 La préparation est volontairement effectuée sur un thread de travail, car le traitement d'une région peut durer plusieurs minutes et solliciter fortement le CPU. Pour une grosse région, il est préférable de laisser le téléphone branché.
 
-Après une préparation, OpenRide demande encore un redémarrage de l'application pour activer le nouveau `.ormap`. Une activation à chaud pourra être ajoutée plus tard.
+Une installation plus ancienne qui ne possède que `.ormap` reste compatible. Lorsqu'un PBF est encore disponible et que seule `.ormap11` manque, l'interface peut proposer **« Compléter la carte détaillée »**.
 
 ## Méthode B — préparer la même région sur macOS (développement)
 
@@ -354,7 +357,7 @@ Télécharger le PBF :
 ./scripts/download_routing_data.sh
 ```
 
-Puis construire les trois formats :
+Puis construire les quatre artefacts de la région :
 
 ```sh
 ./scripts/prepare_region.sh
@@ -366,27 +369,32 @@ Ce script enchaîne :
 ./scripts/prepare_routing_graph.sh
 ./scripts/prepare_place_index.sh
 ./scripts/prepare_ormap.sh
+./scripts/prepare_ormap11.sh
 ```
 
 Résultat :
 
 ```text
 data/maps/nord-pas-de-calais.ormap
+data/maps/nord-pas-de-calais.ormap11
 data/routing/nord-pas-de-calais.orgraph
 data/search/nord-pas-de-calais.orplaces.sqlite
 ```
 
-## Référence v0.22.1 — Nord-Pas-de-Calais
+## Région de référence — Nord-Pas-de-Calais
 
 La chaîne complète a été validée sur macOS puis sur un téléphone Android réel avec génération locale depuis le PBF. Sur la région de référence, les ordres de grandeur observés sont :
 
 ```text
-.ormap               ~65 Mo
-.orgraph             ~180 Mo
-.orplaces.sqlite     ~300 Ko
+La chaîne de préparation produit actuellement quatre artefacts :
+
+.ormap               carte stable v8
+.ormap11             carte détaillée v11
+.orgraph             routage hors ligne
+.orplaces.sqlite     recherche hors ligne
 ```
 
-La génération v0.22.1 traite notamment plusieurs milliers de multipolygones OSM et produit les surfaces vectorielles directement sur le téléphone. Le PBF source est supprimé après succès afin de ne conserver que les trois formats OpenRide nécessaires à l'utilisation hors ligne.
+La préparation locale construit les données cartographiques, de routage et de recherche directement depuis le PBF. Le fichier source est conservé si une étape échoue afin de permettre une reprise, puis supprimé uniquement après succès complet de la préparation.
 
 Pour lancer la version macOS :
 
@@ -887,14 +895,16 @@ Quelques règles architecturales importantes :
 
 # Prochaines étapes
 
-Après v0.22.1, les priorités sont notamment :
+À partir de la base v0.32, les priorités sont notamment :
 
-- améliorer le retour de progression et les métriques de temps/mémoire pendant les longues phases de préparation d'une région ;
-- ajouter plusieurs régions téléchargeables, leur gestion et leur sélection automatique ;
-- prendre en charge les trous `inner` des multipolygones et d'autres géométries OSM complexes réellement utiles à la navigation ;
-- poursuivre les mesures de consommation CPU, mémoire et batterie sur téléphone réel ;
-- enrichir les instructions avec noms/numéros de routes ;
-- fiabiliser encore la navigation longue durée et le GPS en arrière-plan ;
-- améliorer l'expérience de préparation et de départ d'un trajet ;
-- revenir plus tard sur le générateur de boucles ;
+- concevoir **Ride View V1**, une vue de navigation plus lisible en conduite ;
+- simplifier le HUD pour comprendre la prochaine manœuvre d'un coup d'œil ;
+- remplacer la grande barre de commandes par des contrôles flottants ;
+- améliorer la progression pendant la préparation des régions ;
+- poursuivre la gestion de plusieurs régions hors ligne ;
+- enrichir les instructions et la navigation longue durée ;
+- expérimenter ensuite une perspective **2.5D** sans remettre en cause le pipeline ORMap/TilePyramid ;
+- effectuer plus tard les validations sur téléphone physique et en conditions réelles ;
 - préparer ensuite le portage iOS.
+
+Le mode roadbook reste une option de navigation secondaire ; l'expérience par défaut reste centrée sur la carte.

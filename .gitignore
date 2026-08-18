@@ -12,7 +12,6 @@ vendor/SDL/
 # Cartes téléchargées
 data/maps/*.mbtiles
 data/maps/*.zip
-EOF
 
 data/osm/*.osm.pbf
 data/osm/*.part
@@ -24,3 +23,7 @@ data/routing/*.part
 
 # Cartes ORMap v11 générées localement
 data/maps/*.ormap11
+
+# Fichiers temporaires locaux
+/log
+/out
