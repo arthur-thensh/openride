@@ -1,17 +1,22 @@
 #include "openride/drive_mode.h"
 
-#ifdef __ANDROID__
-#include <SDL3/SDL.h>
-#endif
-
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
+
+#ifdef __ANDROID__
+/* The Android application already links SDL3. Keep openride_core header-only
+ * independent from SDL while using its existing Android log/timer symbols for
+ * audit telemetry. */
+extern uint64_t SDL_GetTicksNS(void);
+extern void SDL_Log(const char *fmt, ...);
+#endif
 
 #define OPENRIDE_PI 3.14159265358979323846
 #define OPENRIDE_EARTH_RADIUS_M 6371008.8
 
 #ifdef __ANDROID__
-static Uint64 openride_drive_audit_last_log_ns = 0U;
+static uint64_t openride_drive_audit_last_log_ns = 0U;
 
 static void openride_drive_audit_log_state(const OpenRideDriveModeState *state,
                                            double speed_mps,
@@ -19,9 +24,9 @@ static void openride_drive_audit_log_state(const OpenRideDriveModeState *state,
 {
     if (!state || !state->active || !state->initialized) return;
 
-    const Uint64 now_ns = SDL_GetTicksNS();
+    const uint64_t now_ns = SDL_GetTicksNS();
     if (openride_drive_audit_last_log_ns != 0U
-        && now_ns - openride_drive_audit_last_log_ns < 1000000000ULL) {
+        && now_ns - openride_drive_audit_last_log_ns < UINT64_C(1000000000)) {
         return;
     }
     openride_drive_audit_last_log_ns = now_ns;
