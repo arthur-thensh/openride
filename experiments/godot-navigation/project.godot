@@ -1,0 +1,19 @@
+; OpenRide Godot Drive prototype
+; Autonomous visual experiment: no routing/ORMAP dependency.
+config_version=5
+
+[application]
+config/name="OpenRide Godot Drive Prototype"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=432
+window/size/viewport_height=960
+window/size/window_width_override=432
+window/size/window_height_override=960
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.92, 0.94, 0.91, 1)
