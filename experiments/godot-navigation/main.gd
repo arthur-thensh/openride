@@ -441,7 +441,7 @@ func _update_hud() -> void:
         instruction_label.text = String(next["text"])
         maneuver_symbol.text = String(next["symbol"])
 
-    var remaining := max(0.0, route_length - travel_m)
+    var remaining: float = max(0.0, route_length - travel_m)
     speed_label.text = "%.0f km/h" % (SPEED_MPS * 3.6)
     remaining_label.text = "%.1f km" % (remaining / 1000.0)
     arrival_label.text = _arrival_clock(remaining / SPEED_MPS)
@@ -495,7 +495,7 @@ func _sample_position(distance_m: float) -> Vector3:
         var start_d := float(route_cumulative[i])
         var end_d := float(route_cumulative[i + 1])
         if d <= end_d or i == route_points.size() - 2:
-            var span := max(0.001, end_d - start_d)
+            var span: float = max(0.001, end_d - start_d)
             var t := clampf((d - start_d) / span, 0.0, 1.0)
             return route_points[i].lerp(route_points[i + 1], t)
     return route_points[route_points.size() - 1]
